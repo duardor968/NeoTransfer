@@ -1,0 +1,96 @@
+{
+  "exports": [
+    {
+      "file": "neotransfer-textured-64.png",
+      "size": 64,
+      "alpha": [
+        0,
+        255
+      ],
+      "edgeAlpha": 0
+    },
+    {
+      "file": "neotransfer-textured-128.png",
+      "size": 128,
+      "alpha": [
+        0,
+        255
+      ],
+      "edgeAlpha": 0
+    },
+    {
+      "file": "neotransfer-textured-256.png",
+      "size": 256,
+      "alpha": [
+        0,
+        255
+      ],
+      "edgeAlpha": 0
+    },
+    {
+      "file": "neotransfer-textured-512.png",
+      "size": 512,
+      "alpha": [
+        0,
+        255
+      ],
+      "edgeAlpha": 0
+    },
+    {
+      "file": "neotransfer-textured-1024.png",
+      "size": 1024,
+      "alpha": [
+        0,
+        255
+      ],
+      "edgeAlpha": 0
+    },
+    {
+      "file": "payment-success-textured-64.png",
+      "size": 64,
+      "alpha": [
+        0,
+        255
+      ],
+      "edgeAlpha": 0
+    },
+    {
+      "file": "payment-success-textured-128.png",
+      "size": 128,
+      "alpha": [
+        0,
+        255
+      ],
+      "edgeAlpha": 0
+    },
+    {
+      "file": "payment-success-textured-256.png",
+      "size": 256,
+      "alpha": [
+        0,
+        255
+      ],
+      "edgeAlpha": 0
+    },
+    {
+      "file": "payment-success-textured-512.png",
+      "size": 512,
+      "alpha": [
+        0,
+        255
+      ],
+      "edgeAlpha": 0
+    },
+    {
+      "file": "payment-success-textured-1024.png",
+      "size": 1024,
+      "alpha": [
+        0,
+        255
+      ],
+      "edgeAlpha": 0
+    }
+  ],
+  "method": "Original approved pixels embedded in SVG under measured polygon contours; no generated cutouts used.",
+  "limitation": "Raster texture inside SVG; not resolution-independent vector texture. Android app integration and real-device validation not performed."
+}

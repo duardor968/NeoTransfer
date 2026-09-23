@@ -1,0 +1,238 @@
+{
+  "pngs": [
+    {
+      "file": "android/res/mipmap-hdpi/ic_neotransfer.png",
+      "width": 72,
+      "height": 72,
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "edgeAlphaMax": 255,
+      "pass": true
+    },
+    {
+      "file": "android/res/mipmap-hdpi/ic_neotransfer_round.png",
+      "width": 72,
+      "height": 72,
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "edgeAlphaMax": 249,
+      "pass": true
+    },
+    {
+      "file": "android/res/mipmap-mdpi/ic_neotransfer.png",
+      "width": 48,
+      "height": 48,
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "edgeAlphaMax": 255,
+      "pass": true
+    },
+    {
+      "file": "android/res/mipmap-mdpi/ic_neotransfer_round.png",
+      "width": 48,
+      "height": 48,
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "edgeAlphaMax": 250,
+      "pass": true
+    },
+    {
+      "file": "android/res/mipmap-xhdpi/ic_neotransfer.png",
+      "width": 96,
+      "height": 96,
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "edgeAlphaMax": 255,
+      "pass": true
+    },
+    {
+      "file": "android/res/mipmap-xhdpi/ic_neotransfer_round.png",
+      "width": 96,
+      "height": 96,
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "edgeAlphaMax": 249,
+      "pass": true
+    },
+    {
+      "file": "android/res/mipmap-xxhdpi/ic_neotransfer.png",
+      "width": 144,
+      "height": 144,
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "edgeAlphaMax": 255,
+      "pass": true
+    },
+    {
+      "file": "android/res/mipmap-xxhdpi/ic_neotransfer_round.png",
+      "width": 144,
+      "height": 144,
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "edgeAlphaMax": 255,
+      "pass": true
+    },
+    {
+      "file": "android/res/mipmap-xxxhdpi/ic_neotransfer.png",
+      "width": 192,
+      "height": 192,
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "edgeAlphaMax": 255,
+      "pass": true
+    },
+    {
+      "file": "android/res/mipmap-xxxhdpi/ic_neotransfer_round.png",
+      "width": 192,
+      "height": 192,
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "edgeAlphaMax": 255,
+      "pass": true
+    },
+    {
+      "file": "png/neotransfer-adaptive-foreground-432.png",
+      "width": 432,
+      "height": 432,
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "edgeAlphaMax": 0,
+      "pass": true
+    },
+    {
+      "file": "png/neotransfer-lockup-dark.png",
+      "width": 1398,
+      "height": 240,
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "edgeAlphaMax": 0,
+      "pass": true
+    },
+    {
+      "file": "png/neotransfer-lockup-graphite.png",
+      "width": 1398,
+      "height": 240,
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "edgeAlphaMax": 0,
+      "pass": true
+    },
+    {
+      "file": "png/neotransfer-lockup-light.png",
+      "width": 1398,
+      "height": 240,
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "edgeAlphaMax": 0,
+      "pass": true
+    },
+    {
+      "file": "png/neotransfer-lockup-white.png",
+      "width": 1398,
+      "height": 240,
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "edgeAlphaMax": 0,
+      "pass": true
+    },
+    {
+      "file": "png/neotransfer-store-icon-512.png",
+      "width": 512,
+      "height": 512,
+      "alphaMin": 255,
+      "alphaMax": 255,
+      "edgeAlphaMax": 255,
+      "pass": true
+    },
+    {
+      "file": "png/neotransfer-symbol-dark.png",
+      "width": 512,
+      "height": 512,
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "edgeAlphaMax": 0,
+      "pass": true
+    },
+    {
+      "file": "png/neotransfer-symbol-graphite.png",
+      "width": 512,
+      "height": 512,
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "edgeAlphaMax": 0,
+      "pass": true
+    },
+    {
+      "file": "png/neotransfer-symbol-light.png",
+      "width": 512,
+      "height": 512,
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "edgeAlphaMax": 0,
+      "pass": true
+    },
+    {
+      "file": "png/neotransfer-symbol-white.png",
+      "width": 512,
+      "height": 512,
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "edgeAlphaMax": 0,
+      "pass": true
+    },
+    {
+      "file": "png/neotransfer-wordmark-dark.png",
+      "width": 1152,
+      "height": 192,
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "edgeAlphaMax": 0,
+      "pass": true
+    },
+    {
+      "file": "png/neotransfer-wordmark-graphite.png",
+      "width": 1152,
+      "height": 192,
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "edgeAlphaMax": 0,
+      "pass": true
+    },
+    {
+      "file": "png/neotransfer-wordmark-light.png",
+      "width": 1152,
+      "height": 192,
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "edgeAlphaMax": 0,
+      "pass": true
+    },
+    {
+      "file": "png/neotransfer-wordmark-white.png",
+      "width": 1152,
+      "height": 192,
+      "alphaMin": 0,
+      "alphaMax": 255,
+      "edgeAlphaMax": 0,
+      "pass": true
+    }
+  ],
+  "adaptive": {
+    "canvas": 108,
+    "safeCircleDiameter": 66,
+    "maxRadius": 32.6559,
+    "clearance": 0.3441,
+    "pass": true
+  },
+  "contrast": {
+    "mintOnGraphite": 10.84,
+    "mintOnSurface": 9.95,
+    "mintOnRaised": 9.34,
+    "greenOnWhite": 2.71,
+    "graphiteOnWhite": 19.17
+  },
+  "limits": [
+    "Launcher masks are simulated; no device, APK build or manifest integration performed.",
+    "Green on white is a brand accent, not an accessible small functional icon or body text. Use graphite variant for those cases."
+  ]
+}
