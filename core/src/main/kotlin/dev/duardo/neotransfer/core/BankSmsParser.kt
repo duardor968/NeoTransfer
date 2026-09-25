@@ -7,12 +7,15 @@ class BankSmsParser {
     fun parse(sender: String, body: String): BankMessage? {
         if (!sender.equals("PAGOxMOVIL", ignoreCase = true)) return null
         val text = body.replace("\r\n", "\n").trim()
+        parseBankHistory(text)?.let { return it }
 
         authentication.matchEntire(text)?.let { match ->
             val bank = bank(match.groupValues[1]) ?: return BankMessage.Unrecognized
             return BankMessage.Authenticated(bank, match.groupValues[2].takeIf(String::isNotEmpty))
         }
         if (bpaAuthentication.matches(text)) return BankMessage.Authenticated(Bank.BPA, null)
+        SemanticAuthentication.parse(text)?.let { return it }
+        SemanticBalance.parse(text)?.let { return it }
 
         incoming.matchEntire(text.replace(Regex("\\s+"), " "))?.let { match ->
             val amount = money(match.groupValues[3], match.groupValues[4])
@@ -87,6 +90,7 @@ class BankSmsParser {
         }
 
         parseServiceReceipt(text)?.let { return it }
+        parseBillReceipt(text)?.let { return it }
         return BankMessage.Unrecognized
     }
 
@@ -109,7 +113,7 @@ class BankSmsParser {
     }
 
     private fun headerBank(text: String): Bank? =
-        Regex("^Banco\\s+(Bandec|BPA|Popular de Ahorro)\\b", insensitive).find(text)?.groupValues?.get(1)?.let(::bank)
+        Regex("^Banco\\s+(Bandec|BPA|Popular de Ahorros?|Metropolitano)\\b", insensitive).find(text)?.groupValues?.get(1)?.let(::bank)
 
     private fun field(text: String, label: String): String? =
         Regex("^\\s*$label\\s*:\\s*([^\\r\\n]+)", multilineInsensitive)
@@ -121,13 +125,16 @@ class BankSmsParser {
     private fun money(value: String, currency: String): Money? {
         val amount = value.toBigDecimalOrNull() ?: return null
         if (amount.signum() < 0 || amount.scale() > 2) return null
-        val unit = Currency.entries.find { it.name == currency.uppercase(Locale.ROOT) } ?: return null
+        // The known SMS contracts cover these units; BFI's wider operation enum is not SMS evidence.
+        val unit = listOf(Currency.CUP, Currency.USD, Currency.CUC)
+            .find { it.name == currency.uppercase(Locale.ROOT) } ?: return null
         return Money(amount, unit)
     }
 
     private fun bank(value: String): Bank? = when (value.lowercase(Locale.ROOT)) {
         "bandec" -> Bank.BANDEC
-        "bpa", "popular de ahorro" -> Bank.BPA
+        "bpa", "popular de ahorro", "popular de ahorros" -> Bank.BPA
+        "metropolitano" -> Bank.BANMET
         else -> null
     }
 
@@ -138,8 +145,8 @@ class BankSmsParser {
         val multilineInsensitive = setOf(RegexOption.IGNORE_CASE, RegexOption.MULTILINE)
         val accountPattern = Regex("[0-9Xx*]{16}")
         val referencePattern = Regex("[A-Za-z0-9]+")
-        val paymentHeader = Regex("^(?:Banco\\s+(?:Bandec|BPA|Popular de Ahorro)\\s*:\\s*)?(?:Pago completado|La compra fue completada)\\.", insensitive)
-        val rechargeSuccess = Regex("^(?:Banco\\s+(?:Bandec|BPA|Popular de Ahorro)\\s*:\\s*)?La recarga se realizo con exito\\.", insensitive)
+        val paymentHeader = Regex("^(?:Banco\\s+(?:Bandec|BPA|Popular de Ahorros?|Metropolitano)\\s*:\\s*)?(?:Pago completado|La compra fue completada)\\.", insensitive)
+        val rechargeSuccess = Regex("^(?:Banco\\s+(?:Bandec|BPA|Popular de Ahorros?|Metropolitano)\\s*:\\s*)?La recarga se realizo con exito\\.", insensitive)
         val rechargePaid = Regex("Monto Pagado:\\s*$NUMBER\\s+$UNIT(?:\\.|\\s|$)", insensitive)
         val rechargePhone = Regex("Telefono:\\s*([0-9+]{8,13})(?:\\.|\\s|$)", insensitive)
         val rechargeReference = Regex("Id transaccion:\\s*([A-Za-z0-9]+)(?:\\.|\\s|$)", insensitive)
@@ -147,7 +154,7 @@ class BankSmsParser {
         val creditBalance = Regex("CR\\s+$NUMBER\\s+$UNIT", insensitive)
         val creditAmount = Regex("CR\\s+$NUMBER", insensitive)
         val outgoingHeader = Regex(
-            "^Banco\\s+(Bandec|BPA|Popular de Ahorro)\\s*:\\s*La Transferencia fue completada\\.",
+            "^Banco\\s+(Bandec|BPA|Popular de Ahorros?|Metropolitano)\\s*:\\s*La Transferencia fue completada\\.",
             insensitive,
         )
         val balanceHeader = Regex(

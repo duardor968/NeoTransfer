@@ -1,0 +1,41 @@
+case	operation	provider	profile	source	currency	values	parameters
+BPA-register	bpa.register	BPA	PERSONAL	0000	CUP	card=0000000000000123;name=Ana;surname=Perez;secondSurname=Lopez;identity=00000000001	01*0000000000000123*Ana*Perez*Lopez*00000000001
+BANDEC-register	bandec.register	BANDEC	PERSONAL	0000	CUP	card=0000000000000123;name=Ana Perez Lopez;expiry=0928	02*0000000000000123*Ana Perez Lopez*0928
+BANMET-register	banmet.register	BANMET	PERSONAL	0000	CUP	telebankCard=9500000001;name=Ana;surname=Perez;secondSurname=Lopez;identity=00000000001	03*9500000001*Ana*Perez*Lopez*00000000001
+BPA-change-key	bpa.change-key	BPA	PERSONAL	0000	CUP	newPin=1234	1234
+BPA-limits	bpa.limits	BPA	PERSONAL	0000	CUP		1*0000
+BPA-change-limits	bpa.change-limits	BPA	PERSONAL	0000	CUP	atm=100;pos=200	100*200*300*1*0000
+BPA-open-account	bpa.open-account	BPA	PERSONAL	0000	CUP	branch=101	101
+BANDEC-change-key	bandec.change-key	BANDEC	PERSONAL	0000	CUP	newPin=12345	12345
+BANDEC-limits	bandec.limits	BANDEC	PERSONAL	0000	CUP		0*0000
+BANDEC-change-limits	bandec.change-limits	BANDEC	PERSONAL	0000	CUP	atm=100;pos=200	100*200*300*1*0000
+BANDEC-open-account	bandec.open-account	BANDEC	PERSONAL	0000	CUP	branch=104	104
+BANDEC-remove-registration	bandec.remove-registration	BANDEC	PERSONAL	0000	CUP	pin=12345	02*12345
+BANMET-change-key	banmet.change-key	BANMET	PERSONAL	0000	CUP	pin=1234;newPin=5678	03*1234*5678
+BANMET-limits	banmet.limits	BANMET	PERSONAL	0000	CUP		1*0000
+BANMET-change-limits	banmet.change-limits	BANMET	PERSONAL	0000	CUP	atm=100;pos=200	100*200*300*1*0000
+BANMET-open-account	banmet.open-account	BANMET	PERSONAL	0000	CUP	municipality=01;branch=238	01*238
+BANMET-remove-registration	banmet.remove-registration	BANMET	PERSONAL	0000	CUP	identity=00000000001;pin=1234;telebankCard=9500000001	03*00000000001*1234*9500000001
+BANDEC-change-multibank-pin	bandec.change-multibank-pin	BANDEC	PERSONAL	0000	CUP	multibankPin=1234;newPin=5678	1234*5678*5678
+BPA-digital-pin	bpa.digital-pin	BPA	PERSONAL	0000	CUP		1*0000
+BPA-recover-pin	bpa.recover-pin	BPA	PERSONAL	0000	CUP		1*0000
+BANDEC-digital-pin	bandec.digital-pin	BANDEC	PERSONAL	0000	CUP	card=0000000000000123;coordinate=A1;matrixValue=01;coordinate2=J10;matrixValue2=02	0000000000000123*A1*01*J10*02
+BANMET-digital-pin	banmet.digital-pin	BANMET	PERSONAL	0000	CUP	card=0000000000000123;coordinate=A1;matrixValue=01	0000000000000123*A1*01
+BANMET-associate-account	banmet.associate-account	BANMET	PERSONAL	0000	CUP	card=0000000000000123;coordinate=A1;matrixValue=01	0000000000000123*A1*01
+BANMET-payment-priority	banmet.payment-priority	BANMET	PERSONAL	0000000000000123	CUP	priority=2	2*0000000000000123
+BANMET-payment-priority-query	banmet.payment-priority-query	BANMET	PERSONAL	0000000000000123	CUP		0000000000000123
+BANMET-loan-query	banmet.standard-account	BANMET	PERSONAL	0000000000000123	CUP		0000000000000123
+BPA-reprint-card	bpa.reprint-card	BPA	PERSONAL	0000	CUP		1*0000
+BANDEC-reprint-card	bandec.reprint-card	BANDEC	PERSONAL	0000000000000123	CUP	branch=104;reason=1	104*0000000000000123*1
+BANMET-reprint-card	banmet.reprint-card	BANMET	PERSONAL	0000000000000123	CUP	commissionAccount=0000000000000002;municipality=01;branch=238	0*0000000000000123*0000000000000002*01*238
+BANDEC-statement	bandec.statement	BANDEC	PERSONAL	0000000000000123	CUP	email=ana@test.cu;from=01/09/2026;to=23/09/2026	ana@test.cu*01-09-2026*23-09-2026*0000000000000123
+BANMET-statement	banmet.statement	BANMET	PERSONAL	0000000000000123	CUP	email=ana@test.cu;from=01/09/2026;to=23/09/2026	ana@test.cu*01-09-2026*23-09-2026*0000000000000123
+BPA-fiscal-account	bpa.fiscal-account	BPA	PERSONAL	0000	CUP	identity=00000000001;municipality=2101;branch=101	00000000001*2101*101
+BANDEC-fiscal-account	bandec.fiscal-account	BANDEC	PERSONAL	0000	CUP	identity=00000000001;municipality=2101;branch=104	00000000001*2101*104
+BANMET-fiscal-account	banmet.fiscal-account	BANMET	PERSONAL	0000	CUP	identity=00000000001;municipality=2301;branch=238	00000000001*2301*238
+BPA-postal-query	bpa.postal-query	BPA	PERSONAL	0000	CUP	identity=00000000001	00000000001
+BANDEC-postal-query	bandec.postal-query	BANDEC	PERSONAL	0000	CUP	identity=00000000001	00000000001
+BANMET-postal-query	banmet.postal-query	BANMET	PERSONAL	0000	CUP	identity=00000000001	00000000001
+BPA-standard-account	bpa.standard-account	BPA	PERSONAL	0000000000000123	CUP		0000000000000123
+BANMET-update-telebank	banmet.update-account	BANMET	PERSONAL	0000	CUP	holderIdentity=00000000001;telebankCard=9500000001	00000000001*9500000001
+BANDEC-card-info	bandec.card-information	BANDEC	PERSONAL	0000	CUP	card=0000000000000123	0000000000000123

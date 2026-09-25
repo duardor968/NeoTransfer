@@ -1,0 +1,11 @@
+case	operation	provider	profile	source	currency	values	parameters
+PERSONAL-false-false	wallet.qr.dynamic	MITRANSFER	PERSONAL	0000	CUP	pin=1234;transaction=TEST;amount=10.50;amountCurrency=1;provider=12;auxiliary=1	04*1234*TEST*10.50*1*2*12*1*0000
+PERSONAL-false-true	wallet.qr.dynamic	MITRANSFER	PERSONAL	0000	CUP	pin=1234;transaction=TEST;amount=10.50;amountCurrency=1;provider=12;auxiliary=1;phone=50000001	04*1234*TEST*10.50*1*2*12*1*0000*50000001
+PERSONAL-true-false	wallet.qr.static	MITRANSFER	PERSONAL	0000	CUP	pin=1234;transaction=TEST;amount=10.50;amountCurrency=1;provider=12;auxiliary=1;description=Compra	04*1234*TEST*10.50*1*2*12*1*Compra*0000
+PERSONAL-true-true	wallet.qr.static	MITRANSFER	PERSONAL	0000	CUP	pin=1234;transaction=TEST;amount=10.50;amountCurrency=1;provider=12;auxiliary=1;description=Compra;phone=50000001;qrId=Q1	04*1234*TEST*10.50*1*2*12*1*Compra*0000*50000001*Q1
+CLASSIC-false-false	wallet.classic.qr.dynamic	MITRANSFER	CLASSIC	0000000000000123	CUP	pin=1234;transaction=TEST;amount=10.50;amountCurrency=1;provider=12;auxiliary=1	04*1234*TEST*10.50*1*3*12*1*0000*0*0000000000000123
+CLASSIC-false-true	wallet.classic.qr.dynamic	MITRANSFER	CLASSIC	0000000000000123	CUP	pin=1234;transaction=TEST;amount=10.50;amountCurrency=1;provider=12;auxiliary=1;phone=50000001	04*1234*TEST*10.50*1*3*12*1*0000*50000001*0000000000000123
+CLASSIC-true-false	wallet.classic.qr.static	MITRANSFER	CLASSIC	0000000000000123	CUP	pin=1234;transaction=TEST;amount=10.50;amountCurrency=1;provider=12;auxiliary=1;description=Compra	04*1234*TEST*10.50*1*3*12*1*Compra*0000*0000000000000123
+CLASSIC-true-true	wallet.classic.qr.static	MITRANSFER	CLASSIC	0000000000000123	CUP	pin=1234;transaction=TEST;amount=10.50;amountCurrency=1;provider=12;auxiliary=1;description=Compra;phone=50000001;qrId=Q1	04*1234*TEST*10.50*1*3*12*1*Compra*0000*50000001*Q1*0000000000000123
+special	wallet.qr.dynamic	MITRANSFER	PERSONAL	0000	USD	pin=1234;transaction=TEST;amount=10.50;amountCurrency=3;provider=12;auxiliary=11200301	04*1234*TEST*10.50*3*1*12*0*0000
+CLASSIC-special	wallet.classic.qr.special	MITRANSFER	CLASSIC	0000	USD	pin=1234;transaction=TEST;amount=10.50;amountCurrency=3;provider=12;auxiliary=11200301	04*1234*TEST*10.50*3*3*12*0*0000

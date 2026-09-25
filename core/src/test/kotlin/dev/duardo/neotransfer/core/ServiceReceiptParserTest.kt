@@ -15,7 +15,15 @@ class ServiceReceiptParserTest {
             assertEquals(columns[2].takeUnless { it == "null" }?.toBigDecimal(), receipt.paid?.amount)
             assertEquals(columns[3], receipt.reference)
             assertEquals(columns[4], receipt.bank.name)
+            if (receipt.service == "Sello del timbre") {
+                assertEquals(StampReceiptDetails("00000000000", "Oficinas Tramites MININT", "000000000001"), receipt.stamp)
+            }
             val movement = checkNotNull(FinancialMovement.from(receipt))
+            if (receipt.stamp != null) {
+                assertEquals(receipt.stamp?.stampReference, movement.purchaseId)
+                assertTrue(movement.party.contains(receipt.stamp!!.payerIdentity))
+                assertNull(movement.account) // The CI is not a bank account.
+            }
             assertEquals(receipt.paid == null, movement.amountIsNominal)
             assertEquals(receipt.paid ?: receipt.nominal, movement.amount)
         }
@@ -29,5 +37,7 @@ class ServiceReceiptParserTest {
         assertNull(parseServiceReceipt(valid.replace("Id Transaccion: TEST01.", "")))
         assertNull(parseServiceReceipt("Se ha pagado la cuenta nauta hogar fixture@example.invalid con 100.00 CUP. Nro. Transaccion: TEST01."))
         assertNull(parseServiceReceipt("Fallo el pago de la cuenta Nauta Hogar. $valid"))
+        assertNull(parseServiceReceipt("$valid Monto Pagado: 90 CUP."))
+        assertNull(parseServiceReceipt("$valid Id Transaccion: OTHER."))
     }
 }

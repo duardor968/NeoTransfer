@@ -3,3 +3,5 @@
 *.png binary
 *.ttf binary
 *.jar binary
+# Empty final TSV fields are part of the catalog schema.
+*.tsv text eol=lf whitespace=-blank-at-eol
