@@ -1,0 +1,37 @@
+name: Error
+description: Reportar un comportamiento incorrecto con datos ficticios.
+title: "[Error] "
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Versión de NeoTransfer
+      description: Versión instalada o commit usado.
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Dispositivo y versión de Android
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Pasos para reproducirlo
+      description: Describe el banco o servicio, sin incluir datos de tu cuenta.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Resultado esperado y resultado observado
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Datos del reporte
+      options:
+        - label: El reporte no contiene claves, matrices, números personales, SMS reales ni respaldos.
+          required: true
