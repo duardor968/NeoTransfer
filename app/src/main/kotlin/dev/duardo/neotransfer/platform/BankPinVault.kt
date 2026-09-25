@@ -16,6 +16,7 @@ class BankPinVault(context: Context) {
     private val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
 
     fun hasCredentials(): Boolean = preferences.contains("ciphertext") && preferences.contains("iv")
+    fun hasStoredMaterial(): Boolean = preferences.contains("ciphertext") || preferences.contains("iv")
 
     fun reset() {
         check(preferences.edit().clear().commit()) { "No se pudo restablecer el acceso" }

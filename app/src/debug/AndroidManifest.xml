@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application android:label="NeoTransfer · Desarrollo" tools:replace="android:label">
+        <activity android:name=".IconDiagnosticActivity" android:exported="true" />
+        <activity android:name=".BankingTestHostActivity" android:exported="false" />
+        <receiver android:name=".BankSmsReceiver" tools:node="remove" />
+    </application>
+</manifest>
