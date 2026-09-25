@@ -1,0 +1,713 @@
+package dev.duardo.neotransfer
+
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.SharedPreferences
+import android.os.Handler
+import android.os.Looper
+import dev.duardo.neotransfer.core.*
+import dev.duardo.neotransfer.core.fuel.FuelEnvelopeProtector
+import dev.duardo.neotransfer.data.*
+import dev.duardo.neotransfer.fuel.FuelSecretStore
+import dev.duardo.neotransfer.platform.*
+import java.time.Instant
+import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+
+/** Isolated UUID databases and a fake modem: no real USSD, user database, vault or SIM writes. */
+object OperationExecutorChecks {
+    fun run(context: Context, onPassed: (String) -> Unit = {}): Int {
+        var passed = 0
+        fun case(name: String, provider: ProviderId = ProviderId.BPA, body: (Harness) -> Unit) {
+            val key = "executor_check_${UUID.randomUUID()}"
+            val file = "$key.db"
+            val isolated = object : ContextWrapper(context) {
+                override fun checkSelfPermission(permission: String) = android.content.pm.PackageManager.PERMISSION_GRANTED
+                override fun getSharedPreferences(name: String, mode: Int): SharedPreferences =
+                    super.getSharedPreferences("${key}_$name", mode)
+            }
+            val repository = RoomWalletRepository.open(context, file)
+            repository.putIdentity(IdentityRecord("owner", "Fixture"))
+            val registration = RegistrationRecord("registration", "owner", provider.name, "PERSONAL", provider.bank?.code, 7, null,
+                "Fixture ${provider.name}", "access:registration")
+            repository.putRegistration(registration)
+            val harness = Harness(isolated, repository, registration)
+            try { body(harness); passed++; onPassed(name) }
+            finally {
+                harness.close()
+                check(context.deleteDatabase(file)) { "La base aislada no se pudo eliminar" }
+                check(context.deleteSharedPreferences("${key}_bank_state")) { "Las preferencias aisladas no se pudieron eliminar" }
+            }
+        }
+
+        case("Executor denies unapproved money and keeps serial requests durable before the fake modem") { h ->
+            val request = h.telecomTransfer()
+            val target = ServiceExecutionContext(null, request.identity, 7, null, null)
+            h.main { h.executor.execute(request, target, null, approved = false) }
+            check(h.main { h.modem.services.isEmpty() })
+            h.main { h.executor.execute(request, target, null, approved = true) }
+            h.await { h.modem.services.size == 1 }
+            check(h.repository.snapshot().operations.single().parameters.keys.none { it.contains("pin", true) })
+            h.main { h.executor.execute(request, target, null, approved = true) }
+            check(h.main { h.modem.services.size == 1 && h.executor.busy })
+            h.main { h.modem.reply(UssdResult.NetworkFailure(-1)) }
+            h.await { h.wallet.snapshot.operations.single().status == OperationStatus.UNCERTAIN }
+            check(h.main { h.modem.services.size == 1 })
+        }
+
+        case("Executor rejects a registration whose line changed after approval") { h ->
+            val request = h.bankTransfer()
+            val captured = h.target()
+            h.main { h.wallet.transact(block = { putRegistration(h.registration.copy(subscriptionId = 8)) }) }
+            h.await { h.wallet.snapshot.registrations.single().subscriptionId == 8 }
+            h.main { h.executor.execute(request, captured, "1234".toCharArray(), approved = true) }
+            check(h.main { h.modem.services.isEmpty() })
+            check(h.repository.snapshot().operations.isEmpty())
+        }
+
+        case("Executor requires auth acknowledgement and provider evidence then sends money once") { h ->
+            h.main { h.executor.execute(h.bankTransfer(), h.target(), "1234".toCharArray(), approved = true) }
+            h.await { h.modem.services == listOf(40) }
+            h.clock = h.clock.plusSeconds(1)
+            val body = "Usted se ha autenticado en la plataforma de pagos moviles, en el Banco Popular de Ahorro, puede comenzar a utilizar nuestros servicios de pagos a traves del movil"
+            val record = BankSmsRecord(null, body, h.clock, 7)
+            val result = SmsIngestor(h.repository, now = { h.clock }).ingest(record)
+            h.main { h.executor.observed(record, result) }
+            check(h.main { h.modem.services == listOf(40) })
+            h.main { h.modem.reply(UssdResult.Response("Su solicitud esta siendo procesada, espere un SMS")) }
+            h.await { h.modem.services == listOf(40, 45) }
+            val duplicate = BankSmsRecord(1, body, h.clock, 7)
+            val duplicateResult = SmsIngestor(h.repository, now = { h.clock }).ingest(duplicate)
+            h.main { h.executor.observed(duplicate, duplicateResult); h.modem.reply(UssdResult.NetworkFailure(-1)) }
+            h.await { h.wallet.snapshot.operations.single { it.specId == "bpa.transfer" }.status == OperationStatus.UNCERTAIN }
+            check(h.main { h.modem.services == listOf(40, 45) })
+        }
+
+        case("Executor foreground invalidation prevents a queued payment after authentication") { h ->
+            h.main { h.executor.execute(h.bankTransfer(), h.target(), "1234".toCharArray(), approved = true) }
+            h.await { h.modem.services == listOf(40) }
+            h.main { h.executor.invalidate(); h.modem.reply(UssdResult.Response("Su solicitud esta siendo procesada, espere un SMS")) }
+            h.await { h.wallet.snapshot.operations.single().status == OperationStatus.UNCERTAIN }
+            check(h.main { h.modem.services == listOf(40) })
+        }
+        case("BANDEC rejected selection never falls through to a default balance", ProviderId.BANDEC) { h ->
+            h.beginBandecQuery()
+            h.main { h.modem.reply(UssdResult.Response("Solicitud rechazada")) }
+            h.await { !h.executor.busy }
+            check(h.main { h.modem.services == listOf(40, 60) })
+            check(h.repository.snapshot().operations.none { it.specId == "bandec.card-balance" })
+        }
+        case("BANDEC selection acknowledgement alone never confirms an account", ProviderId.BANDEC) { h ->
+            h.beginBandecQuery(); h.acknowledgeSelectionAndRead()
+            check(h.main { h.executor.busy })
+            check(h.repository.snapshot().operations.filter { it.specId.startsWith("bandec.card-") }.none { it.status == OperationStatus.CONFIRMED })
+            h.main { h.executor.invalidate() }
+        }
+        case("BANDEC balance for a different card cannot populate the selected product", ProviderId.BANDEC) { h ->
+            h.addCard(); h.beginBandecQuery(); h.acknowledgeSelectionAndRead()
+            h.balance("0000XXXXXXXX0009", "CUP")
+            h.await { !h.executor.busy }
+            check(h.main { h.wallet.snapshot.balances.none { it.cardId == "card" } })
+            check(h.main { h.modem.services == listOf(40, 60, 46) })
+        }
+        case("BANDEC matching balance confirms both persisted query steps", ProviderId.BANDEC) { h ->
+            h.addCard(); h.beginBandecQuery(); h.acknowledgeSelectionAndRead()
+            h.balance("0000XXXXXXXX0001", "CUP")
+            h.await { !h.executor.busy && h.wallet.snapshot.operations.filter { it.specId.startsWith("bandec.card-") }.all { it.status == OperationStatus.CONFIRMED } }
+            h.await { h.wallet.snapshot.balances.singleOrNull()?.cardId == "card" }
+            check(h.main { h.modem.services == listOf(40, 60, 46) })
+        }
+        case("BANDEC ignores another SIM and rejects another bank as source proof", ProviderId.BANDEC) { h ->
+            h.addCard(); h.beginBandecQuery(); h.acknowledgeSelectionAndRead()
+            h.balance("0000XXXXXXXX0001", "CUP", sim = 8)
+            check(h.main { h.executor.busy })
+            check(h.repository.snapshot().operations.filter { it.specId.startsWith("bandec.card-") }.none { it.status == OperationStatus.CONFIRMED })
+            h.balance("0000XXXXXXXX0001", "CUP", bank = "BPA")
+            h.await { !h.executor.busy }
+            check(h.main { h.wallet.snapshot.balances.none { it.cardId == "card" } })
+        }
+        case("BANDEC cancellation after selection submission never starts the balance step", ProviderId.BANDEC) { h ->
+            h.beginBandecQuery()
+            h.main { h.executor.invalidate(); h.modem.reply(Harness.processing) }
+            h.await { h.wallet.snapshot.operations.single { it.specId == "bandec.card-select" }.status == OperationStatus.UNCERTAIN }
+            check(h.main { h.modem.services == listOf(40, 60) })
+        }
+        case("BANDEC USD card labelled CUP cannot send a CUP amount as USD", ProviderId.BANDEC) { h ->
+            h.addCard()
+            h.main { h.executor.execute(h.bankTransfer(amount = "250.00"), h.target(), "12345".toCharArray(), approved = true) }
+            h.authenticate(); h.await { h.modem.services == listOf(40, 60) }; h.acknowledgeSelectionAndRead()
+            h.balance("0000XXXXXXXX0001", "USD")
+            h.await { !h.executor.busy }
+            check(h.main { 45 !in h.modem.services })
+            check(h.repository.snapshot().operations.none { it.specId == "bandec.transfer" })
+        }
+        case("BANDEC exact fresh currency permits only one transfer", ProviderId.BANDEC) { h ->
+            h.main { h.executor.execute(h.bankTransfer(), h.target(), "12345".toCharArray(), approved = true) }
+            h.authenticate(); h.await { h.modem.services == listOf(40, 60) }; h.acknowledgeSelectionAndRead()
+            h.balance("0000XXXXXXXX0001", "CUP")
+            h.await { h.modem.services == listOf(40, 60, 46, 45) }
+            h.main { h.modem.reply(UssdResult.NetworkFailure(-1)) }
+            h.await { !h.executor.busy }
+            check(h.main { h.modem.services.count { it == 45 } == 1 })
+        }
+        case("BANDEC another card with the same currency never enables the transfer", ProviderId.BANDEC) { h ->
+            h.main { h.executor.execute(h.bankTransfer(), h.target(), "12345".toCharArray(), approved = true) }
+            h.authenticate(); h.await { h.modem.services == listOf(40, 60) }; h.acknowledgeSelectionAndRead()
+            h.balance("0000XXXXXXXX0009", "CUP")
+            h.await { !h.executor.busy }
+            check(h.main { 45 !in h.modem.services })
+        }
+        case("BANDEC changed default in the same bank invalidates the currency proof", ProviderId.BANDEC) { h ->
+            val request = h.bankTransfer(source = SourceSelector.Default)
+            h.main { h.executor.execute(request, h.target(), "12345".toCharArray(), approved = true) }
+            h.authenticate(); h.await { h.modem.services == listOf(40, 46) }
+            h.main { h.modem.reply(Harness.processing) }
+            val cup = h.balanceEvidence("0000XXXXXXXX0001", "CUP")
+            val changed = h.balanceEvidence("0000XXXXXXXX0009", "CUP")
+            h.main { h.executor.observed(cup.first, cup.second); h.executor.observed(changed.first, changed.second) }
+            h.await { !h.executor.busy }
+            check(h.main { 45 !in h.modem.services })
+        }
+        case("BANDEC default cannot replace the full account shown in the approved context", ProviderId.BANDEC) { h ->
+            h.addCard()
+            val target = h.target().copy(productId = "card", productNumber = "0000000000000001", productCurrency = "CUP")
+            h.main { h.executor.execute(h.bankTransfer(source = SourceSelector.Default), target, "12345".toCharArray(), approved = true) }
+            h.authenticate(); h.await { h.modem.services == listOf(40, 46) }; h.main { h.modem.reply(Harness.processing) }
+            h.balance("0000XXXXXXXX0009", "CUP")
+            h.await { !h.executor.busy }
+            check(h.main { 45 !in h.modem.services })
+        }
+        case("BANDEC default transfer uses a fresh matching currency without selecting an invented PAN", ProviderId.BANDEC) { h ->
+            h.main { h.executor.execute(h.bankTransfer(source = SourceSelector.Default), h.target(), "12345".toCharArray(), approved = true) }
+            h.authenticate(); h.await { h.modem.services == listOf(40, 46) }; h.main { h.modem.reply(Harness.processing) }
+            h.balance("0000XXXXXXXX0001", "CUP")
+            h.await { h.modem.services == listOf(40, 46, 45) }
+            h.main { h.modem.reply(UssdResult.NetworkFailure(-1)) }
+        }
+        case("Linked Clasica uses its personal parent session and preserves the product identity for encoding", ProviderId.MITRANSFER) { h ->
+            h.repository.putCard(CardRecord("classic", h.registration.id, "0000000000000001", "Clásica", currency = "USD", profileId = "CLASSIC"))
+            h.await { h.wallet.snapshot.cards.any { it.id == "classic" } }
+            val identity = ProviderIdentity(ProviderId.MITRANSFER, ProfileId.CLASSIC)
+            val target = h.target().copy(identity = identity, authenticationIdentity = ProviderIdentity(ProviderId.MITRANSFER),
+                productId = "classic", productNumber = "0000000000000001", productCurrency = "USD")
+            val request = ServiceRequest("wallet.classic.transfer", identity, SourceSelector.Explicit("0000000000000001"),
+                values = mapOf("destination" to "0000000000000002", "amount" to "1"))
+            h.main { h.executor.execute(request, target.copy(productId = null, productNumber = null), "1234".toCharArray(), approved = true) }
+            check(h.main { h.modem.services.isEmpty() })
+            h.main { h.executor.execute(request, target, "1234".toCharArray(), approved = true) }
+            h.authenticate(); h.await { h.modem.services == listOf(40, 45) }
+            val operations = h.repository.snapshot().operations
+            check(operations.single { it.specId == "wallet.authenticate" }.profileId == "PERSONAL")
+            check(operations.single { it.specId == "wallet.classic.transfer" }.let { it.profileId == "CLASSIC" && it.registrationId == h.registration.id })
+            h.main { h.modem.reply(UssdResult.NetworkFailure(-1)) }
+        }
+        case("MiTransfer context selects the explicit bag and rejects a mismatched selected currency", ProviderId.MITRANSFER) { h ->
+            h.repository.putAccount(AccountRecord("cup", h.registration.id, "", "CUP", currency = "CUP"))
+            h.repository.putAccount(AccountRecord("usd", h.registration.id, "", "USD", currency = "USD"))
+            h.repository.setSettings(h.repository.snapshot().settings.copy(selectedRegistrationId = h.registration.id,
+                selectedAccountId = "cup", selectedCardId = null, subscriptionId = 7))
+            h.await { h.wallet.snapshot.settings.selectedAccountId == "cup" && h.wallet.snapshot.accounts.size == 2 }
+            val controller = h.controller()
+            val request = ServiceRequest("wallet.transfer", h.target().identity, currency = Currency.USD,
+                values = mapOf("mobile" to "50000001", "amount" to "1"))
+            h.main {
+                check(runCatching { controller.serviceContext(request) }.isFailure)
+                val chosen = controller.serviceContext(request, "usd")
+                check(chosen.productId == "usd" && chosen.productNumber == "" && chosen.productCurrency == "USD")
+                controller.lock()
+            }
+        }
+        case("QR execution keeps the original merchant and fixed amount immutable", ProviderId.MITRANSFER) { h ->
+            val qr = QrPayment("FIXTURE", "123", Money("10.00".toBigDecimal(), Currency.CUP), "1", "", "", null, null, null)
+            val request = WalletQrOperations.fromQr(h.target().identity, SourceSelector.Default, Currency.CUP, qr, qr.amount)
+            val target = h.target().copy(originalQr = qr)
+            for (changes in listOf(mapOf("amount" to "250.00"), mapOf("provider" to "999"))) {
+                val altered = ServiceRequest(request.operationId, request.identity, request.source, request.currency, request.values + changes)
+                h.main { h.executor.execute(altered, target, "1234".toCharArray(), approved = true) }
+                check(h.main { h.modem.services.isEmpty() })
+            }
+            h.main { h.executor.execute(request, target.copy(originalQr = null), "1234".toCharArray(), approved = true) }
+            check(h.main { h.modem.services.isEmpty() })
+            h.main { h.executor.execute(request, target, "1234".toCharArray(), approved = true) }
+            h.await { h.modem.services == listOf(30) }
+            check(h.repository.snapshot().operations.single().qr?.transactionId == qr.transactionId)
+            h.main { h.modem.reply(UssdResult.NetworkFailure(-1)) }
+        }
+        case("Interactive USSD opens the native transport without using the callback modem API") { h ->
+            val request = ServiceRequest("cubacel.plans", ProviderIdentity(ProviderId.CUBACEL))
+            h.main { h.executor.execute(request, ServiceExecutionContext(null, request.identity, 7, null, null), null, approved = true) }
+            h.await { h.nativeRequests.size == 1 && h.wallet.snapshot.operations.single().status == OperationStatus.UNCERTAIN }
+            check(h.main { h.modem.services.isEmpty() && h.nativeRequests.single().transport == OperationTransport.INTERACTIVE_USSD })
+        }
+        case("Fresh history waits for the query acknowledgement and never confirms money", ProviderId.BANDEC) { h ->
+            val request = ServiceRequest("bandec.recent-operations", h.target().identity, SourceSelector.Explicit("0000000000000001"))
+            h.main { h.executor.execute(request, h.target(), "12345".toCharArray(), approved = false) }
+            h.authenticate(); h.await { h.modem.services == listOf(40, 48) }
+            h.clock = h.clock.plusSeconds(1)
+            val record = BankSmsRecord(null, "Banco Bandec Ultimas operaciones.\nFecha;Servicio;Operacion;Monto;Moneda;NoTransaccion\n23/09/2026;Intereses Ref: HST01;Cr;1.00;CUP; |", h.clock, 7)
+            val result = SmsIngestor(h.repository, now = { h.clock }).ingest(record)
+            h.main { h.executor.observed(record, result) }
+            check(h.repository.snapshot().histories.single().account == null)
+            h.main { h.modem.reply(Harness.processing) }
+            h.await { h.wallet.snapshot.histories.single().account == "0000000000000001" }
+            check(h.repository.snapshot().operations.single { it.specId == request.operationId }.status == OperationStatus.CONFIRMED)
+            check(h.main { 45 !in h.modem.services })
+        }
+        case("Access reservation reuses its durable ID and never disables an existing access") { h ->
+            var reserved: RegistrationRecord? = null
+            h.main { h.wallet.reserveRegistration(ProviderIdentity(ProviderId.MITRANSFER), 7) { reserved = it } }
+            h.await { reserved != null }
+            val first = requireNotNull(reserved)
+            check(!first.enabled && first.credentialAlias == null)
+            reserved = null
+            h.main { h.wallet.reserveRegistration(ProviderIdentity(ProviderId.MITRANSFER), 7) { reserved = it } }
+            h.await { reserved != null }; check(reserved == first)
+            h.main { h.wallet.reserveRegistration(h.target().identity, 7) { check(it == h.registration); reserved = it } }
+            h.await { reserved == h.registration }
+            check(h.repository.snapshot().registrations.single { it.id == h.registration.id }.enabled)
+        }
+        case("Wallet close waits for a cancelled blocking IO read before closing its repository") { h ->
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val ended = CountDownLatch(1)
+            val blocking = java.util.concurrent.atomic.AtomicBoolean(false)
+            val repositoryClosed = java.util.concurrent.atomic.AtomicBoolean(false)
+            val wrapper = object : WalletRepository by h.repository {
+                override fun snapshot(): WalletSnapshot {
+                    if (blocking.compareAndSet(true, false)) {
+                        entered.countDown(); check(release.await(10, TimeUnit.SECONDS))
+                        check(!repositoryClosed.get()) { "El repositorio se cerró mientras el lector seguía activo" }
+                    }
+                    return h.repository.snapshot()
+                }
+                override fun close() { repositoryClosed.set(true) }
+            }
+            val coordinator = h.main { WalletCoordinator(h.testContext, wrapper) }
+            h.await { coordinator.ready }
+            blocking.set(true)
+            h.main { coordinator.transact(block = { snapshot() }) }
+            check(entered.await(10, TimeUnit.SECONDS))
+            try {
+                h.main { coordinator.close { ended.countDown() } }
+                check(!repositoryClosed.get() && ended.count == 1L)
+            } finally { release.countDown() }
+            check(ended.await(10, TimeUnit.SECONDS) && repositoryClosed.get())
+        }
+        case("Caja Extra rejects absent, changed and dynamic original QR before modem access") { h ->
+            val qr = QrPayment("ESTATICO", "123", Money("10.00".toBigDecimal(), Currency.CUP), "1", "", "", null, null, null)
+            val request = CashExtraOperations.fromQr(h.target().identity, SourceSelector.Default, Currency.CUP, qr, qr.amount)
+            val altered = ServiceRequest(request.operationId, request.identity, request.source, request.currency, request.values + ("provider" to "999"))
+            for ((value, original) in listOf(request to null, altered to qr, request to qr.copy(transactionId = "DINAMICO"))) {
+                h.main { h.executor.execute(value, h.target().copy(originalQr = original), "1234".toCharArray(), approved = true) }
+                check(h.main { h.modem.services.isEmpty() })
+            }
+            h.main { h.executor.execute(request, h.target().copy(originalQr = qr), "1234".toCharArray(), approved = true) }
+            h.await { h.modem.services == listOf(40) }
+            h.main { h.modem.reply(Harness.processing) }
+            h.clock = h.clock.plusSeconds(1)
+            val access = BankSmsRecord(null, "Usted se ha autenticado en la plataforma de pagos moviles, en el Banco Popular de Ahorro, puede comenzar a utilizar nuestros servicios de pagos a traves del movil", h.clock, 7)
+            val result = SmsIngestor(h.repository, now = { h.clock }).ingest(access)
+            h.main { h.executor.observed(access, result) }
+            h.await { h.modem.services == listOf(40, 32) }
+            h.main { h.modem.reply(UssdResult.NetworkFailure(-1)) }
+        }
+        case("Retired providers and profiles remain identifiable but cannot execute", ProviderId.MITRANSFER) { h ->
+            val historical = RegistrationRecord("bfi-history", "owner", "BFI", "PERSONAL", "05", 7, null, "Histórico BFI")
+            h.repository.putRegistration(historical)
+            h.await { h.wallet.snapshot.registrations.any { it.id == historical.id } }
+            val retired = listOf(
+                "bfi.balance" to ProviderIdentity(ProviderId.BFI),
+                "bpa.balance" to ProviderIdentity(ProviderId.BFI),
+                "wallet.business.transfer" to ProviderIdentity(ProviderId.MITRANSFER, ProfileId.CLASSIC_BUSINESS),
+                "wallet.agent.mobile" to ProviderIdentity(ProviderId.MITRANSFER, ProfileId.AGENT),
+            )
+            for ((id, identity) in retired) {
+                val request = ServiceRequest(id, identity, currency = Currency.CUP)
+                check(OperationCatalog.validate(request).isNotEmpty())
+                check(runCatching { OperationCatalog.encode(request) }.isFailure)
+                val target = if (identity.provider == ProviderId.BFI)
+                    ServiceExecutionContext(historical.id, identity, 7, null, historical)
+                else h.target().copy(identity = identity, authenticationIdentity = h.target().identity)
+                h.main { h.executor.execute(request, target, "1234".toCharArray(), approved = true) }
+                check(h.main { h.modem.services.isEmpty() })
+            }
+            for (id in listOf("miboleto.offers", "miboleto.redeem", "miboleto.seller.request-code", "wallet.ticket.buy", "wallet.ticket.list")) {
+                check(OperationCatalog.find(id) == null)
+                val request = ServiceRequest(id, h.target().identity)
+                h.main { h.executor.execute(request, h.target(), "1234".toCharArray(), approved = true) }
+                check(h.main { h.modem.services.isEmpty() })
+            }
+            check(OperationCatalog.all.all { it.identities.all(OperationCatalog::supports) })
+            for (provider in listOf("bpa", "bandec", "banmet")) check(OperationCatalog.find("$provider.transfer") != null)
+            check(h.repository.snapshot().registrations.single { it.id == historical.id } == historical)
+            check(h.repository.snapshot().operations.isEmpty())
+        }
+        case("Nauta receipt settles the actual debit and cannot be reused for a second request", ProviderId.BANDEC) { h ->
+            val request = h.nautaRequest()
+            h.main { h.executor.execute(request, h.target(), "12345".toCharArray(), approved = true) }
+            h.authenticate(); h.await { h.modem.services == listOf(40, 84) }
+            h.main { h.modem.reply(Harness.processing) }
+            h.clock = h.clock.plusSeconds(1)
+            h.observe(BankSmsRecord(null, h.nautaReceipt("NAUTA01"), h.clock, 7))
+            val first = h.repository.snapshot().operations.single { it.specId == request.operationId }
+            check(first.status == OperationStatus.CONFIRMED && first.amount?.toBigDecimal()?.compareTo("270".toBigDecimal()) == 0)
+            check(first.parameters["amount"] == "300")
+            val receipt = h.repository.snapshot().receipts.single()
+            check(receipt.amount.toBigDecimal() == "270".toBigDecimal() && receipt.nominalAmount?.toBigDecimal() == "300".toBigDecimal())
+            h.clock = h.clock.plusSeconds(1)
+            h.main { h.executor.execute(request, h.target(), "12345".toCharArray(), approved = true) }
+            h.await { h.modem.services == listOf(40, 84, 84) }
+            h.main { h.modem.reply(Harness.processing) }
+            h.clock = h.clock.plusSeconds(1)
+            h.observe(BankSmsRecord(null, h.nautaReceipt("NAUTA01"), h.clock, 7))
+            val requests = h.repository.snapshot().operations.filter { it.specId == request.operationId }
+            check(requests.count { it.status == OperationStatus.CONFIRMED } == 1)
+            check(requests.single { it.id != first.id }.status != OperationStatus.CONFIRMED)
+            check(h.repository.snapshot().receipts.size == 1 && h.repository.snapshot().movements.size == 1)
+        }
+        case("Nauta ignores wrong family account SIM bank date nominal-only and excess debits", ProviderId.BANDEC) { h ->
+            val request = h.nautaRequest()
+            h.main { h.executor.execute(request, h.target(), "12345".toCharArray(), approved = true) }
+            h.authenticate(); h.await { h.modem.services == listOf(40, 84) }
+            h.main { h.modem.reply(Harness.processing) }
+            val start = h.repository.snapshot().operations.single { it.specId == request.operationId }.startedAt
+            h.clock = h.clock.plusSeconds(1)
+            val cases = listOf(
+                BankSmsRecord(null, h.nautaReceipt("WRONG1").replace("fixture@", "another@"), h.clock, 7),
+                BankSmsRecord(null, h.nautaReceipt("WRONG2").replace("nauta.com.cu", "nauta.co.cu"), h.clock, 7),
+                BankSmsRecord(null, h.nautaReceipt("WRONG3"), h.clock, 8),
+                BankSmsRecord(null, h.nautaReceipt("WRONG4").replace("Banco Bandec", "Banco Popular de Ahorro"), h.clock, 7),
+                BankSmsRecord(null, h.nautaReceipt("WRONG5"), h.clock.plusSeconds(60), 7),
+                BankSmsRecord(null, h.nautaReceipt("WRONG6"), Instant.ofEpochMilli(start - 1), 7),
+                BankSmsRecord(null, h.nautaReceipt("WRONG7").replace("Monto Pagado: 270 CUP. ", ""), h.clock, 7),
+                BankSmsRecord(null, h.nautaReceipt("WRONG8").replace("270 CUP", "301 CUP"), h.clock, 7),
+                BankSmsRecord(null, h.nautaReceipt("WRONG9").replace("Nauta Hogar:", ":").replace("pagada", "recargada"), h.clock, 7),
+            )
+            for (record in cases) {
+                h.observe(record)
+                check(h.repository.snapshot().operations.single { it.specId == request.operationId }.status != OperationStatus.CONFIRMED)
+            }
+            h.observe(BankSmsRecord(null, h.nautaReceipt("NAUTAOK"), h.clock, 7))
+            check(h.repository.snapshot().operations.single { it.specId == request.operationId }.status == OperationStatus.CONFIRMED)
+        }
+        case("A delayed Nauta receipt does not choose between two identical submitted requests", ProviderId.BANDEC) { h ->
+            val request = h.nautaRequest()
+            h.main { h.executor.execute(request, h.target(), "12345".toCharArray(), approved = true) }
+            h.authenticate(); h.await { h.modem.services == listOf(40, 84) }
+            h.main { h.modem.reply(UssdResult.NetworkFailure(-1)) }
+            h.await { h.wallet.snapshot.operations.any { it.specId == request.operationId && it.status == OperationStatus.UNCERTAIN } }
+            h.repository.snapshot().operations.single { it.specId == request.operationId }.let { h.repository.putOperation(it.copy(reviewRequired = false)) }
+            h.await { h.wallet.snapshot.operations.single { it.specId == request.operationId }.reviewRequired.not() }
+            h.clock = h.clock.plusSeconds(1)
+            h.main { h.executor.execute(request, h.target(), "12345".toCharArray(), approved = true) }
+            h.await { h.modem.services == listOf(40, 84, 84) }
+            h.main { h.modem.reply(Harness.processing) }
+            h.clock = h.clock.plusSeconds(1)
+            h.observe(BankSmsRecord(null, h.nautaReceipt("DELAYED1"), h.clock, 7))
+            check(h.repository.snapshot().operations.filter { it.specId == request.operationId }.let { it.size == 2 && it.none { it.status == OperationStatus.CONFIRMED } })
+            check(h.repository.snapshot().receipts.single().operationId == null)
+        }
+        case("Restored service evidence cannot confirm a live Nauta request", ProviderId.BANDEC) { h ->
+            val request = h.nautaRequest()
+            h.main { h.executor.execute(request, h.target(), "12345".toCharArray(), approved = true) }
+            h.authenticate(); h.await { h.modem.services == listOf(40, 84) }
+            h.main { h.modem.reply(Harness.processing) }
+            h.clock = h.clock.plusSeconds(1)
+            val body = h.nautaReceipt("RESTORED1")
+            h.repository.importSnapshot(WalletSnapshot(events = listOf(EventRecord("old-event", EventSource.BROADCAST, null, "PAGOxMOVIL", body,
+                h.clock.toEpochMilli(), 7, "old-event")), receipts = listOf(ReceiptRecord("old-receipt", "old-event", "02", 7,
+                "PAYMENT", "RESTORED1", "270", "CUP", "Nauta Hogar · fixture@nauta.com.cu", nominalAmount = "300"))))
+            val message = checkNotNull(BankSmsParser().parse("PAGOxMOVIL", body))
+            val forgedEligibility = SmsIngestResult(IngestResult("old-event", "old-event", "old-receipt", false), message,
+                FinancialMovement.from(message), evidenceEligible = true)
+            h.observe(BankSmsRecord(null, body, h.clock, 7), forgedEligibility)
+            check(h.repository.snapshot().operations.single { it.specId == request.operationId }.status != OperationStatus.CONFIRMED)
+        }
+        case("Hogar wording cannot choose a recharge over an unresolved debt payment", ProviderId.BANDEC) { h ->
+            val recharge = h.nautaRequest()
+            val debt = ServiceRequest("service.nauta.debt", recharge.identity, recharge.source, recharge.currency, recharge.values)
+            h.main { h.executor.execute(debt, h.target(), "12345".toCharArray(), approved = true) }
+            h.authenticate(); h.await { h.modem.services == listOf(40, 86) }
+            h.main { h.modem.reply(UssdResult.NetworkFailure(-1)) }
+            h.await { h.wallet.snapshot.operations.any { it.specId == debt.operationId && it.status == OperationStatus.UNCERTAIN } }
+            h.repository.snapshot().operations.single { it.specId == debt.operationId }.let { h.repository.putOperation(it.copy(reviewRequired = false)) }
+            h.await { !h.wallet.snapshot.operations.single { it.specId == debt.operationId }.reviewRequired }
+            h.clock = h.clock.plusSeconds(1)
+            h.observe(BankSmsRecord(null, h.nautaReceipt("DEBT1"), h.clock, 7))
+            check(h.repository.snapshot().operations.single { it.specId == debt.operationId }.status == OperationStatus.UNCERTAIN)
+            h.main { h.executor.execute(recharge, h.target(), "12345".toCharArray(), approved = true) }
+            h.await { h.modem.services == listOf(40, 86, 84) }
+            h.main { h.modem.reply(Harness.processing) }
+            h.clock = h.clock.plusSeconds(1)
+            h.observe(BankSmsRecord(null, h.nautaReceipt("AMBIGUOUS1"), h.clock, 7))
+            check(h.repository.snapshot().operations.filter { it.specId in setOf(debt.operationId, recharge.operationId) }.none { it.status == OperationStatus.CONFIRMED })
+            check(h.repository.snapshot().receipts.all { it.operationId == null })
+        }
+        case("Stamp receipt identifies payer and entity before completing the bank request", ProviderId.BANDEC) { h ->
+            val request = ServiceRequest("service.stamp", h.target().identity, currency = Currency.CUP, values = mapOf(
+                "municipality" to "2101", "taxpayer" to "00000000000", "taxCode" to "1", "period" to "9/2026", "amount" to "50", "entity" to "95016"))
+            h.main { h.executor.execute(request, h.target(), "12345".toCharArray(), approved = true) }
+            h.authenticate(); h.await { h.modem.services == listOf(40, 43) }
+            h.main { h.modem.reply(Harness.processing) }
+            h.clock = h.clock.plusSeconds(1)
+            val body = "Banco Bandec El pago del impuesto sobre el documento (sello del timbre) fue completado.\nCI: 00000000000\nEntidad: Oficinas Tramites MININT\nValor del sello: 50 CUP\nImporte Pagado: 50 CUP\nNro. Transaccion Banco: STAMP01\nIdSello: 000000000001."
+            for (bad in listOf(body.replace("CI: 00000000000", "CI: 00000000001"),
+                body.replace("Oficinas Tramites MININT", "Otros tramites"), body.replace("IdSello: 000000000001.", ""),
+                body.replace("CI: 00000000000", ""), body.replace("Nro. Transaccion Banco: STAMP01", ""))) {
+                h.observe(BankSmsRecord(null, bad.replace("STAMP01", "BAD" + bad.hashCode().toUInt()), h.clock, 7))
+                check(h.repository.snapshot().operations.single { it.specId == request.operationId }.status != OperationStatus.CONFIRMED)
+            }
+            h.observe(BankSmsRecord(null, body, h.clock, 7))
+            check(h.repository.snapshot().operations.single { it.specId == request.operationId }.status == OperationStatus.CONFIRMED)
+        }
+        case("MiTurno rechecks the date after authentication crosses midnight", ProviderId.BANDEC) { h ->
+            val day = java.time.LocalDate.of(2026, 9, 23)
+            h.clock = day.atTime(23, 59, 59).atZone(java.time.ZoneId.systemDefault()).toInstant()
+            fun request(date: String) = ServiceRequest("service.miturno.change", h.target().identity,
+                values = mapOf("identity" to "00000000001", "serviceType" to "1", "date" to date))
+            h.main { h.executor.execute(request("22/09/2026"), h.target(), "12345".toCharArray(), approved = true) }
+            check(h.main { h.modem.services.isEmpty() })
+            h.main { h.executor.execute(request("23/09/2026"), h.target(), "12345".toCharArray(), approved = true) }
+            h.authenticate(); h.await { !h.executor.busy }
+            check(h.main { h.modem.services == listOf(40) })
+            check(h.repository.snapshot().operations.none { it.specId == "service.miturno.change" })
+            h.main { h.executor.execute(request("24/09/2026"), h.target(), "12345".toCharArray(), approved = true) }
+            h.await { h.modem.services == listOf(40, 105) }
+            h.main { h.modem.reply(UssdResult.NetworkFailure(-1)) }
+        }
+        case("Conflicting stamp identities under one bank reference are not collapsed as duplicate facts", ProviderId.BANDEC) { h ->
+            val body = "Banco Bandec El pago del impuesto sobre el documento (sello del timbre) fue completado.\nCI: 00000000000\nEntidad: Oficinas Tramites MININT\nValor del sello: 50 CUP\nImporte Pagado: 50 CUP\nNro. Transaccion Banco: SAMESTAMP\nIdSello: 000000000001."
+            h.observe(BankSmsRecord(null, body, h.clock, 7))
+            h.clock = h.clock.plusSeconds(1)
+            h.observe(BankSmsRecord(null, body.replace("CI: 00000000000", "CI: 00000000001").replace("IdSello: 000000000001", "IdSello: 000000000002"), h.clock, 7))
+            val receipts = h.repository.snapshot().receipts
+            check(receipts.size == 2 && receipts.all { it.referenceConflict && it.operationId == null })
+            check(receipts.map { it.purchaseId }.toSet() == setOf("000000000001", "000000000002"))
+            check(receipts.all { it.account == null })
+        }
+        case("A locked controller protects a received coupon without a bank PIN or a purchase in progress", ProviderId.BANDEC) { h ->
+            val controller = h.controller(h.fuelProtector)
+            h.await { !controller.busy }
+            var finished = false
+            h.main { controller.receive(BankSmsRecord(null, h.fuelBody(), h.clock, 7)) { finished = true } }
+            h.await { finished }
+            check(h.main { !controller.unlocked && controller.history.isEmpty() && h.modem.services.isEmpty() })
+            val stored = h.repository.snapshot()
+            val coupon = stored.fuelCoupons.single()
+            check(stored.events.single().let { it.body == null && it.bodyWithheld })
+            val protected = h.repository.protectedFuelEnvelopes(listOf(coupon)).single()
+            check(protected.blob.startsWith("1:") && !protected.blob.contains(Harness.fuelEnvelope))
+            check(stored.receipts.single().operationId == null && stored.operations.isEmpty())
+        }
+        case("Fuel purchase evidence arriving before the callback waits for its valid acknowledgement", ProviderId.BANDEC) { h ->
+            h.beginFuel()
+            h.clock = h.clock.plusSeconds(1)
+            h.observeFuel(BankSmsRecord(null, h.fuelBody(), h.clock, 7))
+            check(h.repository.snapshot().operations.single { it.specId == "service.fuel" }.status != OperationStatus.CONFIRMED)
+            check(h.repository.snapshot().fuelObservations.single().purchaseEvidence != null)
+            h.main { h.modem.reply(Harness.processing) }
+            h.await { h.wallet.snapshot.operations.single { it.specId == "service.fuel" }.status == OperationStatus.CONFIRMED }
+            val operation = h.repository.snapshot().operations.single { it.specId == "service.fuel" }
+            check(operation.currency == "CUP" && operation.parameters["amountCurrency"] == "1")
+            check(h.repository.snapshot().receipts.single().operationId == operation.id)
+            h.clock = h.clock.plusSeconds(1)
+            h.observeFuel(BankSmsRecord(null, h.fuelBody(), h.clock, 7))
+            check(h.repository.snapshot().receipts.size == 1 && h.repository.snapshot().movements.size == 1)
+        }
+        case("A received coupon cannot override a rejected purchase callback", ProviderId.BANDEC) { h ->
+            h.beginFuel()
+            h.clock = h.clock.plusSeconds(1)
+            h.observeFuel(BankSmsRecord(null, h.fuelBody(), h.clock, 7))
+            h.main { h.modem.reply(UssdResult.Response("Solicitud rechazada")) }
+            h.await { !h.executor.busy }
+            h.clock = h.clock.plusSeconds(1)
+            h.observeFuel(BankSmsRecord(null, h.fuelBody(), h.clock, 7))
+            check(h.repository.snapshot().operations.single { it.specId == "service.fuel" }.status != OperationStatus.CONFIRMED)
+            check(h.repository.snapshot().fuelCoupons.size == 1 && h.repository.snapshot().receipts.single().operationId == null)
+        }
+        case("Fuel confirmation expires when its callback is missing or arrives outside the local evidence window", ProviderId.BANDEC) { h ->
+            h.beginFuel()
+            h.clock = h.clock.plusSeconds(1)
+            h.observeFuel(BankSmsRecord(null, h.fuelBody(), h.clock, 7))
+            check(h.repository.snapshot().receipts.single().operationId == null)
+            h.clock = h.clock.plusSeconds(31)
+            h.main { h.modem.reply(Harness.processing) }
+            h.await { !h.executor.busy }
+            h.observeFuel(BankSmsRecord(null, h.fuelBody(), h.clock, 7))
+            check(h.repository.snapshot().operations.single { it.specId == "service.fuel" }.status != OperationStatus.CONFIRMED)
+            check(h.main { h.modem.services == listOf(40, 35) })
+        }
+        case("Fuel status renewal list and coupon credit are observations rather than bank purchase receipts", ProviderId.BANDEC) { h ->
+            h.beginFuel(); h.main { h.modem.reply(Harness.processing) }
+            for ((header, label) in listOf("Estado del cupon de combustible con" to "Saldo actual",
+                "Actualizado el token del cupon de combustible con" to "Saldo actual",
+                "Se ha realizado una devolucion al cupon de combustible con" to "Importe acreditado")) {
+                h.clock = h.clock.plusSeconds(1)
+                h.observeFuel(BankSmsRecord(null, h.fuelBody(header = header, amountLabel = label), h.clock, 7))
+                check(h.repository.snapshot().operations.single { it.specId == "service.fuel" }.status != OperationStatus.CONFIRMED)
+            }
+            h.clock = h.clock.plusSeconds(1)
+            val body = "Mis cupones de combustible.\nNo.Serie;Saldo actual;Importe pagado;Moneda;ID Banco;ID TM;Fecha;Banco;DatosCupon\n" +
+                "0000000000002;10.00;10.00;CUP;BANK2;TM2;23/09/2026;BANDEC;${Harness.fuelEnvelope}"
+            h.observeFuel(BankSmsRecord(null, body, h.clock, 7))
+            check(h.repository.snapshot().operations.single { it.specId == "service.fuel" }.status != OperationStatus.CONFIRMED)
+            check(h.repository.snapshot().receipts.none { it.operationId != null })
+            h.clock = h.clock.plusSeconds(1)
+            h.observeFuel(BankSmsRecord(null, h.fuelBody(serial = "0000000000003", reference = "BANK3"), h.clock, 7))
+            check(h.repository.snapshot().operations.single { it.specId == "service.fuel" }.status == OperationStatus.CONFIRMED)
+        }
+        case("Fuel rejects mismatched bank SIM amount currency and nonfresh evidence without deriving a discount", ProviderId.BANDEC) { h ->
+            h.beginFuel(); h.main { h.modem.reply(Harness.processing) }
+            val started = h.repository.snapshot().operations.single { it.specId == "service.fuel" }.startedAt
+            h.clock = h.clock.plusSeconds(1)
+            val messages = listOf(
+                BankSmsRecord(null, h.fuelBody(serial = "0000000000001", reference = "WRONG1", bank = "BPA"), h.clock, 7),
+                BankSmsRecord(null, h.fuelBody(serial = "0000000000002", reference = "WRONG2"), h.clock, 8),
+                BankSmsRecord(null, h.fuelBody(serial = "0000000000003", reference = "WRONG3", amount = "9.00"), h.clock, 7),
+                BankSmsRecord(null, h.fuelBody(serial = "0000000000004", reference = "WRONG4", currency = "USD"), h.clock, 7),
+                BankSmsRecord(null, h.fuelBody(serial = "0000000000005", reference = "WRONG5"), h.clock.plusSeconds(60), 7),
+                BankSmsRecord(null, h.fuelBody(serial = "0000000000006", reference = "WRONG6"), Instant.ofEpochMilli(started - 1), 7),
+            )
+            for (record in messages) {
+                h.observeFuel(record)
+                check(h.repository.snapshot().operations.single { it.specId == "service.fuel" }.status != OperationStatus.CONFIRMED)
+            }
+        }
+        case("A late fuel purchase cannot choose the newer of two identical requests after uncertainty was reviewed", ProviderId.BANDEC) { h ->
+            h.beginFuel(); h.main { h.modem.reply(Harness.processing) }
+            h.await { h.wallet.snapshot.operations.single { it.specId == "service.fuel" }.status == OperationStatus.AWAITING_CONFIRMATION }
+            val first = h.repository.snapshot().operations.single { it.specId == "service.fuel" }
+            check(h.repository.updateOperationStatus(first.id, first.status, OperationStatus.UNCERTAIN, h.clock.toEpochMilli()))
+            h.repository.putOperation(first.copy(status = OperationStatus.UNCERTAIN, reviewRequired = false))
+            h.await { h.wallet.snapshot.operations.single { it.specId == "service.fuel" }.status == OperationStatus.UNCERTAIN }
+            h.clock = h.clock.plusSeconds(31)
+            h.main { h.executor.execute(h.fuelRequest(), h.target(), "12345".toCharArray(), approved = true) }
+            h.await { h.modem.services == listOf(40, 35, 35) }
+            h.main { h.modem.reply(Harness.processing) }
+            h.clock = h.clock.plusSeconds(1)
+            h.observeFuel(BankSmsRecord(null, h.fuelBody(), h.clock, 7))
+            check(h.repository.snapshot().operations.filter { it.specId == "service.fuel" }.let { it.size == 2 && it.none { op -> op.status == OperationStatus.CONFIRMED } })
+            check(h.repository.snapshot().receipts.single().operationId == null)
+        }
+        return passed
+    }
+
+    private class Harness(private val context: Context, val repository: WalletRepository, val registration: RegistrationRecord) {
+        val testContext: Context get() = context
+        private val handler = Handler(Looper.getMainLooper())
+        var clock: Instant = Instant.parse("2026-09-23T12:00:00Z")
+        lateinit var wallet: WalletCoordinator
+        lateinit var executor: OperationExecutor
+        lateinit var modem: FakeModem
+        val nativeRequests = mutableListOf<SystemDialRequest>()
+        private val controllers = mutableListOf<BankController>()
+        val fuelProtector = FuelSecretStore { javax.crypto.spec.SecretKeySpec(ByteArray(32) { it.toByte() }, "AES") }
+        init {
+            main {
+                wallet = WalletCoordinator(context, repository)
+                modem = FakeModem { check(wallet.snapshot.operations.any { it.status == OperationStatus.SUBMITTING }) {
+                    "El módem recibió una orden sin persistencia previa"
+                } }
+                executor = OperationExecutor(wallet, modem, { clock }, { true }, {}, { nativeRequests += it; it.complete(false) }, { _, _ -> })
+            }
+            await { wallet.ready && !executor.busy }
+        }
+        fun target() = ServiceExecutionContext(registration.id, ProviderIdentity(ProviderId.valueOf(registration.providerId)), 7, null, registration)
+        fun controller(protector: FuelEnvelopeProtector? = null) = main {
+            BankController(context, modem, { emptyList() }, { listOf(SimChoice(7, "Fixture")) }, { clock }, wallet, protector).also(controllers::add)
+        }
+        fun unlock(controller: BankController) {
+            val credentials = AccessCredentials.empty().use { it.scoped["access:registration"] = "1234".toCharArray(); it.encode() }
+            main { controller.unlock(credentials) }; await { !controller.busy }
+        }
+        fun bankTransfer(source: SourceSelector = SourceSelector.Explicit("0000000000000001"), amount: String = "1.00") =
+            ServiceRequest("${registration.providerId.lowercase()}.transfer", target().identity, source, Currency.CUP,
+                mapOf("destination" to "0000000000000002", "amount" to amount))
+        fun nautaRequest() = ServiceRequest("service.nauta.home", target().identity, currency = Currency.CUP,
+            values = mapOf("username" to "fixture", "accountType" to "1", "amount" to "300"))
+        fun nautaReceipt(reference: String) = "Banco Bandec: La cuenta Nauta Hogar: fixture@nauta.com.cu ha sido pagada con 300 CUP. Monto Pagado: 270 CUP. Id Transaccion: $reference."
+        fun observe(record: BankSmsRecord, result: SmsIngestResult = SmsIngestor(repository, now = { clock }).ingest(record)) {
+            var finished = false
+            main { executor.observed(record, result); wallet.transact(block = { Unit }, onSuccess = { finished = true }) }
+            await { finished }
+        }
+        fun fuelRequest() = ServiceRequest("service.fuel", target().identity, currency = Currency.CUP, values = mapOf("amount" to "10"))
+        fun beginFuel() {
+            main { executor.execute(fuelRequest(), target(), "12345".toCharArray(), approved = true) }
+            authenticate(); await { modem.services == listOf(40, 35) }
+        }
+        fun fuelBody(serial: String = "0000000000001", reference: String = "BANK1", amount: String = "10.00", currency: String = "CUP",
+                     bank: String = "Bandec", header: String = "El pago del cupon de combustible fue completado.", amountLabel: String = "Importe pagado") =
+            "Banco $bank: $header\nID TM: TM1.\nNo. Transaccion : $reference.\nNo. Serie: $serial.\n$amountLabel: $amount $currency\nDatos del cupon: $fuelEnvelope"
+        fun observeFuel(record: BankSmsRecord) = observe(record, SmsIngestor(repository, now = { clock }, fuelProtector = fuelProtector).ingest(record))
+        fun addCard() {
+            repository.putCard(CardRecord("card", registration.id, "0000000000000001", "Fixture CUP", currency = "CUP"))
+            await { wallet.snapshot.cards.any { it.id == "card" } }
+        }
+        fun authenticate() {
+            await { modem.services == listOf(40) }
+            main { modem.reply(processing) }
+            clock = clock.plusSeconds(1)
+            val place = if (registration.providerId == "MITRANSFER") "el monedero MiTransfer" else "el Banco Bandec con la cuenta 0000XXXXXXXX0001"
+            val record = BankSmsRecord(null, "Usted se ha autenticado en la plataforma de pagos moviles, en $place, puede comenzar a utilizar nuestros servicios de pagos a traves del movil", clock, 7)
+            val result = SmsIngestor(repository, now = { clock }).ingest(record)
+            main { executor.observed(record, result) }
+        }
+        fun beginBandecQuery() {
+            main { executor.queryBandecCard(target(), SourceSelector.Explicit("0000000000000001"), "12345".toCharArray()) }
+            authenticate(); await { modem.services == listOf(40, 60) }
+        }
+        fun acknowledgeSelectionAndRead() {
+            main { modem.reply(processing) }; await { modem.services == listOf(40, 60, 46) }
+            main { modem.reply(processing) }
+        }
+        fun balanceEvidence(account: String, currency: String, sim: Int = 7, bank: String = "Bandec"): Pair<BankSmsRecord, SmsIngestResult> {
+            clock = clock.plusSeconds(1)
+            val record = BankSmsRecord(null, "Banco $bank La consulta de saldo fue completada.\nCuenta;Saldo Contable;Saldo Disponible;Moneda\n$account; CR 1000.00; CR 900.00;$currency |", clock, sim)
+            return record to SmsIngestor(repository, now = { clock }).ingest(record)
+        }
+        fun balance(account: String, currency: String, sim: Int = 7, bank: String = "Bandec") {
+            val (record, result) = balanceEvidence(account, currency, sim, bank)
+            main { executor.observed(record, result) }
+        }
+        fun telecomTransfer() = ServiceRequest("cubacel.transfer", ProviderIdentity(ProviderId.CUBACEL),
+            values = mapOf("mobile" to "50000001", "pin" to "1234", "amount" to "1.00"))
+        fun <T> main(action: () -> T): T {
+            if (Looper.myLooper() == Looper.getMainLooper()) return action()
+            val latch = CountDownLatch(1)
+            var result: Result<T>? = null
+            handler.post { try { result = runCatching(action) } finally { latch.countDown() } }
+            check(latch.await(10, TimeUnit.SECONDS)) { "La tarea del hilo principal no terminó" }
+            return requireNotNull(result).getOrThrow()
+        }
+        fun await(condition: () -> Boolean) {
+            check(Looper.myLooper() != Looper.getMainLooper())
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+            while (!main(condition)) {
+                check(System.nanoTime() < deadline) { "No llegó el estado esperado del ejecutor" }
+                Thread.sleep(10)
+            }
+        }
+        fun close() {
+            val complete = CountDownLatch(1)
+            main { controllers.forEach { it.close() }; executor.close(); wallet.close { complete.countDown() } }
+            check(complete.await(10, TimeUnit.SECONDS)) { "La cartera no terminó de cerrar su IO" }
+        }
+        companion object {
+            val processing = UssdResult.Response("Su solicitud esta siendo procesada, espere un SMS")
+            const val fuelEnvelope = "W3ePK80M6VKxq9C60HXAHg==|+yRrfQTQ/zLIJShacXR3ow=="
+        }
+    }
+
+    private class FakeModem(val beforeSend: () -> Unit) : UssdTransport {
+        val services = mutableListOf<Int>()
+        private var callback: ((UssdResult) -> Unit)? = null
+        override fun isIdle() = callback == null
+        override fun send(command: UssdCommand, subscriptionId: Int, result: (UssdResult) -> Unit) {
+            check(isIdle()); check(subscriptionId == 7); beforeSend()
+            services += command.service; callback = result
+        }
+        fun reply(result: UssdResult) { val previous = checkNotNull(callback); callback = null; previous(result) }
+    }
+}

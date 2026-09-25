@@ -2,12 +2,14 @@ package dev.duardo.neotransfer
 
 import android.app.Instrumentation
 import android.content.Context
+import android.content.Intent
 import android.content.ContextWrapper
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Bundle
 import dev.duardo.neotransfer.core.*
 import dev.duardo.neotransfer.platform.*
+import dev.duardo.neotransfer.data.BankingDataChecks
 import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
@@ -16,9 +18,28 @@ import java.util.UUID
 class BankingChecks : Instrumentation() {
     private val report = StringBuilder()
     private var passed = 0
+    @Volatile private var stage = "Starting"
+    @Volatile private var stageAt = android.os.SystemClock.elapsedRealtime()
+    @Volatile private var finished = false
     override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); start() }
     override fun onStart() {
+        Thread({
+            while (!finished) {
+                Thread.sleep(1_000)
+                if (android.os.SystemClock.elapsedRealtime() - stageAt > 20_000) {
+                    val stacks = Thread.getAllStackTraces().entries.joinToString("\n") { (thread, frames) ->
+                        "${thread.name}: ${thread.state}\n" + frames.joinToString("\n") { "  $it" }
+                    }
+                    sendStatus(0, Bundle().apply { putString("stream", "STALL $stage\n$stacks\n") })
+                    stageAt = android.os.SystemClock.elapsedRealtime()
+                }
+            }
+        }, "banking-check-watchdog").apply { isDaemon = true; start() }
         try {
+            // Some vendor schedulers suspend even an instrumented process without a visible activity.
+            // Keep only the test harness visible; banking and notifications still have separate background tests.
+            val host = startActivitySync(Intent().setClassName(targetContext.packageName,
+                "dev.duardo.neotransfer.BankingTestHostActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             // Remove only this harness's old fixtures, never the app's real preferences.
             targetContext.dataDir.resolve("shared_prefs").listFiles().orEmpty()
                 .filter { it.name.matches(Regex("banking_test_[0-9a-f-]{36}_(bank_state|bank_vault)\\.xml")) }
@@ -92,7 +113,7 @@ class BankingChecks : Instrumentation() {
                     HistoryEntry(BankSmsRecord(5, "fixture", h.clock.minusSeconds(600), 1), receipt),
                     HistoryEntry(BankSmsRecord(6, "fixture", h.clock, 1), BankMessage.Authenticated(Bank.BPA, null)),
                 )
-                check(financialHistory(rows).map { it.entry.record.id }.toSet() == setOf(1L, 3L, 4L, 5L))
+                check(financialHistory(rows).map { it.entry?.record?.id }.toSet() == setOf(1L, 3L, 4L, 5L))
                 check(rows.size == 6)
             }
             case("balance storage preserves missing account and ledger without inventing values") { h ->
@@ -395,25 +416,69 @@ class BankingChecks : Instrumentation() {
                 }
             }
             case("Android QR parser accepts supported inputs and rejects ambiguous fields") { _ ->
+                progress("QR JSON")
                 val json = "{\"id_transaccion\":\"ESTATICO-123\",\"numero_proveedor\":\"123\",\"importe\":25.00,\"moneda\":\"CUP\",\"extra\":null}"
                 val qr = QrInput.parse(json) as QrInput.Payment
                 check(qr.value.service == 31 && qr.value.amount.amount.compareTo(BigDecimal("25.00")) == 0)
+                progress("QR link")
                 val link = QrInput.parse("transfermovil://tm_compra_en_linea/action?id_transaccion=TEST123&numero_proveedor=123&importe=12%2C50&moneda=CUP") as QrInput.Payment
                 check(link.value.service == 30 && link.value.amount.amount.compareTo(BigDecimal("12.50")) == 0)
+                progress("QR card and invalid inputs")
                 val card = QrInput.parse("TRANSFERMOVIL_ETECSA,TRANSFERENCIA,0000000000000002,5350000000,") as QrInput.Card
                 check(card.phone == "50000000" && card.card == "0000000000000002")
                 check(runCatching { QrInput.parse("https://transfermovil.app/action?id_transaccion=ONE&id_transaccion=TWO&importe=1&moneda=CUP&numero_proveedor=123") }.isFailure)
                 check(runCatching { QrInput.parse(json.replace("null", "\"invalid!\"")) }.isFailure)
+                progress("QR encode")
                 val matrix = com.google.zxing.qrcode.QRCodeWriter().encode(json, com.google.zxing.BarcodeFormat.QR_CODE, 360, 360)
                 val luminance = ByteArray(360 * 360) { i -> if (matrix[i % 360, i / 360]) 0 else 255.toByte() }
                 val source = com.google.zxing.PlanarYUVLuminanceSource(luminance, 360, 360, 0, 0, 360, 360, false)
+                progress("QR decode")
                 val decoded = com.google.zxing.MultiFormatReader().decode(com.google.zxing.BinaryBitmap(com.google.zxing.common.HybridBinarizer(source)))
                 check((QrInput.parse(decoded.text) as QrInput.Payment).value == qr.value)
             }
+            progress("Gallery camera checks")
+            passed += CameraChecks.run(host, this, ::recordGroupPass)
+            progress("Room data checks")
+            case("application icon keeps its branded foreground when rasterized at system dialog sizes") { _ ->
+                for (size in listOf(16, 24, 32, 80)) {
+                    val pixels = (size * targetContext.resources.displayMetrics.density).toInt()
+                    val bitmap = android.graphics.Bitmap.createBitmap(pixels, pixels, android.graphics.Bitmap.Config.ARGB_8888)
+                    try {
+                        val drawable = targetContext.packageManager.getApplicationIcon(targetContext.packageName)
+                        drawable.setBounds(0, 0, pixels, pixels)
+                        drawable.draw(android.graphics.Canvas(bitmap))
+                        var green = 0
+                        for (y in 0 until pixels) for (x in 0 until pixels) {
+                            val color = bitmap.getPixel(x, y)
+                            if (android.graphics.Color.alpha(color) > 128 && android.graphics.Color.green(color) > android.graphics.Color.red(color) + 20 &&
+                                android.graphics.Color.green(color) > android.graphics.Color.blue(color) + 10) green++
+                        }
+                        check(green > pixels * pixels / 20) { "The icon foreground disappears at $size dp ($green branded pixels)" }
+                    } finally { bitmap.recycle() }
+                }
+            }
+            passed += BankingDataChecks.run(targetContext, ::recordGroupPass)
+            progress("Notification checks")
+            passed += NotificationChecks.run(targetContext, ::recordGroupPass) { reason ->
+                report.appendLine("SKIP $reason")
+                progress("SKIP $reason")
+            }
+            finished = true
             finish(-1, Bundle().apply { putString("stream", "\n$report\nPASS $passed Android checks; fake modem only.\n") })
         } catch (error: Throwable) {
+            finished = true
             finish(0, Bundle().apply { putString("stream", "\n$report\nFAIL ${error.stackTraceToString()}\n") })
         }
+    }
+
+    private fun progress(name: String) {
+        stage = name; stageAt = android.os.SystemClock.elapsedRealtime()
+        sendStatus(0, Bundle().apply { putString("stream", "STEP $name\n") })
+    }
+
+    private fun recordGroupPass(name: String) {
+        progress("PASS $name")
+        report.appendLine("PASS $name")
     }
 
     private fun main(action: () -> Unit) {
@@ -431,11 +496,12 @@ class BankingChecks : Instrumentation() {
         error("Timed out waiting for test state")
     }
     private fun case(name: String, body: (Harness) -> Unit) {
+        stage = name; stageAt = android.os.SystemClock.elapsedRealtime()
         sendStatus(0, Bundle().apply { putString("stream", "BEGIN $name\n") })
         lateinit var h: Harness
         main { h = Harness() }
         try { body(h); passed++; report.appendLine("PASS $name"); sendStatus(0, Bundle().apply { putString("stream", "PASS $name\n") }) }
-        finally { main { h.bank.lock(); h.context.clearOwnedPreferences() } }
+        finally { main { h.bank.close(); h.context.clearOwnedPreferences() } }
     }
 
     private inner class Harness {
@@ -446,6 +512,7 @@ class BankingChecks : Instrumentation() {
         lateinit var modem: FakeModem
         init { BankStore(context).apply { subscription = 1; bank = Bank.BANDEC }; recreate() }
         fun recreate() {
+            if (::bank.isInitialized) bank.close()
             modem = FakeModem()
             bank = BankController(context, modem, { inbox }, { listOf(SimChoice(1, "SIM de prueba")) }, { clock })
             modem.beforeSend = { command -> if (command.service == 45) check(bank.store.pending() != null) }
