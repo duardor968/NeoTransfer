@@ -24,7 +24,10 @@ jobs:
           java-version: '21'
       - uses: gradle/actions/setup-gradle@67621b124fd2e251c5e8a0e6e3b91318f2287669 # v6.3.0
       - name: Instalar SDK
-        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          packages: 'platforms;android-36 build-tools;36.0.0'
+          log-accepted-android-sdk-licenses: 'false'
       - name: Pruebas JVM, compilación y análisis
         run: bash ./gradlew --no-daemon :core:test :app:testDebugUnitTest :app:assembleDebug :app:assemblePreview :app:assembleDebugAndroidTest :app:lintDebug
       - name: Resultados de comprobación
