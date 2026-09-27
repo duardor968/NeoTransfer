@@ -231,15 +231,15 @@ internal fun MovementsScreen(state: AppUiState, actions: UiActions, resolve: (Un
                 if (operations.isEmpty()) item { Text("No hay solicitudes que coincidan", Modifier.padding(vertical = 24.dp)) }
                 items(operations, key = { "operation:${it.id}" }) { operation ->
                     ActionRow(operation.title(state), R.drawable.ic_receipt_long,
-                        "${operation.status.title()} · ${dateText(Instant.ofEpochMilli(operation.startedAt))}") { selectedOperationId = operation.id }
+                        "${operation.statusTitle()} · ${dateText(Instant.ofEpochMilli(operation.startedAt))}") { selectedOperationId = operation.id }
                 }
                 return@LazyColumn
             }
-            val pendingServices = state.wallet.operations.filter { it.reviewRequired && it.status in setOf(OperationStatus.UNCERTAIN, OperationStatus.AWAITING_CONFIRMATION) &&
+            val pendingServices = state.wallet.operations.filter { it.reviewRequired && it.timeoutAt == null && it.status in setOf(OperationStatus.UNCERTAIN, OperationStatus.AWAITING_CONFIRMATION) &&
                 it.id != state.pending?.id && state.uncertain.none { uncertain -> uncertain.id == it.id } }
             if (pendingServices.isNotEmpty()) item(key = "services-review") {
                 Text("Solicitudes por revisar", Modifier.padding(top = 16.dp), style = MaterialTheme.typography.titleSmall)
-                pendingServices.forEach { operation -> ReviewRow(operation.title(state), operation.status.title(), "Revisar resultado") { selectedOperationId = operation.id } }
+                pendingServices.forEach { operation -> ReviewRow(operation.title(state), operation.statusTitle(), "Revisar resultado") { selectedOperationId = operation.id } }
             }
             if (state.pending != null || state.uncertain.isNotEmpty()) item(key = "review") {
                 Text("Por revisar", Modifier.padding(top = 16.dp, bottom = 8.dp).semantics { heading() }, style = MaterialTheme.typography.titleSmall)

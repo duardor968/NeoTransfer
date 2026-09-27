@@ -29,7 +29,8 @@ object FuelDataChecks {
     private fun ingest(r: WalletRepository, text: String = body(), time: Long = at, sim: Int = 7,
                        id: Long? = null, delivery: String = UUID.randomUUID().toString(), protector: FuelEnvelopeProtector = store()) =
         SmsIngestor(r, now = { Instant.ofEpochMilli(at + 3_600_000) }, fuelProtector = protector)
-            .ingest(BankSmsRecord(id, text, Instant.ofEpochMilli(time), sim, delivery)).stored
+            .ingest(BankSmsRecord(id, text, Instant.ofEpochMilli(time), sim, delivery,
+                sentAt = Instant.ofEpochMilli(time))).stored
     private fun operation(id: String = "fuel", started: Long = at - 1000) = OperationRecord(id, "service.fuel", "02", 7, "", "10.00", "CUP", started,
         status = OperationStatus.AWAITING_CONFIRMATION, providerId = "BANDEC", parameters = mapOf("amount" to "10.00", "amountCurrency" to "1"))
 
@@ -216,7 +217,7 @@ object FuelDataChecks {
             check(r.snapshot().usedReferences.isEmpty())
         }
         case("Fuel unsupported currency mismatched contract amount missing CUP marker and generic receipt cannot confirm") { r, _ ->
-            val proof = FuelPurchaseEvidence(couponId, "0000000000001", "02", 7, "BANK1", "TM1", "10.00", "CUP", at, true)
+            val proof = FuelPurchaseEvidence(couponId, "0000000000001", "02", 7, "BANK1", "TM1", "10.00", "CUP", at, true, at)
             check(fuelPurchaseMatches(operation(), proof))
             check(!fuelPurchaseMatches(operation().copy(parameters = mapOf("amount" to "10.00")), proof))
             check(!fuelPurchaseMatches(operation().copy(amount = "11.00"), proof))

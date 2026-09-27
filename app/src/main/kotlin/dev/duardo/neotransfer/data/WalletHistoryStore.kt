@@ -102,10 +102,17 @@ internal class WalletHistoryStore(private val repository: RoomWalletRepository) 
             operation.status !in setOf(OperationStatus.SUBMITTING, OperationStatus.AWAITING_CONFIRMATION, OperationStatus.UNCERTAIN) ||
             !event.evidenceEligible || !canonical.evidenceEligible || event.source == EventSource.LEGACY ||
             event.originalSource != null || canonical.originalSource != null ||
-            event.subscriptionId != operation.subscriptionId || event.receivedAt < operation.startedAt ||
-            event.receivedAt > at || at - operation.startedAt !in 0..30_000) return false
+            event.subscriptionId != operation.subscriptionId || !event.after(operation, at)) return false
         val message = event.body?.let { BankSmsParser().parse(event.sender, it) } as? BankHistory ?: return false
         if (message.bank.code != operation.bankCode) return false
+        val candidates = dao.operations().map { it.value }.filter {
+            !it.restored && it.specId == "bandec.recent-operations" && it.kind == it.specId &&
+                it.providerId == "BANDEC" && it.profileId == "PERSONAL" && it.bankCode == message.bank.code &&
+                it.subscriptionId == event.subscriptionId && it.amount == null && it.destination.isEmpty() &&
+                it.status in setOf(OperationStatus.SUBMITTING, OperationStatus.AWAITING_CONFIRMATION, OperationStatus.UNCERTAIN) &&
+                event.after(it, at)
+        }
+        if (candidates.singleOrNull()?.id != operation.id) return false
         val observations = dao.historyObservations(canonical.id)
         if (observations.size != message.entries.size) return false
         if (operation.source != "0000") {

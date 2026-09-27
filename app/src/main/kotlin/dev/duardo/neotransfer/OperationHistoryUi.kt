@@ -20,6 +20,9 @@ internal fun OperationStatus.title(): String = when (this) {
     OperationStatus.CANCELLED -> "Sin enviar"
 }
 
+internal fun OperationRecord.statusTitle(): String =
+    if (status == OperationStatus.UNCERTAIN && timeoutAt != null) "Tiempo de espera agotado" else status.title()
+
 internal fun OperationRecord.title(state: AppUiState): String = state.services.firstOrNull { it.id == specId }?.title
     ?: when (kind) {
         "TRANSFER" -> "Transferencia"; "RECHARGE" -> "Recarga móvil"; "ELECTRICITY" -> "Electricidad"
@@ -46,7 +49,7 @@ internal fun OperationHistoryDetail(operation: OperationRecord, state: AppUiStat
     ModalBottomSheet(onDismissRequest = dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
             Text(operation.title(state), style = MaterialTheme.typography.headlineSmall)
-            Text(operation.status.title(), style = MaterialTheme.typography.titleMedium)
+            Text(operation.statusTitle(), style = MaterialTheme.typography.titleMedium)
             registration?.let { Detail("Acceso", it.label.ifBlank { it.identity()?.title().orEmpty() }) }
             if (operation.source != "0000") Detail("Desde", readableAccount(operation.source))
             else if (spec?.sourcePolicy != dev.duardo.neotransfer.core.SourcePolicy.NONE) Detail("Desde", "Cuenta predeterminada")
@@ -59,10 +62,10 @@ internal fun OperationHistoryDetail(operation: OperationRecord, state: AppUiStat
                 }
             }
             Detail("Fecha", dateText(Instant.ofEpochMilli(operation.startedAt)))
-            if (operation.status in setOf(OperationStatus.UNCERTAIN, OperationStatus.AWAITING_CONFIRMATION)) {
+            if (operation.timeoutAt == null && operation.status in setOf(OperationStatus.UNCERTAIN, OperationStatus.AWAITING_CONFIRMATION)) {
                 Text("El resultado no está confirmado. Comprueba la actividad antes de repetir la operación.")
             }
-            if (operation.reviewRequired) TextButton(onClick = { confirmReview = true }, enabled = !state.busy) { Text("Cerrar revisión") }
+            if (operation.reviewRequired && operation.timeoutAt == null) TextButton(onClick = { confirmReview = true }, enabled = !state.busy) { Text("Cerrar revisión") }
         }
     }
     if (confirmReview) AlertDialog(onDismissRequest = { confirmReview = false }, title = { Text("Cerrar revisión") },

@@ -12,6 +12,8 @@ class BankSmsRecord(
     val receivedAt: Instant,
     val subscriptionId: Int?,
     val deliveryId: String? = null,
+    /** SMS service-centre time, not the time when the bank performed an operation. */
+    val sentAt: Instant? = null,
 ) {
     override fun toString() = "BankSmsRecord(id=$id)"
 }
@@ -22,7 +24,7 @@ class BankSmsInbox(context: Context) {
     /** Run off the main thread. Permission errors are propagated to the permission flow. */
     fun read(limit: Int = Int.MAX_VALUE): List<BankSmsRecord> {
         require(limit > 0)
-        val projection = arrayOf("_id", "body", "date", "sub_id")
+        val projection = arrayOf("_id", "body", "date", "sub_id", Telephony.Sms.DATE_SENT)
         return buildList {
             checkNotNull(resolver.query(Telephony.Sms.Inbox.CONTENT_URI, projection, "address = ? COLLATE NOCASE", arrayOf("PAGOxMOVIL"), "date DESC, _id DESC")) {
                 "No se pudo leer la bandeja de mensajes"
@@ -30,7 +32,9 @@ class BankSmsInbox(context: Context) {
                 while (size < limit && cursor.moveToNext()) {
                     val subscription = if (cursor.isNull(3)) null else
                         cursor.getInt(3).takeIf(SubscriptionManager::isValidSubscriptionId)
-                    add(BankSmsRecord(cursor.getLong(0), cursor.getString(1), Instant.ofEpochMilli(cursor.getLong(2)), subscription))
+                    val sentAt = if (cursor.isNull(4)) null else cursor.getLong(4).takeIf { it > 0 }?.let(Instant::ofEpochMilli)
+                    add(BankSmsRecord(cursor.getLong(0), cursor.getString(1), Instant.ofEpochMilli(cursor.getLong(2)), subscription,
+                        sentAt = sentAt))
                 }
             }
         }
@@ -44,8 +48,11 @@ class BankSmsInbox(context: Context) {
             val subscription = intent.getIntExtra(SubscriptionManager.EXTRA_SUBSCRIPTION_INDEX,
                 intent.getIntExtra("subscription", SubscriptionManager.INVALID_SUBSCRIPTION_ID))
                 .takeIf(SubscriptionManager::isValidSubscriptionId)
+            // A partial old message must not become fresh merely because its last part arrived later.
+            val timestamps = parts.map { it.timestampMillis }
+            val sentAt = timestamps.takeIf { values -> values.all { it > 0 } }?.minOrNull()?.let(Instant::ofEpochMilli)
             return BankSmsRecord(null, parts.joinToString("") { it.messageBody }, Instant.now(), subscription,
-                broadcastDeliveryId(subscription, parts.map { it.pdu }))
+                broadcastDeliveryId(subscription, parts.map { it.pdu }), sentAt)
         }
     }
 }

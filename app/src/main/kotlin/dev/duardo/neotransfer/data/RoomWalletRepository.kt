@@ -15,11 +15,14 @@ import dev.duardo.neotransfer.core.fuel.FuelCoupon
 import dev.duardo.neotransfer.core.fuel.FuelEnvelopeProtector
 import dev.duardo.neotransfer.core.fuel.ProtectedFuelEnvelope
 import dev.duardo.neotransfer.core.matchesAccount
+import dev.duardo.neotransfer.platform.smsEvidenceAfter
+import dev.duardo.neotransfer.platform.smsEvidenceTime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import java.math.BigDecimal
+import java.time.Instant
 import java.security.MessageDigest
 import java.util.Locale
 import java.util.UUID
@@ -174,6 +177,15 @@ class RoomWalletRepository internal constructor(internal val database: WalletDat
         true
     }
 
+    override fun expireWaitingOperation(id: String, at: Long): Boolean = write {
+        val old = dao.operation(id)?.value ?: return@write false
+        if (old.restored || old.status !in setOf(OperationStatus.SUBMITTING, OperationStatus.AWAITING_CONFIRMATION) ||
+            at < old.startedAt || at < old.updatedAt) return@write false
+        dao.put(OperationRow(old.copy(status = OperationStatus.UNCERTAIN, updatedAt = at,
+            reviewRequired = false, timeoutAt = at)))
+        true
+    }
+
     override fun setSettings(value: WalletSettings) = write {
         require(value.subscriptionId >= -1)
         val registration = value.selectedRegistrationId?.let { id -> dao.registrations().singleOrNull { it.value.id == id }?.value
@@ -204,7 +216,13 @@ class RoomWalletRepository internal constructor(internal val database: WalletDat
             val old = existing[value.id]?.value
             require(old == null || (old.bankCode == value.bankCode && old.subscriptionId == value.subscriptionId &&
                 old.registrationId == value.registrationId && old.cardId == value.cardId && old.accountId == value.accountId))
-            if (old == null || value.at >= old.at) dao.put(BalanceRow(value))
+            val incomingOrder = smsEvidenceTime(Instant.ofEpochMilli(value.at), value.sentAt?.let(Instant::ofEpochMilli),
+                Instant.ofEpochMilli(value.at))?.toEpochMilli()
+            val oldOrder = old?.let { smsEvidenceTime(Instant.ofEpochMilli(it.at), it.sentAt?.let(Instant::ofEpochMilli),
+                Instant.ofEpochMilli(it.at))?.toEpochMilli() }
+            if (old == null || incomingOrder != null && (oldOrder == null && value.at >= old.at ||
+                oldOrder != null && incomingOrder > oldOrder) || incomingOrder == null && oldOrder == null && value.at >= old.at)
+                dao.put(BalanceRow(value))
         }
     }
 
@@ -226,6 +244,17 @@ class RoomWalletRepository internal constructor(internal val database: WalletDat
             require(existing.value.subscriptionId == value.subscriptionId && existing.bodyHash == bodyHash(value.body)) {
                 "Un identificador de entrega no puede cambiar su contenido"
             }
+            val previousSentAt = existing.value.sentAt
+            val suppliedSentAt = value.sentAt
+            val conflictingTime = previousSentAt != null && suppliedSentAt != null && suppliedSentAt > 0 &&
+                suppliedSentAt <= value.receivedAt && previousSentAt / 1000 != suppliedSentAt / 1000
+            if (conflictingTime) {
+                quarantineSmsTime(existing.value.canonicalEventId)
+            } else {
+                enrichSmsTime(existing.value.id, value.sentAt, value.receivedAt, value.evidenceEligible)
+                if (existing.value.id != existing.value.canonicalEventId)
+                    enrichSmsTime(existing.value.canonicalEventId, value.sentAt, value.receivedAt, value.evidenceEligible)
+            }
             val fuel = fuelStore.record(value.fuelUpdate, existing.value.canonicalEventId, fuelProtector, value.body)
             return@write IngestResult(existing.value.id, existing.value.canonicalEventId,
                 dao.receiptForEvent(existing.value.canonicalEventId)?.value?.id, true,
@@ -238,6 +267,8 @@ class RoomWalletRepository internal constructor(internal val database: WalletDat
             .mapNotNull { dao.event(it.value.eventId) }
         val oppositeDeliveries = dao.matchingEvents(hash, value.receivedAt - 120_000, value.receivedAt + 120_000)
             .filter { it.value.source != value.source && !dao.hasDeliverySource(it.value.canonicalEventId, value.source) }
+            .filter { it.value.sentAt == null || value.sentAt == null ||
+                it.value.sentAt?.div(1000) == value.sentAt?.div(1000) }
         // A referenced receipt with the same complete facts can be re-delivered by the bank.
         // Preserve the delivery row while reusing its receipt; administrative events do not use this path.
         val candidates = (oppositeDeliveries + referenceCandidates)
@@ -252,9 +283,10 @@ class RoomWalletRepository internal constructor(internal val database: WalletDat
         val secret = containsSecret(value.body)
         val event = EventRecord(id, value.source, value.sourceId, value.sender,
             value.body.takeUnless { secret }, value.receivedAt, value.subscriptionId, canonical ?: id, secret,
-            evidenceEligible = value.evidenceEligible)
+            evidenceEligible = value.evidenceEligible, sentAt = value.sentAt)
         dao.put(EventRow(event, hash))
         if (canonical != null) {
+            enrichSmsTime(canonical, value.sentAt, value.receivedAt, value.evidenceEligible)
             val fuel = fuelStore.record(value.fuelUpdate, canonical, fuelProtector, value.body)
             return@write IngestResult(id, canonical, dao.receiptForEvent(canonical)?.value?.id, true,
                 historyStore.record(value.history, canonical), fuel.couponIds, fuel.receiptIds)
@@ -290,6 +322,27 @@ class RoomWalletRepository internal constructor(internal val database: WalletDat
         IngestResult(id, id, receiptId, false)
     }
 
+    /** A later inbox read may add the SMSC time to a previously stored delivery. */
+    private fun enrichSmsTime(canonicalId: String, sentAt: Long?, receivedAt: Long, eligible: Boolean) {
+        if (!eligible || sentAt == null || sentAt <= 0 || sentAt > receivedAt) return
+        val canonical = dao.event(canonicalId) ?: return
+        if (!canonical.value.evidenceEligible || canonical.value.source == EventSource.LEGACY ||
+            canonical.value.originalSource != null || sentAt > canonical.value.receivedAt ||
+            canonical.value.sentAt != null) return
+        dao.update(canonical.copy(value = canonical.value.copy(sentAt = sentAt)))
+        dao.fuelObservations(canonicalId).forEach { row ->
+            val proof = row.value.purchaseEvidence ?: return@forEach
+            if (proof.sentAt == null && proof.receivedAt == canonical.value.receivedAt)
+                dao.put(row.copy(value = row.value.copy(purchaseEvidence = proof.copy(sentAt = sentAt))))
+        }
+    }
+
+    private fun quarantineSmsTime(canonicalId: String) {
+        dao.events().filter { it.value.canonicalEventId == canonicalId && it.value.evidenceEligible }.forEach { row ->
+            dao.update(row.copy(value = row.value.copy(evidenceEligible = false)))
+        }
+    }
+
     override fun confirmOperation(operationId: String, receiptId: String, at: Long, refresh: RefreshRequest?): Boolean = write {
         val operation = dao.operation(operationId)?.value ?: return@write false
         val row = dao.receipt(receiptId) ?: return@write false
@@ -320,7 +373,7 @@ class RoomWalletRepository internal constructor(internal val database: WalletDat
             operation.restored || event.source == EventSource.LEGACY || event.originalSource != null ||
             receipt.operationId != null || receipt.referenceConflict || receipt.amountIsNominal || receipt.bankCode == null ||
             receipt.bankCode != operation.bankCode || receipt.subscriptionId != operation.subscriptionId ||
-            !event.evidenceEligible || event.receivedAt < operation.startedAt || event.receivedAt > at ||
+            !event.evidenceEligible || !event.after(operation, at) ||
             operation.currency != receipt.currency || !fullInvoice && !servicePayment && (operation.amount == null ||
             BigDecimal(operation.amount).compareTo(BigDecimal(receipt.amount)) != 0) || receipt.kind == "RECEIVED") return@write false
         if (servicePayment) {
@@ -335,7 +388,7 @@ class RoomWalletRepository internal constructor(internal val database: WalletDat
                 return@write false
             val candidates = dao.operations().map { it.value }.filter {
                 !it.restored && it.status in pendingPaymentStatuses && it.subscriptionId == receipt.subscriptionId &&
-                    it.startedAt <= event.receivedAt && matchesServiceReceipt(it, parsed, forAmbiguity = true)
+                    event.after(it, at) && matchesServiceReceipt(it, parsed, forAmbiguity = true)
             }
             if (candidates.singleOrNull()?.id != operation.id || !matchesServiceReceipt(operation, parsed)) return@write false
         }
@@ -347,6 +400,17 @@ class RoomWalletRepository internal constructor(internal val database: WalletDat
                 bill.reference != receipt.reference || paid.currency.name != receipt.currency ||
                 paid.amount.compareTo(BigDecimal(receipt.amount)) != 0 ||
                 bill.service.name != expectedService) return@write false
+        }
+        if (!servicePayment && operation.specId != "service.fuel") {
+            val candidates = dao.operations().map { it.value }.filter {
+                !it.restored && it.status in pendingPaymentStatuses && it.bankCode == receipt.bankCode &&
+                    it.subscriptionId == receipt.subscriptionId && it.currency == receipt.currency &&
+                    event.after(it, at) && (fullInvoice && it.destination == receipt.account ||
+                        !fullInvoice && it.amount?.toBigDecimalOrNull()?.compareTo(BigDecimal(receipt.amount)) == 0 &&
+                        (receipt.kind != "SENT" || (it.kind == "TRANSFER" || it.specId.endsWith(".transfer")) &&
+                            matchesAccount(receipt.party, it.destination)))
+            }
+            if (candidates.singleOrNull()?.id != operationId) return@write false
         }
         val reference = receipt.reference ?: return@write false
         if (!claimReference(UsedReference(receipt.bankCode, reference, operationId))) return@write false
@@ -366,32 +430,39 @@ class RoomWalletRepository internal constructor(internal val database: WalletDat
             !operation.specId.matches(Regex("(bpa|bandec|banmet|wallet)\\.(authenticate|balance)|bandec\\.(card-select|card-balance|origin-balance)")) ||
             operation.status !in setOf(OperationStatus.SUBMITTING, OperationStatus.AWAITING_CONFIRMATION, OperationStatus.UNCERTAIN) ||
             !event.evidenceEligible || event.source == EventSource.LEGACY || event.originalSource != null ||
-            event.subscriptionId != operation.subscriptionId || event.receivedAt < operation.startedAt || event.receivedAt > at)
+            event.subscriptionId != operation.subscriptionId || !event.after(operation, at))
             return@write false
         val message = event.body?.let { BankSmsParser().parse(event.sender, it) } ?: return@write false
-        val matches = when (message) {
-            is BankMessage.Authenticated -> operation.specId == "${message.bank.name.lowercase()}.authenticate" &&
-                operation.providerId == message.bank.name && operation.bankCode == message.bank.code
-            is BankMessage.ProviderAuthenticated -> operation.specId == "wallet.authenticate" &&
-                operation.providerId == message.identity.provider.name && operation.profileId == message.identity.profile.name
-            is BankMessage.Balance -> (operation.specId == "${message.bank.name.lowercase()}.balance" ||
-                message.bank == dev.duardo.neotransfer.core.Bank.BANDEC && operation.specId in setOf("bandec.card-select", "bandec.card-balance", "bandec.origin-balance")) &&
-                operation.providerId == message.bank.name && operation.bankCode == message.bank.code &&
-                (operation.source != "0000" || operation.parameters["sourceCurrency"] == null ||
-                    message.accounts.all { it.available.currency.name == operation.parameters["sourceCurrency"] }) &&
-                message.accounts.isNotEmpty() && (operation.source == "0000" || message.accounts.count { balance ->
-                    balance.account?.let { matchesAccount(it, operation.source) } == true
-                } == 1)
-            else -> false
+        fun matches(candidate: OperationRecord): Boolean {
+            val content = when (message) {
+                is BankMessage.Authenticated -> candidate.specId == "${message.bank.name.lowercase()}.authenticate" &&
+                    candidate.providerId == message.bank.name && candidate.bankCode == message.bank.code
+                is BankMessage.ProviderAuthenticated -> candidate.specId == "wallet.authenticate" &&
+                    candidate.providerId == message.identity.provider.name && candidate.profileId == message.identity.profile.name
+                is BankMessage.Balance -> (candidate.specId == "${message.bank.name.lowercase()}.balance" ||
+                    message.bank == dev.duardo.neotransfer.core.Bank.BANDEC && candidate.specId in setOf("bandec.card-select", "bandec.card-balance", "bandec.origin-balance")) &&
+                    candidate.providerId == message.bank.name && candidate.bankCode == message.bank.code &&
+                    (candidate.source != "0000" || candidate.parameters["sourceCurrency"] == null ||
+                        message.accounts.all { it.available.currency.name == candidate.parameters["sourceCurrency"] }) &&
+                    message.accounts.isNotEmpty() && (candidate.source == "0000" || message.accounts.count { balance ->
+                        balance.account?.let { matchesAccount(it, candidate.source) } == true
+                    } == 1)
+                else -> false
+            }
+            if (!content) return false
+            if (candidate.specId != "bandec.card-select") return true
+            if (candidate.parameters["verification"] != "SELECTED_CARD_BALANCE") return false
+            val read = candidate.parameters["readOperationId"]?.let { dao.operation(it)?.value } ?: return false
+            return read.status == OperationStatus.CONFIRMED && read.specId == "bandec.card-balance" &&
+                read.source == candidate.source && read.subscriptionId == candidate.subscriptionId &&
+                read.registrationId == candidate.registrationId && read.startedAt >= candidate.startedAt
         }
-        if (!matches) return@write false
-        if (operation.specId == "bandec.card-select") {
-            if (operation.parameters["verification"] != "SELECTED_CARD_BALANCE") return@write false
-            val read = operation.parameters["readOperationId"]?.let { dao.operation(it)?.value } ?: return@write false
-            if (read.status != OperationStatus.CONFIRMED || read.specId != "bandec.card-balance" ||
-                read.source != operation.source || read.subscriptionId != operation.subscriptionId ||
-                read.registrationId != operation.registrationId || read.startedAt < operation.startedAt) return@write false
+        val candidates = dao.operations().map { it.value }.filter {
+            !it.restored && it.profileId == "PERSONAL" && it.kind == it.specId && it.amount == null &&
+                it.destination.isEmpty() && it.status in pendingPaymentStatuses &&
+                it.subscriptionId == event.subscriptionId && event.after(it, at) && matches(it)
         }
+        if (candidates.singleOrNull()?.id != operationId) return@write false
         dao.put(OperationRow(operation.copy(status = OperationStatus.CONFIRMED, updatedAt = at, reviewRequired = false)))
         true
     }
@@ -432,6 +503,9 @@ class RoomWalletRepository internal constructor(internal val database: WalletDat
 
 private val correlatedServiceSpecs = setOf("service.nauta", "service.nauta.home", "service.nauta.debt", "service.stamp")
 private val pendingPaymentStatuses = setOf(OperationStatus.SUBMITTING, OperationStatus.AWAITING_CONFIRMATION, OperationStatus.UNCERTAIN)
+internal fun EventRecord.after(operation: OperationRecord, now: Long): Boolean =
+    smsEvidenceAfter(Instant.ofEpochMilli(receivedAt), sentAt?.let(Instant::ofEpochMilli),
+        Instant.ofEpochMilli(operation.startedAt), Instant.ofEpochMilli(now))
 private fun matchesServiceReceipt(operation: OperationRecord, receipt: BankMessage.ServicePaymentCompleted, forAmbiguity: Boolean = false): Boolean {
     if (operation.kind != operation.specId || operation.specId !in correlatedServiceSpecs || operation.bankCode != receipt.bank.code) return false
     val provider = ProviderId.entries.singleOrNull { it.name == operation.providerId } ?: return false
@@ -490,6 +564,7 @@ internal fun validateOperation(value: OperationRecord) {
     require(listOfNotNull(value.destination, value.source, value.phone, value.description,
         value.qr?.description, value.qr?.auxiliary).none(::containsSecret)) { "La operación contiene credenciales o comandos" }
     require(!value.restored || value.status !in setOf(OperationStatus.PREPARED, OperationStatus.SUBMITTING)) { "Una operación restaurada requiere revisión" }
+    require(value.timeoutAt == null || value.timeoutAt >= value.startedAt && value.timeoutAt <= value.updatedAt)
     if (value.providerId == "BULEVAR" || value.kind.startsWith("bulevar.") || value.specId.startsWith("bulevar.")) {
         require(isHistoricalBulevarRecord(value)) { "Solicitud Bulevar incompatible" }
         val allowed = setOf("userId", "title", "sourceId") + if (value.specId == "bulevar.refund_request") setOf("externalCode") else emptySet()
@@ -512,7 +587,7 @@ internal fun isHistoricalBulevarRecord(value: OperationRecord): Boolean = value.
 private fun validBulevarReference(value: String?): Boolean = value == null || value.matches(Regex("[A-Za-z0-9][A-Za-z0-9._:-]{0,255}"))
 private fun sameRequest(a: OperationRecord, b: OperationRecord): Boolean =
     a.copy(status = b.status, updatedAt = b.updatedAt, refreshTaken = b.refreshTaken, restored = b.restored,
-        reviewRequired = b.reviewRequired, legacyState = b.legacyState) == b
+        reviewRequired = b.reviewRequired, legacyState = b.legacyState, timeoutAt = b.timeoutAt) == b
 private fun allowedTransition(from: OperationStatus, to: OperationStatus): Boolean = when (from) {
     OperationStatus.PREPARED -> to in setOf(OperationStatus.SUBMITTING, OperationStatus.CANCELLED)
     OperationStatus.SUBMITTING -> to in setOf(OperationStatus.AWAITING_CONFIRMATION, OperationStatus.UNCERTAIN, OperationStatus.REJECTED)

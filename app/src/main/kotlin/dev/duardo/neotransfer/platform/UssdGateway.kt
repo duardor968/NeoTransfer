@@ -16,27 +16,39 @@ sealed interface UssdResult {
     data object PermissionRequired : UssdResult
     data object InvalidSubscription : UssdResult
     data object Unsupported : UssdResult
+    /** Local deadline elapsed; the network may still complete the request. */
+    data object TimedOut : UssdResult
 }
 
 interface UssdTransport {
     fun isIdle(): Boolean
     fun send(command: UssdCommand, subscriptionId: Int, result: (UssdResult) -> Unit)
+    /** Expire only a still-pending local send. Each send needs a distinct callback instance. */
+    fun abandon(result: (UssdResult) -> Unit): Boolean = false
 }
 
 /** Serializes access to the modem. A USSD response is not a banking receipt. */
 class UssdGateway(context: Context) : UssdTransport {
     private val context = context.applicationContext
     private val handler = Handler(Looper.getMainLooper())
-    private var active = false
+    private val lease = UssdRequestLease(
+        schedule = { task, delay -> handler.postDelayed(task, delay) },
+        cancel = handler::removeCallbacks,
+    )
 
     override fun isIdle(): Boolean {
         check(Looper.myLooper() == Looper.getMainLooper())
-        return !active
+        return lease.isIdle()
+    }
+
+    override fun abandon(result: (UssdResult) -> Unit): Boolean {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        return lease.abandon(result)
     }
 
     override fun send(command: UssdCommand, subscriptionId: Int, result: (UssdResult) -> Unit) {
         check(Looper.myLooper() == Looper.getMainLooper())
-        if (active) return result(UssdResult.Busy)
+        if (!lease.isIdle()) return result(UssdResult.Busy)
         if (context.checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
             return result(UssdResult.PermissionRequired)
         }
@@ -45,28 +57,23 @@ class UssdGateway(context: Context) : UssdTransport {
         }
         val telephony = context.getSystemService(TelephonyManager::class.java)
             ?.createForSubscriptionId(subscriptionId) ?: return result(UssdResult.Unsupported)
-        active = true
+        val ticket = lease.begin(result) ?: return result(UssdResult.Busy)
         try {
             telephony.sendUssdRequest(command.valueForTransport(), object : TelephonyManager.UssdResponseCallback() {
                 override fun onReceiveUssdResponse(manager: TelephonyManager, request: String, response: CharSequence) {
-                    active = false
-                    result(UssdResult.Response(response.toString()))
+                    lease.complete(ticket, UssdResult.Response(response.toString()))
                 }
 
                 override fun onReceiveUssdResponseFailed(manager: TelephonyManager, request: String, code: Int) {
-                    active = false
-                    result(UssdResult.NetworkFailure(code))
+                    lease.complete(ticket, UssdResult.NetworkFailure(code))
                 }
             }, handler)
         } catch (_: SecurityException) {
-            active = false
-            result(UssdResult.PermissionRequired)
+            lease.complete(ticket, UssdResult.PermissionRequired)
         } catch (_: UnsupportedOperationException) {
-            active = false
-            result(UssdResult.Unsupported)
+            lease.complete(ticket, UssdResult.Unsupported)
         } catch (_: RuntimeException) {
-            active = false
-            result(UssdResult.NetworkFailure(-1))
+            lease.complete(ticket, UssdResult.NetworkFailure(-1))
         }
     }
 }

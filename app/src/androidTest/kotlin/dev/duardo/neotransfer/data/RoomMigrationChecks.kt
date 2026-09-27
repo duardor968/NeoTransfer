@@ -7,14 +7,18 @@ import org.json.JSONObject
 import java.security.MessageDigest
 import java.util.UUID
 
-/** Opens both installed schemas through the complete migration chain and compares every original cell. */
+/** Opens every installed schema through the complete migration chain and compares every original cell. */
 object RoomMigrationChecks {
     fun run(context: Context, onPassed: (String) -> Unit = {}): Int {
         val testContext = context.createPackageContext("${context.packageName}.test", 0)
-        for (sourceVersion in listOf(1, 2)) {
+        for (sourceVersion in listOf(1, 2, 3)) {
         val bytes = testContext.assets.open("dev.duardo.neotransfer.data.WalletDatabase/$sourceVersion.json").use { it.readBytes() }
         val sha = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
-        val expectedHash = if (sourceVersion == 1) "dbe7dd1bdcd26cb79573b0e94ec5aec0821ca56847b64fa21043e52be422fb28" else "fcd18804ad5f9f7b03b5163d88cf4687234990b2ac0491d4b9d8d1bd5af4de31"
+        val expectedHash = when (sourceVersion) {
+            1 -> "dbe7dd1bdcd26cb79573b0e94ec5aec0821ca56847b64fa21043e52be422fb28"
+            2 -> "fcd18804ad5f9f7b03b5163d88cf4687234990b2ac0491d4b9d8d1bd5af4de31"
+            else -> "16cdfe5e7dd6350247ca4b7e29fb261dbe615cff069a1fcea35e8e34855a4305"
+        }
         check(sha == expectedHash) { "The installed v$sourceVersion schema fixture changed" }
         val schema = JSONObject(String(bytes, Charsets.UTF_8)).getJSONObject("database")
         check(schema.getInt("version") == sourceVersion)
@@ -45,15 +49,17 @@ object RoomMigrationChecks {
             }
             RoomWalletRepository.open(context, databaseName).use { repository ->
                 val state = repository.snapshot()
-                check(repository.database.openHelper.readableDatabase.version == 3)
+                check(repository.database.openHelper.readableDatabase.version == 4)
                 check(state.identities.single().label == "Perfil original v1")
                 check(state.registrations.single().credentialAlias == "original-vault-alias")
                 check(state.cards.single().number == "0000000000000001" && state.contacts.single().phones.single().number == "50000001")
-                check(state.cards.single().holderName == (if (sourceVersion == 2) "PERSONA ORIGINAL" else null) && state.cards.single().expiry == (if (sourceVersion == 2) "01/20" else null) && state.cards.single().label == "Débito")
+                check(state.cards.single().holderName == (if (sourceVersion >= 2) "PERSONA ORIGINAL" else null) && state.cards.single().expiry == (if (sourceVersion >= 2) "01/20" else null) && state.cards.single().label == "Débito")
                 check(state.operations.single().status == OperationStatus.AWAITING_CONFIRMATION && state.operations.single().httpEvidence == null)
                 check(state.balances.single().available == "420.25" && state.usedReferences.single().reference == "USED01")
                 check(repository.pendingTransferNotifications().single().id == "receipt")
-                check(columns.size == 21 && state.fuelCoupons.isEmpty() && state.fuelObservations.isEmpty())
+                check(columns.size == if (sourceVersion == 3) 24 else 21)
+                check(state.fuelCoupons.isEmpty() && state.fuelObservations.isEmpty())
+                check(state.operations.single().timeoutAt == null && state.events.single().sentAt == null && state.balances.single().sentAt == null)
                 val migrated = repository.database.openHelper.readableDatabase
                 columns.forEach { (table, names) ->
                     migrated.query("SELECT ${names.joinToString(",") { "`$it`" }} FROM `$table` ORDER BY rowid").use { cursor ->
@@ -66,13 +72,13 @@ object RoomMigrationChecks {
             }
             RoomWalletRepository.open(context, databaseName).use { reopened ->
                 check(reopened.snapshot().operations.single().status == OperationStatus.AWAITING_CONFIRMATION)
-                check(reopened.database.openHelper.readableDatabase.version == 3)
-                check(reopened.snapshot().cards.single().holderName == (if (sourceVersion == 2) "PERSONA ORIGINAL" else null))
+                check(reopened.database.openHelper.readableDatabase.version == 4)
+                check(reopened.snapshot().cards.single().holderName == (if (sourceVersion >= 2) "PERSONA ORIGINAL" else null))
             }
-            onPassed("Room v$sourceVersion to v3 preserves all 21 original tables, card metadata, vault aliases and queued requests")
+            onPassed("Room v$sourceVersion to v4 preserves original rows, card metadata, vault aliases and queued requests")
         } finally { check(context.deleteDatabase(databaseName)) }
         }
-        return 2
+        return 3
     }
 
     private fun capture(database: SQLiteDatabase, columns: Map<String, List<String>>): Map<String, List<List<String?>>> =

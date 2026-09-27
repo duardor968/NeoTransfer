@@ -98,7 +98,14 @@ class BankController(
     var accounts by mutableStateOf(restoredBalance.second); private set
     var balanceAt by mutableStateOf(restoredBalance.first); private set
     var history by mutableStateOf(emptyList<HistoryEntry>()); private set
-    var pending by mutableStateOf(if (wallet == null) store.pending() else null); private set
+    private var pendingRecord by mutableStateOf(if (wallet == null) store.pending() else null)
+    var pending: PendingRecord?
+        get() = pendingRecord?.takeIf { record -> wallet == null || walletSnapshot.operations.any { operation ->
+            operation.id == record.id && operation.timeoutAt == null &&
+                (operation.status in setOf(OperationStatus.PREPARED, OperationStatus.SUBMITTING, OperationStatus.AWAITING_CONFIRMATION) ||
+                    operation.status == OperationStatus.UNCERTAIN && operation.reviewRequired)
+        } }
+        private set(value) { pendingRecord = value }
     var recipients by mutableStateOf(store.recipients()); private set
     var uncertain by mutableStateOf(if (wallet == null) store.uncertain() else emptyList()); private set
     var confirmed by mutableStateOf<BankMessage.TransferSent?>(null); private set
@@ -112,10 +119,15 @@ class BankController(
     var onSystemDial: ((SystemDialRequest) -> Unit)? = null
     var onIngested: ((BankSmsRecord, SmsIngestResult) -> Unit)? = null
     private val executor = wallet?.let { coordinator -> OperationExecutor(coordinator, gateway, now,
-        canContinue = { !closed && foreground && (unlocked || !vault.hasCredentials()) }, onResult = { serviceResult = it },
+        canContinue = { !closed && foreground && (unlocked || !vault.hasCredentials()) }, onResult = { result ->
+            when {
+                result == "Tiempo de espera agotado" -> { serviceResult = null; notice = result }
+                else -> serviceResult = result
+            }
+        },
         dial = { request -> onSystemDial?.invoke(request) ?: request.complete(false) }, onConfirmed = { operation, message ->
-            if (pending?.id == operation.id) pending = null
-            if (message is BankMessage.TransferSent) confirmed = message
+            if (pendingRecord?.id == operation.id) pending = null
+            if (operation.timeoutAt == null && message is BankMessage.TransferSent) confirmed = message
         }, accessGeneration = ::currentAccessGeneration) }
 
     private fun currentAccessGeneration(registrationId: String): Long = accessGenerations[registrationId] ?: store.accessGeneration(registrationId)
@@ -798,8 +810,8 @@ class BankController(
 
     private fun processStoredEvidence(record: BankSmsRecord, result: SmsIngestResult) {
         executor?.observed(record, result)
-        if (result.evidenceEligible && result.message is BankMessage.Balance && result.message.bank == bank && record.subscriptionId == subscription)
-            if (balanceAt == null || record.receivedAt > balanceAt) updateBalance(result.message.accounts, record.receivedAt)
+        // The wallet's balance observations are persisted and ordered by the shared ingestor.
+        // Do not overwrite the legacy cache using delivery order after migration.
         onIngested?.invoke(record, result)
     }
 
@@ -882,6 +894,7 @@ class BankController(
         UssdResult.PermissionRequired -> "Permite llamadas para continuar"
         UssdResult.InvalidSubscription -> "La SIM seleccionada no está disponible"
         UssdResult.Busy -> "Hay una solicitud en curso"
+        UssdResult.TimedOut -> "Tiempo de espera agotado"
         is UssdResult.Response -> result.text
         else -> "No se pudo completar la solicitud. Comprueba la cobertura."
     }

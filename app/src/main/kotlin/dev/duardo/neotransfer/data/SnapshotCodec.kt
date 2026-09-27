@@ -32,7 +32,7 @@ object SnapshotCodec {
             "sender" to it.sender, "body" to it.body, "receivedAt" to it.receivedAt,
             "subscriptionId" to it.subscriptionId, "canonicalEventId" to it.canonicalEventId, "bodyWithheld" to it.bodyWithheld,
             "originalSource" to it.originalSource?.name, "originalSourceId" to it.originalSourceId,
-            "evidenceEligible" to it.evidenceEligible) },
+            "evidenceEligible" to it.evidenceEligible, "sentAt" to it.sentAt) },
         "receipts" to value.receipts.map { obj("id" to it.id, "eventId" to it.eventId, "bankCode" to it.bankCode,
             "subscriptionId" to it.subscriptionId, "kind" to it.kind, "reference" to it.reference,
             "amount" to it.amount, "currency" to it.currency, "party" to it.party, "account" to it.account,
@@ -43,7 +43,7 @@ object SnapshotCodec {
         "balances" to value.balances.map { obj("id" to it.id, "bankCode" to it.bankCode, "subscriptionId" to it.subscriptionId,
             "at" to it.at, "account" to it.account, "available" to it.available, "currency" to it.currency,
             "ledger" to it.ledger, "label" to it.label, "registrationId" to it.registrationId,
-            "cardId" to it.cardId, "accountId" to it.accountId) },
+            "cardId" to it.cardId, "accountId" to it.accountId, "sentAt" to it.sentAt) },
         "usedReferences" to value.usedReferences.map { obj("bankCode" to it.bankCode, "reference" to it.reference, "operationId" to it.operationId) },
         "settings" to value.settings.let { obj("activeBankCode" to it.activeBankCode, "subscriptionId" to it.subscriptionId,
             "selectedRegistrationId" to it.selectedRegistrationId, "selectedCardId" to it.selectedCardId, "selectedAccountId" to it.selectedAccountId) },
@@ -88,14 +88,14 @@ object SnapshotCodec {
             operations = root.rows("operations") { decodeOperation(this) },
             events = root.rows("events") { EventRecord(s("id"), EventSource.valueOf(s("source")), ns("sourceId"), s("sender"),
                 ns("body"), getLong("receivedAt"), ni("subscriptionId"), s("canonicalEventId"), getBoolean("bodyWithheld"),
-                ns("originalSource")?.let(EventSource::valueOf), ns("originalSourceId"), getBoolean("evidenceEligible")) },
+                ns("originalSource")?.let(EventSource::valueOf), ns("originalSourceId"), getBoolean("evidenceEligible"), nl("sentAt")) },
             receipts = root.rows("receipts") { ReceiptRecord(s("id"), s("eventId"), ns("bankCode"), ni("subscriptionId"),
                 s("kind"), ns("reference"), s("amount"), s("currency"), s("party"), ns("account"), ns("purchaseId"),
                 ns("bankDate"), ns("nominalAmount"), getBoolean("amountIsNominal"), ns("operationId"), getBoolean("referenceConflict")) },
             movements = root.rows("movements") { MovementRecord(s("id"), s("receiptId"), s("kind"), s("amount"),
                 s("currency"), getLong("occurredAt"), getBoolean("incoming")) },
             balances = root.rows("balances") { BalanceRecord(s("id"), s("bankCode"), getInt("subscriptionId"), getLong("at"),
-                ns("account"), s("available"), s("currency"), ns("ledger"), ns("label"), ns("registrationId"), ns("cardId"), ns("accountId")) },
+                ns("account"), s("available"), s("currency"), ns("ledger"), ns("label"), ns("registrationId"), ns("cardId"), ns("accountId"), nl("sentAt")) },
             usedReferences = root.rows("usedReferences") { UsedReference(s("bankCode"), s("reference"), ns("operationId")) },
             settings = root.getJSONObject("settings").run { WalletSettings(s("activeBankCode"), getInt("subscriptionId"),
                 ns("selectedRegistrationId"), ns("selectedCardId"), ns("selectedAccountId")) },
@@ -128,7 +128,8 @@ object SnapshotCodec {
             "specId" to it.specId, "providerId" to it.providerId, "profileId" to it.profileId,
             "parameters" to JSONObject(it.parameters),
             "httpEvidence" to it.httpEvidence?.let { e -> obj("requestId" to e.requestId, "specId" to e.specId,
-                "httpStatus" to e.httpStatus, "responseCode" to e.responseCode, "receivedAt" to e.receivedAt, "reference" to e.reference) })
+                "httpStatus" to e.httpStatus, "responseCode" to e.responseCode, "receivedAt" to e.receivedAt, "reference" to e.reference) },
+            "timeoutAt" to it.timeoutAt)
     }
     private fun decodeOperation(json: JSONObject): OperationRecord = json.run {
         OperationRecord(s("id"), s("kind"), ns("bankCode"), getInt("subscriptionId"), s("destination"), ns("amount"),
@@ -139,7 +140,7 @@ object SnapshotCodec {
             getBoolean("reviewRequired"), ns("legacyState"), s("specId"), ns("providerId"), s("profileId"),
             getJSONObject("parameters").let { fields -> fields.keys().asSequence().associateWith { fields.getString(it) } },
             optJSONObject("httpEvidence")?.run { BulevarHttpEvidence(s("requestId"), s("specId"), getInt("httpStatus"),
-                s("responseCode"), getLong("receivedAt"), ns("reference")) })
+                s("responseCode"), getLong("receivedAt"), ns("reference")) }, nl("timeoutAt"))
     }
 
     private fun obj(vararg fields: Pair<String, Any?>): JSONObject = JSONObject().apply {
@@ -152,6 +153,7 @@ object SnapshotCodec {
     private fun JSONObject.s(key: String): String = getString(key)
     private fun JSONObject.ns(key: String): String? = if (isNull(key)) null else getString(key)
     private fun JSONObject.ni(key: String): Int? = if (isNull(key)) null else getInt(key)
+    private fun JSONObject.nl(key: String): Long? = if (!has(key) || isNull(key)) null else getLong(key)
     private fun <T> JSONObject.rows(key: String, decode: JSONObject.() -> T): List<T> = getJSONArray(key).let { array ->
         List(array.length()) { decode(array.getJSONObject(it)) }
     }

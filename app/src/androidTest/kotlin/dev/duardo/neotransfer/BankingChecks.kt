@@ -21,7 +21,12 @@ class BankingChecks : Instrumentation() {
     @Volatile private var stage = "Starting"
     @Volatile private var stageAt = android.os.SystemClock.elapsedRealtime()
     @Volatile private var finished = false
-    override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); start() }
+    private var notificationsOnly = false
+    override fun onCreate(arguments: Bundle?) {
+        super.onCreate(arguments)
+        arguments?.getString("suite")?.let { require(it == "notifications"); notificationsOnly = true }
+        start()
+    }
     override fun onStart() {
         Thread({
             while (!finished) {
@@ -40,6 +45,7 @@ class BankingChecks : Instrumentation() {
             // Keep only the test harness visible; banking and notifications still have separate background tests.
             val host = startActivitySync(Intent().setClassName(targetContext.packageName,
                 "dev.duardo.neotransfer.BankingTestHostActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            if (notificationsOnly) { checkNotifications(); finishSuccess(); return }
             // Remove only this harness's old fixtures, never the app's real preferences.
             targetContext.dataDir.resolve("shared_prefs").listFiles().orEmpty()
                 .filter { it.name.matches(Regex("banking_test_[0-9a-f-]{36}_(bank_state|bank_vault)\\.xml")) }
@@ -458,17 +464,27 @@ class BankingChecks : Instrumentation() {
                 }
             }
             passed += BankingDataChecks.run(targetContext, ::recordGroupPass)
-            progress("Notification checks")
-            passed += NotificationChecks.run(targetContext, ::recordGroupPass) { reason ->
-                report.appendLine("SKIP $reason")
-                progress("SKIP $reason")
-            }
-            finished = true
-            finish(-1, Bundle().apply { putString("stream", "\n$report\nPASS $passed Android checks; fake modem only.\n") })
+            progress("Controller timeout checks")
+            passed += ControllerTimeoutChecks.run(targetContext, ::recordGroupPass)
+            checkNotifications()
+            finishSuccess()
         } catch (error: Throwable) {
             finished = true
             finish(0, Bundle().apply { putString("stream", "\n$report\nFAIL ${error.stackTraceToString()}\n") })
         }
+    }
+
+    private fun checkNotifications() {
+        progress("Notification checks")
+        passed += NotificationChecks.run(targetContext, ::recordGroupPass) { reason ->
+            report.appendLine("SKIP $reason")
+            progress("SKIP $reason")
+        }
+    }
+
+    private fun finishSuccess() {
+        finished = true
+        finish(-1, Bundle().apply { putString("stream", "\n$report\nPASS $passed Android checks; fake modem only.\n") })
     }
 
     private fun progress(name: String) {

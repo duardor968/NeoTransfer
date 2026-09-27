@@ -65,6 +65,26 @@ internal fun initialCompatibleProduct(state: AppUiState, products: List<WalletPr
     if (state.selectedProductId != null) products.firstOrNull { it.id == state.selectedProductId }
     else products.firstOrNull { it.identity.bank == state.bank }
 
+private fun BalanceRecord.validSentAt(): Long? = sentAt?.takeIf { it > 0 && it <= at && it <= System.currentTimeMillis() }
+private fun BalanceRecord.displayAt(): Long = validSentAt() ?: at
+
+internal fun latestRegistrationBalance(rows: List<BalanceRecord>): BalanceRecord? {
+    if (rows.size <= 1) return rows.singleOrNull()
+    val account = rows.first().account ?: return null
+    val currency = rows.first().currency
+    if (rows.any { it.account != account || it.currency != currency }) return null
+    val dated = rows.mapNotNull { row -> row.validSentAt()?.let { row to it } }
+    if (dated.size == rows.size) {
+        val newest = dated.maxOf { it.second }
+        val latest = dated.filter { it.second == newest }.map { it.first }
+        if (latest.map { it.available to it.ledger }.distinct().size != 1) return null
+        return latest.maxByOrNull { it.at }
+    }
+    // Reception time cannot be compared with an SMSC date. Exact duplicate values are safe to show.
+    if (rows.map { it.available to it.ledger }.distinct().size != 1) return null
+    return dated.maxByOrNull { it.second }?.first ?: rows.maxByOrNull { it.at }
+}
+
 internal fun walletProducts(state: AppUiState): List<WalletProductUi> {
     val wallet = state.wallet
     val products = buildList {
@@ -88,7 +108,7 @@ internal fun walletProducts(state: AppUiState): List<WalletProductUi> {
             add(WalletProductUi(card.id, registration.id, identity, ProductKind.CARD, card.label,
                 card.number, currency, SourceSelector.Explicit(card.number),
                 balance?.let { Money(it.available.toBigDecimal(), Currency.valueOf(it.currency)) },
-                balance?.let { Instant.ofEpochMilli(it.at) }, card = card))
+                balance?.let { Instant.ofEpochMilli(it.displayAt()) }, card = card))
         }
         wallet.accounts.filter { account -> wallet.cards.none { it.accountId == account.id } }.forEach { account ->
             val registration = wallet.registrations.singleOrNull { it.id == account.registrationId } ?: return@forEach
@@ -108,21 +128,21 @@ internal fun walletProducts(state: AppUiState): List<WalletProductUi> {
                 account.label, account.number.takeIf { it.isNotBlank() }, currency,
                 if (account.number.isBlank()) SourceSelector.Default else SourceSelector.Explicit(account.number),
                 balance?.let { Money(it.available.toBigDecimal(), Currency.valueOf(it.currency)) },
-                balance?.let { Instant.ofEpochMilli(it.at) }, account = account))
+                balance?.let { Instant.ofEpochMilli(it.displayAt()) }, account = account))
         }
         wallet.registrations.forEach { registration ->
             if (none { it.registrationId == registration.id }) {
                 val identity = registration.identity() ?: return@forEach
-                val balance = wallet.balances.filter { row -> row.cardId == null && row.accountId == null &&
-                    (row.registrationId == registration.id || (row.registrationId == null && row.bankCode == registration.bankCode &&
-                        row.subscriptionId == registration.subscriptionId && wallet.registrations.count {
+                val balance = latestRegistrationBalance(wallet.balances.filter { row -> row.cardId == null && row.accountId == null &&
+                    row.bankCode == registration.bankCode && row.subscriptionId == registration.subscriptionId &&
+                    (row.registrationId == registration.id || (row.registrationId == null && wallet.registrations.count {
                             it.bankCode == row.bankCode && it.subscriptionId == row.subscriptionId
-                        } == 1)) }.singleOrNull()
-                val currency = balance?.currency?.let { Currency.valueOf(it) }
+                        } == 1)) })
+                val currency = balance?.currency?.let { runCatching { Currency.valueOf(it) }.getOrNull() }
                 add(WalletProductUi("registration:${registration.id}", registration.id, identity,
                     if (identity.provider == ProviderId.MITRANSFER && identity.profile == ProfileId.PERSONAL) ProductKind.WALLET else ProductKind.ACCOUNT,
                     registration.label.ifBlank { "Cuenta predeterminada" }, balance?.account, currency, SourceSelector.Default,
-                    balance?.let { Money(it.available.toBigDecimal(), Currency.valueOf(it.currency)) }, balance?.let { Instant.ofEpochMilli(it.at) }))
+                    balance?.let { Money(it.available.toBigDecimal(), Currency.valueOf(it.currency)) }, balance?.let { Instant.ofEpochMilli(it.displayAt()) }))
             }
         }
         // A bank's default selector is represented as an account, never as an invented card.

@@ -116,7 +116,8 @@ object ServiceReceiptDataChecks {
         return passed
     }
 
-    private fun sms(id: Long, body: String, at: Long = 1500, sim: Int = 7) = BankSmsRecord(id, body, Instant.ofEpochMilli(at), sim)
+    private fun sms(id: Long, body: String, at: Long = 1500, sim: Int = 7) = BankSmsRecord(id, body, Instant.ofEpochMilli(at), sim,
+        sentAt = Instant.ofEpochMilli(at))
     private fun nautaOperation(id: String, home: Boolean = false, bank: String = "BPA", bankCode: String = "01", accountType: String = "1"): OperationRecord {
         val spec = if (home) "service.nauta.home" else "service.nauta"
         return OperationRecord(id, spec, bankCode, 7, "", "300.00", "CUP", 1000, status = OperationStatus.SUBMITTING,

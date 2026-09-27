@@ -195,6 +195,7 @@ internal interface WalletDao {
     @Upsert fun put(value: ServiceRow)
     @Upsert fun put(value: OperationRow)
     @Insert fun put(value: EventRow)
+    @Update fun update(value: EventRow)
     @Upsert fun put(value: ReceiptRow)
     @Insert fun put(value: MovementRow)
     @Insert(onConflict = OnConflictStrategy.IGNORE) fun enqueue(value: NotificationOutboxRow): Long
@@ -227,7 +228,8 @@ internal interface WalletDao {
     EventRow::class, ReceiptRow::class, MovementRow::class, BalanceRow::class, UsedReferenceRow::class,
     SettingsRow::class, RefreshRow::class, MetadataRow::class, LegacyArchiveRow::class,
     HistoryRow::class, HistoryObservationRow::class, NotificationOutboxRow::class, FuelCouponRow::class, FuelSecretRow::class, FuelObservationRow::class],
-    version = 3, exportSchema = true, autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)])
+    version = 4, exportSchema = true, autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3),
+        AutoMigration(from = 3, to = 4)])
 @TypeConverters(WalletConverters::class)
 internal abstract class WalletDatabase : RoomDatabase() {
     abstract fun wallet(): WalletDao

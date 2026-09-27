@@ -66,7 +66,7 @@ internal class FuelStore(private val repository: RoomWalletRepository) {
                 val proof = if (item.kind == FuelUpdateKind.PURCHASE) incoming.paidAmount?.let { paid ->
                     FuelPurchaseEvidence(incoming.id, incoming.serial, incoming.bankCode, incoming.subscriptionId,
                         incoming.bankReference, incoming.tmReference, paid, incoming.currency, event.receivedAt,
-                        incoming.evidenceEligible && !uncertainty && disposition == "APPLIED")
+                        incoming.evidenceEligible && !uncertainty && disposition == "APPLIED", event.sentAt)
                 } else null
                 dao.put(FuelObservationRow(FuelObservation(eventId, index, item.kind.name, disposition, incoming.id,
                     item.creditedAmount, receiptId, purchaseEvidence = proof)))

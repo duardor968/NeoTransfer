@@ -93,9 +93,9 @@ object BankHistoryDataChecks {
             check(snapshot.receipts.isEmpty() && snapshot.movements.isEmpty() && snapshot.usedReferences.isEmpty())
         }
 
-        case("Default query keeps the account unknown and stale restored or wrong-SIM queries cannot bind") { r, ingestor ->
+        case("Default query keeps the account unknown and later restored or wrong-SIM queries cannot bind") { r, ingestor ->
             val result = ingestor.ingest(record(1, statement(row("REF01")), NOW.minusSeconds(10)))
-            r.putOperation(query("stale", NOW.minusSeconds(60), "0000000000000001"))
+            r.putOperation(query("stale", NOW.minusSeconds(5), "0000000000000001"))
             r.putOperation(query("restored", NOW.minusSeconds(20), "0000000000000001").copy(restored = true, status = OperationStatus.UNCERTAIN))
             r.putOperation(query("wrong-sim", NOW.minusSeconds(20), "0000000000000001").copy(subscriptionId = 8))
             for (id in listOf("stale", "restored", "wrong-sim")) check(!r.bindHistoryToQuery(result.stored.eventId, id, NOW.toEpochMilli()))
@@ -168,7 +168,7 @@ object BankHistoryDataChecks {
     }
 
     private val NOW = Instant.parse("2026-09-23T02:00:00Z")
-    private fun record(id: Long, body: String, at: Instant, sim: Int? = 7) = BankSmsRecord(id, body, at, sim)
+    private fun record(id: Long, body: String, at: Instant, sim: Int? = 7) = BankSmsRecord(id, body, at, sim, sentAt = at)
     private fun row(reference: String?, direction: String = "Db", date: String = "22/09/2026") =
         "$date;Banca Movil Transferencia${reference?.let { " Ref: $it" }.orEmpty()};$direction;10.00;CUP; |"
     private fun statement(vararg rows: String) = "Banco Bandec Ultimas operaciones.\n\nFecha;Servicio;Operacion;Monto;Moneda;NoTransaccion\n\n" + rows.joinToString("\n")

@@ -39,14 +39,19 @@ internal class OperationExecutor(
     private val dial: (SystemDialRequest) -> Unit,
     private val onConfirmed: (OperationRecord, BankMessage) -> Unit,
     private val accessGeneration: (String) -> Long = { 0 },
+    private val scheduleTimeout: ((Long, () -> Unit) -> Unit)? = null,
 ) {
     var busy by mutableStateOf(true); private set
     private val main = Handler(Looper.getMainLooper())
     private var epoch = 0
     private var session: ProviderSession? = null
+    private var sessionContext: ServiceExecutionContext? = null
     private var active: Execution? = null
     private var authentication: Authentication? = null
+    private val pendingPresentations = mutableMapOf<String, Execution>()
+    private val acknowledgedAccesses = mutableListOf<Authentication>()
     private var cardQuery: CardQuery? = null
+    private val acknowledgedCardQueries = mutableListOf<CardQuery>()
     private val evidenceRevision = mutableMapOf<Int, Long>()
     private val historyQueries = mutableListOf<HistoryQuery>()
     private val fuelPurchases = mutableListOf<FuelPurchaseWait>()
@@ -67,7 +72,13 @@ internal class OperationExecutor(
         val request: ServiceRequest, val context: ServiceExecutionContext, val pin: CharArray?,
         val token: Int, val legacy: MoneyAction?, val prepared: ((OperationRecord) -> Unit)?,
         val wire: List<UssdCommand>?,
-    ) { var originProof: OriginProof? = null }
+        val deadline: Instant = Instant.MAX,
+    ) {
+        var originProof: OriginProof? = null
+        val operationIds = mutableSetOf<String>()
+        var timedOut = false
+        var pendingUssdResult: ((UssdResult) -> Unit)? = null
+    }
     private data class OriginProof(val source: SourceSelector, val currency: Currency, val revision: Long)
     private class CardQuery(val execution: Execution, val forMoney: Boolean) {
         val readId = UUID.randomUUID().toString()
@@ -78,7 +89,7 @@ internal class OperationExecutor(
         var evidence: Pair<BankSmsRecord, SmsIngestResult>? = null
     }
     private class Authentication(val operationId: String, val execution: Execution, val started: Instant,
-                                 val balanceChallenge: Boolean = false) {
+                                 val balanceChallenge: Boolean = false, val fulfillsRequest: Boolean = false) {
         var accepted = false
         var completing = false
         var evidence: Pair<BankSmsRecord, SmsIngestResult>? = null
@@ -94,8 +105,12 @@ internal class OperationExecutor(
     }
 
     fun invalidate() {
+        active?.operationIds?.forEach(::markUncertain)
+        pendingPresentations.clear()
+        acknowledgedAccesses.clear()
+        acknowledgedCardQueries.clear()
         cardQuery?.let { flow -> flow.selectId?.let(::markUncertain); markUncertain(flow.readId) }; cardQuery = null
-        epoch++; session = null; authentication = null
+        epoch++; session = null; sessionContext = null; authentication = null
         active?.pin?.fill('\u0000'); active = null; busy = false
     }
 
@@ -156,12 +171,14 @@ internal class OperationExecutor(
                 operation.status in setOf(OperationStatus.PREPARED, OperationStatus.SUBMITTING, OperationStatus.AWAITING_CONFIRMATION) &&
                     OperationCatalog.find(operation.specId)?.requiresConfirmation == true
             }) { "Hay una operación pendiente de resultado. Revísala antes de continuar." }
-            val execution = Execution(request, executionContext, pin?.copyOf(), epoch, legacy, onPrepared, wire)
+            val execution = Execution(request, executionContext, pin?.copyOf(), epoch, legacy, onPrepared, wire, now().plusSeconds(30))
             created = execution
             active = execution; busy = true
+            scheduleTimeout?.invoke(30_000) { expire(execution) } ?: main.postDelayed({ expire(execution) }, 30_000)
             validateOriginalQr(execution)
             val registrationId = executionContext.registrationId
             if (!spec.requiresSession || spec.service == 70 || registrationId != null &&
+                sessionContext?.let { contextValid(it) && it.accessGeneration == executionContext.accessGeneration } == true &&
                 session?.isValidFor(executionContext.authenticationIdentity, registrationId, executionContext.subscriptionId, now()) == true) {
                 persistAndSend(execution, request, wire)
             } else {
@@ -181,7 +198,70 @@ internal class OperationExecutor(
     }
 
     private fun alive(execution: Execution): Boolean = active === execution && execution.token == epoch &&
-        canContinue() && contextValid(execution.context)
+        canContinue() && contextValid(execution.context) && now() < execution.deadline && !execution.timedOut
+
+    private fun expire(execution: Execution) {
+        if (execution.timedOut) return
+        execution.timedOut = true
+        execution.pin?.fill('\u0000')
+        execution.pendingUssdResult?.let { callback ->
+            execution.pendingUssdResult = null
+            gateway.abandon(callback)
+        }
+        execution.operationIds.forEach(pendingPresentations::remove)
+        wallet.transact(block = {
+            var changed = false
+            execution.operationIds.forEach { id ->
+                val operation = snapshot().operations.singleOrNull { it.id == id }
+                if (operation?.status in setOf(OperationStatus.SUBMITTING, OperationStatus.AWAITING_CONFIRMATION)) {
+                    changed = expireWaitingOperation(id, now().toEpochMilli()) || changed
+                }
+            }
+            changed
+        }, onFailure = { finish(execution) }, onSuccess = { changed ->
+            // A new request must see the committed timeout before the pending-operation guard runs.
+            finish(execution)
+            if (changed && presentationContextValid(execution)) onResult("Tiempo de espera agotado")
+        })
+    }
+
+    private fun presentationContextValid(execution: Execution): Boolean = execution.token == epoch &&
+        canContinue() && contextValid(execution.context) && (active == null || active === execution) &&
+        pendingPresentations.values.none { it !== execution && it.deadline > execution.deadline }
+
+    private fun canPresent(execution: Execution): Boolean = !execution.timedOut && now() < execution.deadline &&
+        presentationContextValid(execution)
+
+    private fun presentResult(operationId: String, message: String) {
+        val execution = pendingPresentations.remove(operationId) ?: return
+        if (canPresent(execution)) onResult(message)
+    }
+
+    private fun send(execution: Execution, command: UssdCommand, onResult: (UssdResult) -> Unit) {
+        lateinit var callback: (UssdResult) -> Unit
+        callback = response@{ result ->
+            if (execution.pendingUssdResult !== callback) return@response
+            execution.pendingUssdResult = null
+            onResult(result)
+        }
+        execution.pendingUssdResult = callback
+        gateway.send(command, execution.context.subscriptionId, callback)
+    }
+
+    private fun fresh(record: BankSmsRecord, started: Instant): Boolean =
+        smsEvidenceAfter(record.receivedAt, record.sentAt, started, now())
+
+    private fun soleQueryCandidate(record: BankSmsRecord, operationId: String, balance: Boolean): Boolean {
+        val operation = wallet.snapshot.operations.singleOrNull { it.id == operationId } ?: return false
+        return wallet.snapshot.operations.filter { candidate ->
+            candidate.subscriptionId == operation.subscriptionId && candidate.providerId == operation.providerId &&
+                candidate.profileId == operation.profileId && !candidate.restored &&
+                candidate.status in setOf(OperationStatus.SUBMITTING, OperationStatus.AWAITING_CONFIRMATION, OperationStatus.UNCERTAIN) &&
+                fresh(record, Instant.ofEpochMilli(candidate.startedAt)) &&
+                (if (balance) candidate.specId.endsWith(".balance") || candidate.specId in setOf("bandec.card-balance", "bandec.origin-balance")
+                else candidate.specId == operation.specId)
+        }.singleOrNull()?.id == operationId
+    }
 
     private fun authorizedRequest(execution: Execution, request: ServiceRequest): ServiceRequest {
         val spec = requireNotNull(OperationCatalog.find(request.operationId))
@@ -261,8 +341,16 @@ internal class OperationExecutor(
         if (spec.transport == OperationTransport.INTERACTIVE_USSD && encoded.size != 1) {
             onResult("La solicitud no cabe en un único diálogo del operador."); finish(execution); return
         }
-        val record = operationRecord(execution, request, spec, authenticationStep || balanceChallenge)
-        if (authenticationStep || balanceChallenge) authentication = Authentication(record.id, execution, now(), balanceChallenge)
+        val explicitAccess = request === execution.request && spec.id.endsWith(".authenticate")
+        val fulfillsRequest = explicitAccess || balanceChallenge && (
+            execution.request.operationId.endsWith(".authenticate") || spec.effect == OperationEffect.QUERY &&
+                request.operationId == execution.request.operationId && request.source == execution.request.source &&
+                request.currency == execution.request.currency && request.values == execution.request.values &&
+                (execution.wire == null || execution.wire.map { it.valueForTransport() } == wire?.map { it.valueForTransport() }))
+        val record = operationRecord(execution, request, spec, authenticationStep || balanceChallenge && !fulfillsRequest)
+        execution.operationIds += record.id
+        pendingPresentations[record.id] = execution
+        if (authenticationStep || balanceChallenge || explicitAccess) authentication = Authentication(record.id, execution, now(), balanceChallenge, fulfillsRequest)
         wallet.transact("No se pudo guardar la operación. No se ha enviado.", block = {
             execution.context.registrationId?.let { id ->
                 check(snapshot().registrations.singleOrNull { it.id == id } == execution.context.registration) { "El registro de acceso ha cambiado" }
@@ -293,7 +381,7 @@ internal class OperationExecutor(
                         else "La llamada se ha enviado al sistema. El consumo no está confirmado.")
                     finish(execution)
                 }, transport = spec.transport))
-            } else sendPart(execution, request, record, encoded, 0, authenticationStep || balanceChallenge)
+            } else sendPart(execution, request, record, encoded, 0, authenticationStep || balanceChallenge || explicitAccess)
         })
     }
 
@@ -336,15 +424,14 @@ internal class OperationExecutor(
                          index: Int, authenticationStep: Boolean) {
         if (!alive(execution)) { markUncertain(operation.id); finish(execution); return }
         if (index == 0 && request.operationId == "bandec.recent-operations") {
-            historyQueries.removeAll { now() >= it.sentAt.plusSeconds(30) }
             historyQueries += HistoryQuery(operation.id, execution.context, now())
         }
         if (index == 0 && request.operationId == "service.fuel") {
             val wait = FuelPurchaseWait(operation.id, execution.context.subscriptionId, now())
             fuelPurchases += wait
-            main.postDelayed({ fuelPurchases.remove(wait); markUncertain(operation.id) }, 30_000)
         }
-        gateway.send(parts[index], execution.context.subscriptionId) { result ->
+        send(execution, parts[index]) { result ->
+            if (result == UssdResult.TimedOut || now() >= execution.deadline) { expire(execution); return@send }
             if (!alive(execution)) { markUncertain(operation.id); finish(execution); return@send }
             val response = (result as? UssdResult.Response)?.let { BankResponse.parse(it.text) }
             fuelPurchases.singleOrNull { it.operationId == operation.id }?.let { wait ->
@@ -371,31 +458,30 @@ internal class OperationExecutor(
                 }
                 return@send
             }
+            if (authenticationStep && response == BankResponse.OTHER) {
+                markUncertain(operation.id)
+                onResult("No se pudo confirmar el acceso con la respuesta del proveedor.")
+                finish(execution); return@send
+            }
             if (response == BankResponse.PROCESSING && index + 1 < parts.size) {
                 sendPart(execution, request, operation, parts, index + 1, authenticationStep)
                 return@send
             }
             if (response != BankResponse.PROCESSING && parts.size > 1 || result !is UssdResult.Response) {
                 markUncertain(operation.id)
-                onResult("No se pudo confirmar el resultado. Revisa la operación antes de repetirla.")
+                onResult("No se pudo confirmar el resultado.")
                 finish(execution); return@send
             }
             wallet.transact(block = { updateOperationStatus(operation.id, OperationStatus.SUBMITTING, OperationStatus.AWAITING_CONFIRMATION, now().toEpochMilli()) })
             if (authenticationStep) {
                 val wait = authentication?.takeIf { it.operationId == operation.id } ?: return@send
                 wait.accepted = response == BankResponse.PROCESSING
+                if (wait.accepted && wait !in acknowledgedAccesses) acknowledgedAccesses += wait
                 completeAuthentication(wait)
             } else {
                 onResult("Solicitud enviada. El proveedor aún no ha confirmado el resultado.")
                 finish(execution)
             }
-            main.postDelayed({
-                markUncertain(operation.id)
-                if (authentication?.operationId == operation.id) {
-                    onResult("El proveedor aún no ha confirmado el acceso. No se ha enviado la operación pendiente.")
-                    finish(execution)
-                }
-            }, 30_000)
         }
     }
 
@@ -430,6 +516,7 @@ internal class OperationExecutor(
             parameters = baseRecord.parameters + if (select) mapOf("verification" to "SELECTED_CARD_BALANCE", "readOperationId" to flow.readId)
                 else mapOf("wireSource" to "0000"),
         )
+        execution.operationIds += record.id
         if (!select) flow.startedReading = Instant.ofEpochMilli(record.startedAt)
         wallet.transact("No se pudo guardar la consulta. No se ha enviado.", block = {
             check(snapshot().registrations.singleOrNull { it.id == execution.context.registrationId } == execution.context.registration)
@@ -437,7 +524,8 @@ internal class OperationExecutor(
             check(updateOperationStatus(record.id, OperationStatus.PREPARED, OperationStatus.SUBMITTING, now().toEpochMilli()))
         }, onFailure = { abortCardQuery(flow, "No se pudo guardar la consulta del origen.") }, onSuccess = {
             if (!alive(execution) || cardQuery !== flow) { markUncertain(record.id); return@transact }
-            gateway.send(command, execution.context.subscriptionId) { result ->
+            send(execution, command) { result ->
+                if (result == UssdResult.TimedOut || now() >= execution.deadline) { expire(execution); return@send }
                 if (!alive(execution) || cardQuery !== flow) { markUncertain(record.id); return@send }
                 if (result !is UssdResult.Response || BankResponse.parse(result.text) != BankResponse.PROCESSING) {
                     abortCardQuery(flow, if (select) "No se pudo confirmar la selección de la tarjeta. No se ha consultado otro saldo."
@@ -446,25 +534,25 @@ internal class OperationExecutor(
                 }
                 wallet.transact(block = { updateOperationStatus(record.id, OperationStatus.SUBMITTING, OperationStatus.AWAITING_CONFIRMATION, now().toEpochMilli()) })
                 if (select) sendCardQueryStep(flow, select = false)
-                else { flow.accepted = true; completeCardQuery(flow) }
+                else { flow.accepted = true; acknowledgedCardQueries += flow; completeCardQuery(flow) }
             }
-            main.postDelayed({
-                if (cardQuery === flow) abortCardQuery(flow, "BANDEC aún no ha confirmado el origen. No se ha enviado dinero.")
-            }, 30_000)
         })
     }
 
     private fun abortCardQuery(flow: CardQuery, message: String) {
+        acknowledgedCardQueries.remove(flow)
         flow.selectId?.let(::markUncertain); markUncertain(flow.readId)
         if (cardQuery === flow) { onResult(message); finish(flow.execution) }
     }
 
     private fun completeCardQuery(flow: CardQuery) {
         val (record, result) = flow.evidence ?: return
-        if (cardQuery !== flow || !flow.accepted || flow.completing || !alive(flow.execution)) return
+        if (!flow.accepted || flow.completing || flow.execution.token != epoch || !canContinue() || !contextValid(flow.execution.context)) return
+        if (!soleQueryCandidate(record, flow.readId, balance = true)) return
         val message = result.message as? BankMessage.Balance ?: return
+        val evidenceAt = smsEvidenceTime(record.receivedAt, record.sentAt, now()) ?: return
         val latest = latestEvidence[flow.execution.context.subscriptionId]
-        if (latest != null && (latest.identity != flow.execution.context.authenticationIdentity || latest.at > record.receivedAt)) {
+        if (latest != null && (latest.identity != flow.execution.context.authenticationIdentity || latest.at > evidenceAt)) {
             abortCardQuery(flow, "El origen activo ha cambiado. No se ha enviado dinero."); return
         }
         val source = flow.execution.request.source
@@ -490,8 +578,9 @@ internal class OperationExecutor(
             val read = completeQuery(flow.readId, result.stored.eventId, now().toEpochMilli())
             read && (flow.selectId == null || completeQuery(flow.selectId, result.stored.eventId, now().toEpochMilli()))
         }, onFailure = { abortCardQuery(flow, "No se pudo confirmar de forma segura la consulta.") }, onSuccess = { completed ->
-            if (!completed || !alive(flow.execution) || cardQuery !== flow) { abortCardQuery(flow, "No se pudo confirmar el origen de la consulta."); return@transact }
-            if (flow.forMoney) {
+            acknowledgedCardQueries.remove(flow)
+            if (!completed || flow.execution.token != epoch || !canContinue() || !contextValid(flow.execution.context)) { abortCardQuery(flow, "No se pudo confirmar el origen de la consulta."); return@transact }
+            if (flow.forMoney && alive(flow.execution) && cardQuery === flow) {
                 if (balance.available.currency != flow.execution.request.currency) {
                     abortCardQuery(flow, "La cuenta de origen está en ${balance.available.currency.name}. Revisa la moneda y el importe de la transferencia.")
                     return@transact
@@ -500,7 +589,8 @@ internal class OperationExecutor(
                 cardQuery = null
                 persistAndSend(flow.execution, flow.execution.request, flow.execution.wire)
             } else {
-                onResult("${balance.account.orEmpty()} · ${balance.available.amount.toPlainString()} ${balance.available.currency.name}")
+                if (canPresent(flow.execution))
+                    onResult("${balance.account.orEmpty()} · ${balance.available.amount.toPlainString()} ${balance.available.currency.name}")
                 finish(flow.execution)
             }
         })
@@ -508,9 +598,12 @@ internal class OperationExecutor(
 
     fun observed(record: BankSmsRecord, result: SmsIngestResult) {
         if (!result.evidenceEligible || record.subscriptionId == null) return
+        active?.takeIf { now() >= it.deadline }?.let(::expire)
+        val trackedCardReads = (acknowledgedCardQueries + listOfNotNull(cardQuery)).map { it.readId }.toSet()
+        val trackedHistoryQueries = historyQueries.map { it.operationId }.toSet()
+        val evidenceAt = smsEvidenceTime(record.receivedAt, record.sentAt, now())
         if (result.stored.fuelReceiptIds.isNotEmpty()) {
-            fuelPurchases.filter { it.subscriptionId == record.subscriptionId && record.receivedAt >= it.sentAt &&
-                record.receivedAt <= now() && now() < it.sentAt.plusSeconds(30) }.forEach {
+            fuelPurchases.filter { it.subscriptionId == record.subscriptionId && fresh(record, it.sentAt) }.forEach {
                 it.receiptIds += result.stored.fuelReceiptIds
                 settleFuel(it)
             }
@@ -518,7 +611,7 @@ internal class OperationExecutor(
         val message = result.message
         if (message is BankHistory && message.bank == Bank.BANDEC) {
             val waits = historyQueries.filter { it.context.authenticationIdentity == ProviderIdentity(ProviderId.BANDEC) &&
-                it.context.subscriptionId == record.subscriptionId && record.receivedAt >= it.sentAt && now() < it.sentAt.plusSeconds(30) }
+                it.context.subscriptionId == record.subscriptionId && fresh(record, it.sentAt) }
             waits.singleOrNull()?.let { it.evidence = record to result; bindHistory(it) }
         }
         val observedBank = when (message) { is BankMessage.Authenticated -> message.bank; is BankMessage.Balance -> message.bank; else -> null }
@@ -526,38 +619,44 @@ internal class OperationExecutor(
             is BankMessage.ProviderAuthenticated -> message.identity
             else -> observedBank?.let(ProviderIdentity::forBank)
         }
-        if (observedIdentity != null) {
+        if (observedIdentity != null && evidenceAt != null) {
             val latest = latestEvidence[record.subscriptionId]
-            if (!result.stored.duplicate && (latest == null || record.receivedAt >= latest.at))
+            if (!result.stored.duplicate && (latest == null || evidenceAt >= latest.at))
                 evidenceRevision[record.subscriptionId] = (evidenceRevision[record.subscriptionId] ?: 0L) + 1
-            if (latest == null || record.receivedAt > latest.at)
-                latestEvidence[record.subscriptionId] = SessionEvidence(observedIdentity, record.receivedAt, result.stored.canonicalEventId)
-            else if (record.receivedAt == latest.at && (latest.identity != observedIdentity || latest.eventId != result.stored.canonicalEventId))
-                latestEvidence[record.subscriptionId] = SessionEvidence(null, record.receivedAt, result.stored.canonicalEventId)
+            if (latest == null || evidenceAt > latest.at)
+                latestEvidence[record.subscriptionId] = SessionEvidence(observedIdentity, evidenceAt, result.stored.canonicalEventId)
+            else if (evidenceAt == latest.at && (latest.identity != observedIdentity || latest.eventId != result.stored.canonicalEventId))
+                latestEvidence[record.subscriptionId] = SessionEvidence(null, evidenceAt, result.stored.canonicalEventId)
         }
-        val flow = cardQuery
-        if (flow != null && message is BankMessage.Balance && record.subscriptionId == flow.execution.context.subscriptionId &&
-            flow.startedReading?.let { record.receivedAt >= it } == true) {
-            if (message.bank != Bank.BANDEC) abortCardQuery(flow, "El banco que respondió no coincide con el origen seleccionado.")
-            else { flow.evidence = record to result; completeCardQuery(flow) }
+        if (message is BankMessage.Balance) {
+            (acknowledgedCardQueries + listOfNotNull(cardQuery)).distinct().filter { flow ->
+                flow.execution.token == epoch && record.subscriptionId == flow.execution.context.subscriptionId &&
+                    flow.startedReading?.let { fresh(record, it) } == true
+            }.forEach { flow ->
+                if (message.bank != Bank.BANDEC) abortCardQuery(flow, "El banco que respondió no coincide con el origen seleccionado.")
+                else { flow.evidence = record to result; completeCardQuery(flow) }
+            }
         }
         session?.let { current -> if (observedIdentity != null && record.subscriptionId == current.subscriptionId &&
-            record.receivedAt >= current.authenticatedAt && current.identity != observedIdentity) session = null }
-        val wait = authentication
+            evidenceAt != null && evidenceAt >= current.authenticatedAt && current.identity != observedIdentity) session = null }
+        acknowledgedAccesses.removeAll { now() >= it.started.plusSeconds(3600) }
+        val accessCandidates = (acknowledgedAccesses + listOfNotNull(authentication)).distinct().filter { candidate ->
+            candidate.execution.token == epoch && contextValid(candidate.execution.context) &&
+                record.subscriptionId == candidate.execution.context.subscriptionId && fresh(record, candidate.started) &&
+                observedIdentity == candidate.execution.context.authenticationIdentity &&
+                (message is BankMessage.Authenticated || message is BankMessage.ProviderAuthenticated || candidate.balanceChallenge && message is BankMessage.Balance)
+        }
+        val wait = accessCandidates.singleOrNull()
         val authenticationOperationId = wait?.operationId
-        if (wait != null && record.subscriptionId == wait.execution.context.subscriptionId &&
-            record.receivedAt >= wait.started && record.receivedAt <= now() && now() < wait.started.plusSeconds(30) &&
-            observedIdentity == wait.execution.context.authenticationIdentity &&
-            (message is BankMessage.Authenticated || message is BankMessage.ProviderAuthenticated || wait.balanceChallenge && message is BankMessage.Balance)) {
+        if (wait != null) {
             wait.evidence = record to result
             completeAuthentication(wait)
         }
         wallet.transact(block = {
             val snapshot = snapshot()
-            if (message is BankMessage.Balance) persistBalances(snapshot, record, message)
             val candidates = snapshot.operations.filter { operation ->
                 operation.status in setOf(OperationStatus.SUBMITTING, OperationStatus.AWAITING_CONFIRMATION, OperationStatus.UNCERTAIN) &&
-                    !operation.restored && operation.subscriptionId == record.subscriptionId && operation.startedAt <= record.receivedAt.toEpochMilli() &&
+                    !operation.restored && operation.subscriptionId == record.subscriptionId && fresh(record, Instant.ofEpochMilli(operation.startedAt)) &&
                     OperationResultProjection.couldBelongTo(operation, message)
             }
             val financial = candidates.singleOrNull()?.takeIf { OperationResultProjection.matches(it, message) }
@@ -570,90 +669,119 @@ internal class OperationExecutor(
                     operation.id != authenticationOperationId && operation.bankCode == observedBank?.code &&
                         operation.providerId == observedIdentity?.provider?.name && operation.profileId == observedIdentity?.profile?.name &&
                         operation.subscriptionId == record.subscriptionId &&
-                        operation.startedAt <= record.receivedAt.toEpochMilli() && !operation.restored &&
-                        operation.status in setOf(OperationStatus.SUBMITTING, OperationStatus.AWAITING_CONFIRMATION) &&
+                        fresh(record, Instant.ofEpochMilli(operation.startedAt)) && !operation.restored &&
+                        operation.status in setOf(OperationStatus.SUBMITTING, OperationStatus.AWAITING_CONFIRMATION, OperationStatus.UNCERTAIN) &&
                         ((message is BankMessage.Authenticated || message is BankMessage.ProviderAuthenticated) && operation.specId.endsWith(".authenticate") ||
-                            message is BankMessage.Balance && operation.specId.endsWith(".balance"))
+                            message is BankMessage.Balance && (operation.specId.endsWith(".balance") ||
+                                operation.specId in setOf("bandec.card-balance", "bandec.origin-balance")) &&
+                                balanceQuerySourceMatches(operation, message, snapshot))
                 }
-                matches.singleOrNull()?.let { if (completeQuery(it.id, result.stored.eventId, now().toEpochMilli())) completedQueryId = it.id }
+                matches.singleOrNull()?.takeIf { it.id !in trackedCardReads }?.let { query ->
+                    if (completeQuery(query.id, result.stored.eventId, now().toEpochMilli())) {
+                        completedQueryId = query.id
+                        // Recover only the journal result; never rebuild a live card flow or origin proof.
+                        snapshot.operations.filter { it.specId == "bandec.card-select" &&
+                            it.parameters["readOperationId"] == query.id }.forEach {
+                            completeQuery(it.id, result.stored.eventId, now().toEpochMilli())
+                        }
+                    }
+                }
+            }
+            if (message is BankHistory && message.bank == Bank.BANDEC) {
+                val queries = snapshot.operations.filter { operation ->
+                    !operation.restored && operation.specId == "bandec.recent-operations" &&
+                        operation.kind == operation.specId && operation.providerId == "BANDEC" && operation.profileId == "PERSONAL" &&
+                        operation.bankCode == message.bank.code && operation.subscriptionId == record.subscriptionId &&
+                        operation.amount == null && operation.destination.isEmpty() &&
+                        operation.status in setOf(OperationStatus.SUBMITTING, OperationStatus.AWAITING_CONFIRMATION, OperationStatus.UNCERTAIN) &&
+                        fresh(record, Instant.ofEpochMilli(operation.startedAt))
+                }
+                queries.singleOrNull()?.takeIf { it.id !in trackedHistoryQueries }?.let {
+                    bindHistoryToQuery(result.stored.eventId, it.id, now().toEpochMilli())
+                }
             }
             financial?.id to completedQueryId
         }, onSuccess = { (id, queryId) ->
             val confirmed = wallet.snapshot.operations.singleOrNull { it.id == id && it.status == OperationStatus.CONFIRMED }
             if (confirmed != null) {
                 onConfirmed(confirmed, message)
-                onResult("Operación confirmada por el comprobante del banco.")
+                if (confirmed.timeoutAt == null)
+                    presentResult(confirmed.id, "Operación confirmada por el comprobante del banco.")
             }
             if (queryId != null) {
-                val operation = wallet.snapshot.operations.singleOrNull { it.id == queryId }
-                if (message is BankMessage.Balance) onResult(message.accounts.joinToString("\n") {
+                if (message is BankMessage.Balance) presentResult(queryId, message.accounts.joinToString("\n") {
                     listOfNotNull(it.label, it.account, "${it.available.amount.toPlainString()} ${it.available.currency.name}").joinToString(" · ")
                 })
-                else if (operation?.registrationId != null && observedIdentity != null) {
-                    session = ProviderSession(observedIdentity, operation.registrationId, operation.subscriptionId, record.receivedAt)
-                    onResult("Acceso confirmado por ${observedIdentity.provider.name}.")
-                }
             }
         })
     }
 
-    private fun WalletRepository.persistBalances(snapshot: WalletSnapshot, record: BankSmsRecord, message: BankMessage.Balance) {
-        val registrations = snapshot.registrations.filter { it.bankCode == message.bank.code && it.subscriptionId == record.subscriptionId && it.enabled }
-        val registration = registrations.singleOrNull()
-        val rows = message.accounts.map { balance ->
-            val cards = snapshot.cards.filter { it.registrationId == registration?.id &&
-                balance.account?.let { mask -> matchesAccount(mask, it.number) } == true && (it.currency == null || it.currency == balance.available.currency.name) }
-            val card = cards.singleOrNull()
-            val accounts = snapshot.accounts.filter { it.registrationId == registration?.id &&
-                balance.account?.let { mask -> mask == it.number || matchesAccount(mask, it.number) } == true &&
-                (it.currency == null || it.currency == balance.available.currency.name) }
-            val account = accounts.singleOrNull().takeIf { card == null }
-            BalanceRecord("${message.bank.code}:${record.subscriptionId}:${registration?.id.orEmpty()}:${card?.id ?: account?.id.orEmpty()}:${balance.account.orEmpty()}:${balance.available.currency}",
-                message.bank.code, requireNotNull(record.subscriptionId), record.receivedAt.toEpochMilli(), balance.account,
-                balance.available.amount.toPlainString(), balance.available.currency.name, balance.ledger?.amount?.toPlainString(),
-                balance.label, registration?.id, card?.id, account?.id)
-        }
-        upsertBalances(rows)
+    private fun balanceQuerySourceMatches(operation: OperationRecord, message: BankMessage.Balance, snapshot: WalletSnapshot): Boolean {
+        val cardRead = operation.specId in setOf("bandec.card-balance", "bandec.origin-balance")
+        if (operation.source == "0000") return !cardRead || message.accounts.size == 1
+        val balance = message.accounts.filter { it.account?.let { mask -> matchesAccount(mask, operation.source) } == true }
+            .singleOrNull() ?: return false
+        if (!cardRead) return true
+        val known = (snapshot.cards.filter { it.registrationId == operation.registrationId }.map { it.number } +
+            snapshot.accounts.filter { it.registrationId == operation.registrationId }.map { it.number } + operation.source)
+            .distinct().filter { matchesAccount(requireNotNull(balance.account), it) }
+        return known.singleOrNull() == operation.source
     }
 
     private fun completeAuthentication(wait: Authentication) {
         val (record, result) = wait.evidence ?: return
-        if (authentication !== wait || !wait.accepted || wait.completing || !alive(wait.execution)) return
+        if (!wait.accepted || wait.completing || wait.execution.token != epoch || !canContinue() || !contextValid(wait.execution.context)) return
+        if (!soleQueryCandidate(record, wait.operationId, wait.balanceChallenge)) return
         val latest = latestEvidence[wait.execution.context.subscriptionId]
-        if (latest != null && latest.at >= record.receivedAt && latest.identity != wait.execution.context.authenticationIdentity) {
-            onResult("El proveedor activo no coincide con el acceso seleccionado. No se ha enviado la operación.")
+        val evidenceAt = smsEvidenceTime(record.receivedAt, record.sentAt, now()) ?: return
+        if (latest != null && latest.at >= evidenceAt && latest.identity != wait.execution.context.authenticationIdentity) {
+            if (canPresent(wait.execution))
+                onResult("El proveedor activo no coincide con el acceso seleccionado. No se ha enviado la operación.")
             finish(wait.execution); return
         }
         val registrationId = wait.execution.context.registrationId ?: return
         wait.completing = true
         wallet.transact(block = { completeQuery(wait.operationId, result.stored.eventId, now().toEpochMilli()) }, onSuccess = { completed ->
-            if (!completed || !alive(wait.execution)) { finish(wait.execution); return@transact }
-            authentication = null
-            session = ProviderSession(wait.execution.context.authenticationIdentity, registrationId, wait.execution.context.subscriptionId, record.receivedAt)
-            persistAndSend(wait.execution, wait.execution.request, wait.execution.wire)
+            acknowledgedAccesses.remove(wait)
+            if (!completed || wait.execution.token != epoch || !canContinue() || !contextValid(wait.execution.context)) { finish(wait.execution); return@transact }
+            val latest = latestEvidence[wait.execution.context.subscriptionId]
+            if (latest != null && (latest.at > evidenceAt || latest.identity != wait.execution.context.authenticationIdentity)) {
+                finish(wait.execution); return@transact
+            }
+            session = ProviderSession(wait.execution.context.authenticationIdentity, registrationId, wait.execution.context.subscriptionId, evidenceAt)
+            sessionContext = wait.execution.context
+            if (alive(wait.execution)) {
+                authentication = null
+                if (wait.fulfillsRequest) {
+                    val balance = result.message as? BankMessage.Balance
+                    if (balance != null) onResult(balance.accounts.joinToString("\n") {
+                        listOfNotNull(it.label, it.account, "${it.available.amount.toPlainString()} ${it.available.currency.name}").joinToString(" · ")
+                    }) else onResult("Acceso confirmado por ${wait.execution.context.authenticationIdentity.provider.name}.")
+                    finish(wait.execution)
+                } else persistAndSend(wait.execution, wait.execution.request, wait.execution.wire)
+            }
         }, onFailure = { finish(wait.execution) })
     }
 
     private fun bindHistory(wait: HistoryQuery) {
-        val (_, result) = wait.evidence ?: return
-        if (!wait.accepted || wait !in historyQueries || !contextValid(wait.context) || now() >= wait.sentAt.plusSeconds(30)) return
+        val (record, result) = wait.evidence ?: return
+        if (!wait.accepted || wait !in historyQueries || !contextValid(wait.context)) return
         val candidates = historyQueries.filter { it.context.subscriptionId == wait.context.subscriptionId &&
-            it.context.authenticationIdentity == wait.context.authenticationIdentity && now() < it.sentAt.plusSeconds(30) }
+            it.context.authenticationIdentity == wait.context.authenticationIdentity && fresh(record, it.sentAt) }
         if (candidates.singleOrNull() !== wait) return
         historyQueries.remove(wait)
         wallet.transact(block = { bindHistoryToQuery(result.stored.eventId, wait.operationId, now().toEpochMilli()) },
-            onSuccess = { if (it) onResult("Últimas operaciones recibidas de BANDEC.") })
+            onSuccess = { if (it) presentResult(wait.operationId, "Últimas operaciones recibidas de BANDEC.") })
     }
 
     /** Coupon secrets remain in the encrypted store. Only immutable purchase evidence participates here. */
     private fun settleFuel(wait: FuelPurchaseWait) {
-        if (!wait.accepted || wait.settling || wait !in fuelPurchases || wait.receiptIds.isEmpty() || now() >= wait.sentAt.plusSeconds(30)) return
+        if (!wait.accepted || wait.settling || wait !in fuelPurchases || wait.receiptIds.isEmpty()) return
         wait.settling = true
         val receiptIds = wait.receiptIds.toSet()
         wait.receiptIds.removeAll(receiptIds)
         wallet.transact("No se pudo vincular el comprobante de combustible", block = {
             val current = snapshot()
-            if (now() >= wait.sentAt.plusSeconds(30)) return@transact false
             val observations = current.fuelObservations.filter { it.receiptId in receiptIds && it.kind == "PURCHASE" && it.result == "APPLIED" }
             for (observation in observations) {
                 val proof = observation.purchaseEvidence ?: continue
@@ -669,7 +797,7 @@ internal class OperationExecutor(
             wait.settling = false
             if (confirmed) {
                 fuelPurchases.remove(wait)
-                onResult("Compra del cupón confirmada por el comprobante del banco.")
+                presentResult(wait.operationId, "Compra del cupón confirmada por el comprobante del banco.")
             } else if (wait.receiptIds.isNotEmpty()) settleFuel(wait)
         })
     }

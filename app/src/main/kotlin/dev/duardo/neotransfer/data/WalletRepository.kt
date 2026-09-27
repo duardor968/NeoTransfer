@@ -68,6 +68,7 @@ data class OperationRecord(
     val specId: String = kind, val providerId: String? = null, val profileId: String = "PERSONAL",
     val parameters: Map<String, String> = emptyMap(),
     val httpEvidence: BulevarHttpEvidence? = null,
+    val timeoutAt: Long? = null,
 )
 
 enum class EventSource { BROADCAST, INBOX, LEGACY }
@@ -79,6 +80,7 @@ data class EventRecord(
     val canonicalEventId: String, val bodyWithheld: Boolean = false,
     val originalSource: EventSource? = null, val originalSourceId: String? = null,
     val evidenceEligible: Boolean = true,
+    val sentAt: Long? = null,
 )
 
 data class ReceiptRecord(
@@ -117,6 +119,7 @@ data class BalanceRecord(
     val account: String?, val available: String, val currency: String,
     val ledger: String? = null, val label: String? = null, val registrationId: String? = null,
     val cardId: String? = null, val accountId: String? = null,
+    val sentAt: Long? = null,
 )
 
 data class UsedReference(val bankCode: String, val reference: String, val operationId: String? = null)
@@ -124,7 +127,8 @@ data class LegacyMetadataRecord(val key: String, val safeValue: String, val issu
 /** Immutable, non-secret purchase facts captured before the source body is withheld. */
 data class FuelPurchaseEvidence(val couponId: String, val serial: String, val bankCode: String?,
     val subscriptionId: Int?, val bankReference: String, val tmReference: String,
-    val paidAmount: String, val currency: String, val receivedAt: Long, val evidenceEligible: Boolean)
+    val paidAmount: String, val currency: String, val receivedAt: Long, val evidenceEligible: Boolean,
+    val sentAt: Long? = null)
 
 data class FuelObservation(val eventId: String, val position: Int, val kind: String, val result: String,
     val couponId: String? = null, val creditedAmount: String? = null, val receiptId: String? = null, val rejectedRows: Int = 0,
@@ -159,6 +163,7 @@ data class IncomingEvent(
     val evidenceEligible: Boolean = true,
     val history: IncomingHistory? = null,
     val fuelUpdate: FuelSmsUpdate? = null,
+    val sentAt: Long? = null,
 ) {
     override fun toString(): String = "IncomingEvent(source=$source, sourceId=$sourceId)"
 }
@@ -185,6 +190,8 @@ interface WalletRepository : AutoCloseable {
     fun deleteService(id: String)
     fun putOperation(value: OperationRecord)
     fun updateOperationStatus(id: String, expected: OperationStatus, status: OperationStatus, at: Long): Boolean
+    /** A wait expired; the operation may still receive later positive evidence. */
+    fun expireWaitingOperation(id: String, at: Long): Boolean
     fun setSettings(value: WalletSettings)
     fun setRefresh(value: RefreshRequest?)
     fun replaceBalances(bankCode: String, subscriptionId: Int, values: List<BalanceRecord>)
