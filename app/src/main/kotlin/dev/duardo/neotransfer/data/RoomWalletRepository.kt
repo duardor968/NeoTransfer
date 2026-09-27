@@ -209,22 +209,48 @@ class RoomWalletRepository internal constructor(internal val database: WalletDat
         dao.deleteBalances(bankCode, subscriptionId)
         values.forEach { dao.put(BalanceRow(it)) }
     }
-    override fun upsertBalances(values: List<BalanceRecord>) = write {
+    override fun upsertBalances(values: List<BalanceRecord>) = write { putBalances(values); Unit }
+    private fun putBalances(values: List<BalanceRecord>): Boolean {
         values.forEach(::validateBalance)
-        val existing = dao.balances().associateBy { it.value.id }
+        var resolved = true
         values.forEach { value ->
-            val old = existing[value.id]?.value
+            val existing = dao.balances().map { it.value }
+            val old = existing.singleOrNull { it.id == value.id }
             require(old == null || (old.bankCode == value.bankCode && old.subscriptionId == value.subscriptionId &&
                 old.registrationId == value.registrationId && old.cardId == value.cardId && old.accountId == value.accountId))
             val incomingOrder = smsEvidenceTime(Instant.ofEpochMilli(value.at), value.sentAt?.let(Instant::ofEpochMilli),
                 Instant.ofEpochMilli(value.at))?.toEpochMilli()
-            val oldOrder = old?.let { smsEvidenceTime(Instant.ofEpochMilli(it.at), it.sentAt?.let(Instant::ofEpochMilli),
-                Instant.ofEpochMilli(it.at))?.toEpochMilli() }
-            if (old == null || incomingOrder != null && (oldOrder == null && value.at >= old.at ||
-                oldOrder != null && incomingOrder > oldOrder) || incomingOrder == null && oldOrder == null && value.at >= old.at)
-                dao.put(BalanceRow(value))
+            val peers = existing.filter { sameBalanceInstrument(it, value) }.ifEmpty { listOfNotNull(old) }
+            val peerOrders = peers.map { previous -> previous to smsEvidenceTime(Instant.ofEpochMilli(previous.at),
+                previous.sentAt?.let(Instant::ofEpochMilli), Instant.ofEpochMilli(previous.at))?.toEpochMilli() }
+            if (peerOrders.any { (previous, previousOrder) ->
+                incomingOrder != null && (previousOrder != null && incomingOrder <= previousOrder ||
+                    previousOrder == null && value.at < previous.at) ||
+                    incomingOrder == null && (previousOrder != null || value.at < previous.at)
+            }) {
+                val newer = incomingOrder != null && peerOrders.all { (_, order) ->
+                    order != null && order > incomingOrder
+                } && peers.map { it.available }.distinct().size == 1
+                val same = incomingOrder != null && peerOrders.all { (previous, order) ->
+                    order == incomingOrder && previous.available == value.available
+                }
+                if (!newer && !same) resolved = false
+                return@forEach
+            }
+            peers.filter { it.id != value.id }.forEach { previous ->
+                dao.put(BalanceRow(previous.copy(at = value.at, sentAt = value.sentAt,
+                    available = value.available, ledger = value.ledger)))
+            }
+            dao.put(BalanceRow(value))
         }
+        return resolved
     }
+
+    private fun sameBalanceInstrument(a: BalanceRecord, b: BalanceRecord): Boolean =
+        a.bankCode == b.bankCode && a.subscriptionId == b.subscriptionId &&
+            a.registrationId != null && a.registrationId == b.registrationId && a.currency == b.currency &&
+            (a.cardId != null && a.cardId == b.cardId && a.accountId == null && b.accountId == null ||
+                a.accountId != null && a.accountId == b.accountId && a.cardId == null && b.cardId == null)
 
     override fun markReferenceUsed(value: UsedReference): Boolean = write { claimReference(value) }
     internal fun claimReference(value: UsedReference): Boolean {
@@ -413,13 +439,57 @@ class RoomWalletRepository internal constructor(internal val database: WalletDat
             if (candidates.singleOrNull()?.id != operationId) return@write false
         }
         val reference = receipt.reference ?: return@write false
+        val remaining = transferRemaining(operation, receipt, event)
         if (!claimReference(UsedReference(receipt.bankCode, reference, operationId))) return@write false
         dao.put(row.copy(value = receipt.copy(operationId = operationId)))
+        val remainingResolved = remaining?.let { putBalances(listOf(it)) } == true
         dao.put(OperationRow(operation.copy(status = OperationStatus.CONFIRMED, updatedAt = at, reviewRequired = false,
-            amount = if (fullInvoice || servicePayment) receipt.amount else operation.amount)))
+            amount = if (fullInvoice || servicePayment) receipt.amount else operation.amount,
+            refreshTaken = operation.refreshTaken || remainingResolved)))
         row.normalizedReference?.let { WalletHistoryStore(this).reconcile(it) }
-        putRefresh(refresh)
+        putRefresh(if (remainingResolved) null else refresh)
         true
+    }
+
+    private fun transferRemaining(operation: OperationRecord, receipt: ReceiptRecord, event: EventRecord): BalanceRecord? {
+        if (receipt.kind != "SENT" || operation.kind != "TRANSFER" && !operation.specId.endsWith(".transfer")) return null
+        val bankCode = receipt.bankCode ?: return null
+        val subscriptionId = receipt.subscriptionId ?: return null
+        val message = event.body?.let { BankSmsParser().parse(event.sender, it) } as? BankMessage.TransferSent ?: return null
+        val remaining = message.remainingBalance ?: return null
+        if (message.bank.code != bankCode || message.reference != receipt.reference ||
+            message.beneficiary != receipt.party || message.amount.amount.compareTo(BigDecimal(receipt.amount)) != 0 ||
+            message.amount.currency.name != receipt.currency || remaining.currency.name != operation.currency) return null
+        val registration = dao.registrations().map { it.value }.singleOrNull {
+            it.id == operation.registrationId && it.enabled && it.bankCode == bankCode &&
+                it.subscriptionId == subscriptionId
+        } ?: return null
+        val cards = dao.cards().map { it.value }.filter { it.registrationId == registration.id &&
+            (it.currency == null || it.currency == receipt.currency) }
+        val accounts = dao.accounts().map { it.value }.filter { it.registrationId == registration.id &&
+            (it.currency == null || it.currency == receipt.currency) }
+        val products = cards.map { Triple(it.id, it.number, true) } + accounts.map { Triple(it.id, it.number, false) }
+        val source = operation.source
+        if (source == "0000" || source.isEmpty() || source.any { it !in '0'..'9' }) return null
+        val product = products.filter { (_, number) -> number == source }.singleOrNull() ?: return null
+        val peers = dao.balances().map { it.value }.filter { value ->
+            value.bankCode == bankCode && value.subscriptionId == subscriptionId &&
+                value.registrationId == registration.id && value.currency == receipt.currency &&
+                (product.third && value.cardId == product.first && value.accountId == null ||
+                    !product.third && value.accountId == product.first && value.cardId == null)
+        }
+        if (peers.any { value -> value.account?.let { mask ->
+            products.count { (_, number) -> number == mask || matchesAccount(mask, number) } != 1 ||
+                mask != source && !matchesAccount(mask, source)
+        } == true }) return null
+        val existing = peers.maxByOrNull { it.at }
+        return existing?.copy(at = event.receivedAt, sentAt = event.sentAt,
+            available = remaining.amount.toPlainString(), ledger = null)
+            ?: BalanceRecord("$bankCode:$subscriptionId:${registration.id}:${product.first}:$source:${receipt.currency}",
+                bankCode, subscriptionId, event.receivedAt, source,
+                remaining.amount.toPlainString(), receipt.currency, registrationId = registration.id,
+                cardId = product.first.takeIf { product.third }, accountId = product.first.takeUnless { product.third },
+                sentAt = event.sentAt)
     }
 
     override fun completeQuery(operationId: String, eventId: String, at: Long): Boolean = write {

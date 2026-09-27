@@ -40,6 +40,8 @@ internal class OperationExecutor(
     private val onConfirmed: (OperationRecord, BankMessage) -> Unit,
     private val accessGeneration: (String) -> Long = { 0 },
     private val scheduleTimeout: ((Long, () -> Unit) -> Unit)? = null,
+    private val scheduleBalanceRefresh: ((Long, () -> Unit) -> Unit)? = null,
+    private val canRefreshBalance: (ServiceExecutionContext) -> Boolean = { canContinue() },
 ) {
     var busy by mutableStateOf(true); private set
     private val main = Handler(Looper.getMainLooper())
@@ -49,6 +51,8 @@ internal class OperationExecutor(
     private var active: Execution? = null
     private var authentication: Authentication? = null
     private val pendingPresentations = mutableMapOf<String, Execution>()
+    private val balanceRefreshes = linkedMapOf<String, BalanceRefresh>()
+    private val bandecOrigins = mutableMapOf<Int, OriginProof>()
     private val acknowledgedAccesses = mutableListOf<Authentication>()
     private var cardQuery: CardQuery? = null
     private val acknowledgedCardQueries = mutableListOf<CardQuery>()
@@ -73,13 +77,17 @@ internal class OperationExecutor(
         val token: Int, val legacy: MoneyAction?, val prepared: ((OperationRecord) -> Unit)?,
         val wire: List<UssdCommand>?,
         val deadline: Instant = Instant.MAX,
+        val balanceRefresh: BalanceRefresh? = null,
     ) {
+        val refreshOf: String? get() = balanceRefresh?.operationId
         var originProof: OriginProof? = null
         val operationIds = mutableSetOf<String>()
         var timedOut = false
         var pendingUssdResult: ((UssdResult) -> Unit)? = null
     }
     private data class OriginProof(val source: SourceSelector, val currency: Currency, val revision: Long)
+    private class BalanceRefresh(val operationId: String, val request: ServiceRequest, val context: ServiceExecutionContext,
+                                 val token: Int, var dueAt: Instant, val deadline: Instant, val bandecProof: OriginProof?)
     private class CardQuery(val execution: Execution, val forMoney: Boolean) {
         val readId = UUID.randomUUID().toString()
         val selectId = if (execution.request.source is SourceSelector.Explicit) UUID.randomUUID().toString() else null
@@ -107,6 +115,7 @@ internal class OperationExecutor(
     fun invalidate() {
         active?.operationIds?.forEach(::markUncertain)
         pendingPresentations.clear()
+        balanceRefreshes.clear(); bandecOrigins.clear()
         acknowledgedAccesses.clear()
         acknowledgedCardQueries.clear()
         cardQuery?.let { flow -> flow.selectId?.let(::markUncertain); markUncertain(flow.readId) }; cardQuery = null
@@ -198,36 +207,47 @@ internal class OperationExecutor(
     }
 
     private fun alive(execution: Execution): Boolean = active === execution && execution.token == epoch &&
-        canContinue() && contextValid(execution.context) && now() < execution.deadline && !execution.timedOut
+        canContinue() && contextValid(execution.context) && now() < execution.deadline && !execution.timedOut &&
+        (execution.balanceRefresh?.let(::refreshContextValid) ?: true)
 
     private fun expire(execution: Execution) {
         if (execution.timedOut) return
-        execution.timedOut = true
-        execution.pin?.fill('\u0000')
-        execution.pendingUssdResult?.let { callback ->
-            execution.pendingUssdResult = null
-            gateway.abandon(callback)
+        val parent = execution.refreshOf?.let(pendingPresentations::get)?.takeIf { !it.timedOut }
+        if (parent != null) { expire(parent); return }
+        val expiring = listOf(execution) + (pendingPresentations.values + listOfNotNull(active)).filter {
+            it !== execution && !it.timedOut && it.refreshOf in execution.operationIds
+        }.distinct()
+        val operationIds = expiring.flatMap { it.operationIds }.toSet()
+        expiring.forEach { expired ->
+            expired.timedOut = true
+            expired.pin?.fill('\u0000')
+            expired.pendingUssdResult?.let { callback ->
+                expired.pendingUssdResult = null
+                gateway.abandon(callback)
+            }
         }
-        execution.operationIds.forEach(pendingPresentations::remove)
+        operationIds.forEach(balanceRefreshes::remove)
+        operationIds.forEach(pendingPresentations::remove)
         wallet.transact(block = {
             var changed = false
-            execution.operationIds.forEach { id ->
+            operationIds.forEach { id ->
                 val operation = snapshot().operations.singleOrNull { it.id == id }
                 if (operation?.status in setOf(OperationStatus.SUBMITTING, OperationStatus.AWAITING_CONFIRMATION)) {
                     changed = expireWaitingOperation(id, now().toEpochMilli()) || changed
                 }
             }
             changed
-        }, onFailure = { finish(execution) }, onSuccess = { changed ->
+        }, onFailure = { expiring.forEach(::finish) }, onSuccess = { changed ->
             // A new request must see the committed timeout before the pending-operation guard runs.
-            finish(execution)
-            if (changed && presentationContextValid(execution)) onResult("Tiempo de espera agotado")
+            val present = changed && presentationContextValid(execution)
+            expiring.forEach(::finish)
+            if (present) onResult("Tiempo de espera agotado")
         })
     }
 
-    private fun presentationContextValid(execution: Execution): Boolean = execution.token == epoch &&
-        canContinue() && contextValid(execution.context) && (active == null || active === execution) &&
-        pendingPresentations.values.none { it !== execution && it.deadline > execution.deadline }
+    private fun presentationContextValid(execution: Execution): Boolean = execution.refreshOf == null && execution.token == epoch &&
+        canContinue() && contextValid(execution.context) && (active == null || active === execution || active?.refreshOf in execution.operationIds) &&
+        pendingPresentations.values.none { it !== execution && it.refreshOf == null && it.deadline > execution.deadline }
 
     private fun canPresent(execution: Execution): Boolean = !execution.timedOut && now() < execution.deadline &&
         presentationContextValid(execution)
@@ -246,6 +266,66 @@ internal class OperationExecutor(
         }
         execution.pendingUssdResult = callback
         gateway.send(command, execution.context.subscriptionId, callback)
+    }
+
+    private fun queueBalanceRefresh(execution: Execution, operation: OperationRecord) {
+        if (execution.refreshOf != null || OperationCatalog.find(operation.specId)?.effect != OperationEffect.MONEY) return
+        val context = execution.context
+        if (operation.currency == Currency.CUC.name || execution.request.currency == Currency.CUC || context.productCurrency == Currency.CUC.name) return
+        val bank = context.identity.bank?.takeIf { it in setOf(Bank.BPA, Bank.BANDEC, Bank.BANMET) } ?: return
+        if (context.identity != context.authenticationIdentity || context.identity.profile != ProfileId.PERSONAL) return
+        val proof = bandecOrigins[context.subscriptionId].takeIf { bank == Bank.BANDEC }
+        val source = execution.request.source as? SourceSelector.Explicit
+            ?: (proof?.source as? SourceSelector.Explicit)?.takeIf { it.account == context.productNumber }
+            ?: return
+        if (bank == Bank.BANDEC && proof?.source != source) return
+        val request = ServiceRequest(if (bank == Bank.BANDEC) "bandec.card-balance" else "${bank.name.lowercase()}.balance",
+            context.identity, source, execution.request.currency)
+        if (OperationCatalog.validate(request).isNotEmpty()) return
+        val refresh = BalanceRefresh(operation.id, request, context, epoch, now().plusSeconds(10), execution.deadline, proof)
+        if (!refreshContextValid(refresh)) return
+        balanceRefreshes[operation.id] = refresh
+        val due = { if (balanceRefreshes[operation.id] === refresh) drainBalanceRefreshes() }
+        scheduleBalanceRefresh?.invoke(10_000, due) ?: main.postDelayed({ due() }, 10_000)
+    }
+
+    private fun refreshContextValid(refresh: BalanceRefresh): Boolean {
+        val context = refresh.context
+        val registrationId = context.registrationId ?: return false
+        return now() < refresh.deadline && refresh.token == epoch && canContinue() && canRefreshBalance(context) && contextValid(context) &&
+            !OperationCatalog.needsUpdatedAccess(wallet.snapshot.operations, registrationId, context.accessGeneration) &&
+            sessionContext?.let { contextValid(it) && it.accessGeneration == context.accessGeneration } == true &&
+            session?.isValidFor(context.authenticationIdentity, registrationId, context.subscriptionId, now()) == true &&
+            (refresh.bandecProof == null || bandecOrigins[context.subscriptionId] == refresh.bandecProof &&
+                evidenceRevision[context.subscriptionId] == refresh.bandecProof.revision)
+    }
+
+    private fun drainBalanceRefreshes() {
+        balanceRefreshes.values.removeAll { !refreshContextValid(it) }
+        if (busy || !gateway.isIdle()) return
+        val refresh = balanceRefreshes.values.firstOrNull { it.dueAt <= now() } ?: return
+        balanceRefreshes.remove(refresh.operationId)
+        val execution = Execution(refresh.request, refresh.context.copy(originalQr = null), null, epoch, null, null,
+            if (refresh.bandecProof != null) listOf(BankCommands().defaultBalance()) else null,
+            refresh.deadline, refresh)
+        active = execution; busy = true
+        val remaining = java.time.Duration.between(now(), execution.deadline).toMillis().coerceAtLeast(0)
+        scheduleTimeout?.invoke(remaining) { expire(execution) } ?: main.postDelayed({ expire(execution) }, remaining)
+        wallet.transact(block = {
+            val operation = snapshot().operations.singleOrNull { it.id == refresh.operationId } ?: return@transact false
+            if (operation.restored || operation.refreshTaken || operation.status !in setOf(OperationStatus.SUBMITTING,
+                    OperationStatus.AWAITING_CONFIRMATION, OperationStatus.UNCERTAIN, OperationStatus.CONFIRMED)) return@transact false
+            putOperation(operation.copy(refreshTaken = true))
+            true
+        }, onFailure = { finish(execution) }, onSuccess = { taken ->
+            if (!taken || !alive(execution) || !refreshContextValid(refresh)) { finish(execution); return@transact }
+            persistAndSend(execution, refresh.request, execution.wire)
+        })
+    }
+
+    private fun refreshAfterConfirmation(operationId: String) {
+        balanceRefreshes[operationId]?.dueAt = now()
+        drainBalanceRefreshes()
     }
 
     private fun fresh(record: BankSmsRecord, started: Instant): Boolean =
@@ -320,7 +400,7 @@ internal class OperationExecutor(
         if (request === execution.request) try { validateOriginalQr(execution) }
         catch (failure: Exception) { onResult(failure.message ?: "El QR ya no es válido"); finish(execution); return }
         if (!authenticationStep && !balanceChallenge && request === execution.request) {
-            if (request.operationId == "bandec.card-balance") { startCardQuery(execution, false); return }
+            if (request.operationId == "bandec.card-balance" && execution.refreshOf == null) { startCardQuery(execution, false); return }
             if (request.operationId == "bandec.transfer") {
                 val proof = execution.originProof
                 if (proof == null) { startCardQuery(execution, true); return }
@@ -337,11 +417,14 @@ internal class OperationExecutor(
                 val time = LocalTime.now()
                 command.commandsForTransport(request.identity, "${time.minute}${time.second.toString().padStart(2, '0')}")
             }
-        } catch (failure: Exception) { onResult(failure.message ?: "No se pudo preparar la solicitud"); finish(execution); return }
+        } catch (failure: Exception) { if (execution.refreshOf == null) onResult(failure.message ?: "No se pudo preparar la solicitud"); finish(execution); return }
         if (spec.transport == OperationTransport.INTERACTIVE_USSD && encoded.size != 1) {
             onResult("La solicitud no cabe en un único diálogo del operador."); finish(execution); return
         }
         val explicitAccess = request === execution.request && spec.id.endsWith(".authenticate")
+        if (authenticationStep || explicitAccess || spec.service == 70) {
+            balanceRefreshes.clear(); bandecOrigins.clear()
+        }
         val fulfillsRequest = explicitAccess || balanceChallenge && (
             execution.request.operationId.endsWith(".authenticate") || spec.effect == OperationEffect.QUERY &&
                 request.operationId == execution.request.operationId && request.source == execution.request.source &&
@@ -398,6 +481,8 @@ internal class OperationExecutor(
             (request.currency?.let { mapOf("sourceCurrency" to it.name) } ?: emptyMap()) +
             (if (execution.context.registrationId != null) mapOf("accessGeneration" to execution.context.accessGeneration.toString()) else emptyMap()) +
             (productId?.let { mapOf("walletProductId" to it) } ?: emptyMap()) +
+            (execution.refreshOf?.let { mapOf("refreshOf" to it) +
+                if (request.identity.bank == Bank.BANDEC) mapOf("wireSource" to "0000") else emptyMap() } ?: emptyMap()) +
             (if (auxiliary) mapOf("internalStep" to "true") else emptyMap())
         val currency = legacy?.amount?.currency?.name ?: when (parameters["amountCurrency"]) {
             "1" -> Currency.CUP.name; "2" -> Currency.CUC.name; "3" -> Currency.USD.name
@@ -430,6 +515,8 @@ internal class OperationExecutor(
             val wait = FuelPurchaseWait(operation.id, execution.context.subscriptionId, now())
             fuelPurchases += wait
         }
+        if (index == parts.lastIndex) queueBalanceRefresh(execution, operation)
+        if (request.identity.bank == Bank.BANDEC && parts[index].service == 60) bandecOrigins.remove(execution.context.subscriptionId)
         send(execution, parts[index]) { result ->
             if (result == UssdResult.TimedOut || now() >= execution.deadline) { expire(execution); return@send }
             if (!alive(execution)) { markUncertain(operation.id); finish(execution); return@send }
@@ -469,7 +556,7 @@ internal class OperationExecutor(
             }
             if (response != BankResponse.PROCESSING && parts.size > 1 || result !is UssdResult.Response) {
                 markUncertain(operation.id)
-                onResult("No se pudo confirmar el resultado.")
+                if (execution.refreshOf == null) onResult("No se pudo confirmar el resultado.")
                 finish(execution); return@send
             }
             wallet.transact(block = { updateOperationStatus(operation.id, OperationStatus.SUBMITTING, OperationStatus.AWAITING_CONFIRMATION, now().toEpochMilli()) })
@@ -479,7 +566,7 @@ internal class OperationExecutor(
                 if (wait.accepted && wait !in acknowledgedAccesses) acknowledgedAccesses += wait
                 completeAuthentication(wait)
             } else {
-                onResult("Solicitud enviada. El proveedor aún no ha confirmado el resultado.")
+                if (execution.refreshOf == null) onResult("Solicitud enviada. El proveedor aún no ha confirmado el resultado.")
                 finish(execution)
             }
         }
@@ -493,7 +580,10 @@ internal class OperationExecutor(
 
     private fun finish(execution: Execution) {
         execution.pin?.fill('\u0000')
-        if (active === execution) { active = null; authentication = null; cardQuery = null; busy = false }
+        if (active === execution) {
+            active = null; authentication = null; cardQuery = null; busy = false
+            drainBalanceRefreshes()
+        }
     }
 
     private fun startCardQuery(execution: Execution, forMoney: Boolean) {
@@ -524,6 +614,7 @@ internal class OperationExecutor(
             check(updateOperationStatus(record.id, OperationStatus.PREPARED, OperationStatus.SUBMITTING, now().toEpochMilli()))
         }, onFailure = { abortCardQuery(flow, "No se pudo guardar la consulta del origen.") }, onSuccess = {
             if (!alive(execution) || cardQuery !== flow) { markUncertain(record.id); return@transact }
+            if (select) bandecOrigins.remove(execution.context.subscriptionId)
             send(execution, command) { result ->
                 if (result == UssdResult.TimedOut || now() >= execution.deadline) { expire(execution); return@send }
                 if (!alive(execution) || cardQuery !== flow) { markUncertain(record.id); return@send }
@@ -580,6 +671,8 @@ internal class OperationExecutor(
         }, onFailure = { abortCardQuery(flow, "No se pudo confirmar de forma segura la consulta.") }, onSuccess = { completed ->
             acknowledgedCardQueries.remove(flow)
             if (!completed || flow.execution.token != epoch || !canContinue() || !contextValid(flow.execution.context)) { abortCardQuery(flow, "No se pudo confirmar el origen de la consulta."); return@transact }
+            approvedNumber?.let { bandecOrigins[flow.execution.context.subscriptionId] =
+                OriginProof(SourceSelector.Explicit(it), balance.available.currency, revision) }
             if (flow.forMoney && alive(flow.execution) && cardQuery === flow) {
                 if (balance.available.currency != flow.execution.request.currency) {
                     abortCardQuery(flow, "La cuenta de origen está en ${balance.available.currency.name}. Revisa la moneda y el importe de la transferencia.")
@@ -707,6 +800,7 @@ internal class OperationExecutor(
                 onConfirmed(confirmed, message)
                 if (confirmed.timeoutAt == null)
                     presentResult(confirmed.id, "Operación confirmada por el comprobante del banco.")
+                refreshAfterConfirmation(confirmed.id)
             }
             if (queryId != null) {
                 if (message is BankMessage.Balance) presentResult(queryId, message.accounts.joinToString("\n") {
@@ -798,6 +892,7 @@ internal class OperationExecutor(
             if (confirmed) {
                 fuelPurchases.remove(wait)
                 presentResult(wait.operationId, "Compra del cupón confirmada por el comprobante del banco.")
+                refreshAfterConfirmation(wait.operationId)
             } else if (wait.receiptIds.isNotEmpty()) settleFuel(wait)
         })
     }

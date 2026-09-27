@@ -995,6 +995,134 @@ object OperationExecutorChecks {
             check(h.repository.snapshot().operations.filter { it.specId == "service.fuel" }.let { it.size == 2 && it.none { op -> op.status == OperationStatus.CONFIRMED } })
             check(h.repository.snapshot().receipts.single().operationId == null)
         }
+        case("An automatic balance shares the original deadline and cannot extend a timeout") { h ->
+            val started = h.clock
+            val operation = h.acknowledgedTransfer()
+            h.elapseRefresh()
+            h.await { h.modem.services == listOf(40, 45, 46) }
+            check(h.main { h.latestTimeoutDeadline() == started.plusSeconds(30) })
+            h.elapseTimeout(19)
+            h.await { !h.executor.busy && h.modem.isIdle() }
+            val operations = h.repository.snapshot().operations
+            check(operations.single { it.id == operation.id }.timeoutAt != null)
+            check(operations.single { it.parameters["refreshOf"] == operation.id }.timeoutAt != null)
+            check(h.main { h.results.count { it == "Tiempo de espera agotado" } == 1 })
+            h.elapseRefresh(60)
+            check(h.main { h.modem.services == listOf(40, 45, 46) })
+        }
+        case("Post-operation balance runs once at ten seconds for the captured source and stays silent") { h ->
+            val operation = h.acknowledgedTransfer()
+            val before = h.main { h.results.toList() }
+            val oldTimer = h.main { h.refreshCallbacks.single().second }
+            h.elapseRefresh(9)
+            check(h.main { h.modem.services == listOf(40, 45) })
+            check(!h.repository.snapshot().operations.single { it.id == operation.id }.refreshTaken)
+            h.elapseRefresh(1)
+            h.await { h.modem.services == listOf(40, 45, 46) }
+            val query = h.repository.snapshot().operations.single { it.parameters["refreshOf"] == operation.id }
+            check(query.source == operation.source && query.subscriptionId == operation.subscriptionId && query.providerId == operation.providerId)
+            check(h.repository.snapshot().operations.single { it.id == operation.id }.refreshTaken)
+            h.main { h.modem.reply(Harness.processing) }
+            val (record, result) = h.balanceEvidence("0000XXXXXXXX0001", "CUP", bank = "Popular de Ahorro")
+            h.observe(record, result)
+            check(h.repository.snapshot().operations.single { it.id == query.id }.status == OperationStatus.CONFIRMED)
+            check(h.repository.snapshot().balances.single().available == "900.00")
+            h.elapseRefresh(90)
+            h.main { oldTimer(); check(h.results == before && h.modem.services == listOf(40, 45, 46)) }
+        }
+        case("A busy explicit query defers the one-shot refresh without redirecting its source") { h ->
+            val operation = h.acknowledgedTransfer()
+            h.main { h.executor.execute(ServiceRequest("bpa.balance", h.target().identity,
+                SourceSelector.Explicit("0000000000000003")), h.target(), null, approved = false) }
+            h.await { h.modem.services == listOf(40, 45, 46) }
+            h.elapseRefresh()
+            check(h.main { h.executor.busy && h.modem.services == listOf(40, 45, 46) })
+            check(!h.repository.snapshot().operations.single { it.id == operation.id }.refreshTaken)
+            h.main { h.modem.reply(UssdResult.NetworkFailure(-1)) }
+            h.await { h.modem.services == listOf(40, 45, 46, 46) }
+            check(h.repository.snapshot().operations.single { it.parameters["refreshOf"] == operation.id }.source == "0000000000000001")
+        }
+        for (reason in listOf("latched", "changed access", "restored", "invalidated"))
+            case("Post-operation refresh is discarded when $reason") { h ->
+                val operation = h.acknowledgedTransfer()
+                when (reason) {
+                    "latched" -> h.repository.putOperation(operation.copy(refreshTaken = true))
+                    "changed access" -> h.main { h.generation++ }
+                    "restored" -> h.repository.putOperation(operation.copy(restored = true, status = OperationStatus.UNCERTAIN))
+                    else -> h.main { h.executor.invalidate() }
+                }
+                h.elapseRefresh()
+                var drained = false
+                h.main { h.wallet.transact(block = { Unit }, onSuccess = { drained = true }) }
+                h.await { drained }
+                check(h.main { h.modem.services == listOf(40, 45) })
+                check(h.repository.snapshot().operations.none { it.parameters["refreshOf"] == operation.id })
+            }
+        case("Recreation never rebuilds refreshes and an old timer cannot activate a new queue") { h ->
+            val old = h.acknowledgedTransfer()
+            val oldTimer = h.main { h.refreshCallbacks.single().second }
+            h.recreateExecutor()
+            h.elapseRefresh(60)
+            check(h.main { h.modem.services.isEmpty() })
+            check(!h.repository.snapshot().operations.single { it.id == old.id }.refreshTaken)
+            val current = h.acknowledgedTransfer()
+            h.clock = h.clock.plusSeconds(10)
+            h.main { oldTimer(); check(h.modem.services == listOf(40, 45)) }
+            h.elapseRefresh(0)
+            h.await { h.modem.services == listOf(40, 45, 46) }
+            check(h.repository.snapshot().operations.single { it.parameters["refreshOf"] == current.id }.source == current.source)
+        }
+        case("An intervening provider login cancels the former provider's queued refresh") { h ->
+            val operation = h.acknowledgedTransfer()
+            val other = h.registration.copy(id = "other-bank", providerId = "BANDEC", bankCode = "02", credentialAlias = "access:other-bank")
+            h.repository.putRegistration(other)
+            h.await { h.wallet.snapshot.registrations.size == 2 }
+            val target = ServiceExecutionContext(other.id, ProviderIdentity(ProviderId.BANDEC), 7, null, other)
+            h.main { h.executor.execute(ServiceRequest("bandec.balance", target.identity), target, "12345".toCharArray(), approved = false) }
+            h.await { h.modem.services == listOf(40, 45, 40) }
+            h.elapseRefresh()
+            h.main { h.modem.reply(UssdResult.NetworkFailure(-1)) }
+            h.await { !h.executor.busy }
+            check(h.main { h.modem.services == listOf(40, 45, 40) })
+            check(!h.repository.snapshot().operations.single { it.id == operation.id }.refreshTaken)
+        }
+        case("Invalidating while the refresh latch is queued cannot dispatch a read afterwards") { h ->
+            val operation = h.acknowledgedTransfer()
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            h.main { h.wallet.transact(block = { entered.countDown(); check(release.await(10, TimeUnit.SECONDS)) }) }
+            try {
+                check(entered.await(10, TimeUnit.SECONDS))
+                h.elapseRefresh()
+                h.main { check(h.executor.busy); h.executor.invalidate() }
+            } finally { release.countDown() }
+            h.await { h.wallet.snapshot.operations.single { it.id == operation.id }.refreshTaken }
+            check(h.main { !h.executor.busy && h.modem.services == listOf(40, 45) })
+            check(h.repository.snapshot().operations.none { it.parameters["refreshOf"] == operation.id })
+        }
+        for (known in listOf(false, true)) case("Monetary service refresh requires a ${if (known) "known" else "missing"} explicit origin") { h ->
+            val request = ServiceRequest("service.nauta.home", h.target().identity,
+                if (known) SourceSelector.Explicit("0000000000000001") else SourceSelector.Default,
+                Currency.CUP, mapOf("username" to "fixture", "accountType" to "1", "amount" to "300"))
+            h.main { h.executor.execute(request, h.target(), "1234".toCharArray(), approved = true) }
+            h.authenticate(); h.await { h.modem.services == listOf(40, 84) }
+            h.main { h.modem.reply(Harness.processing) }
+            h.await { !h.executor.busy }
+            h.elapseRefresh()
+            if (known) h.await { h.modem.services == listOf(40, 84, 46) }
+            else check(h.main { h.modem.services == listOf(40, 84) && h.refreshCallbacks.isEmpty() })
+        }
+        case("BANDEC refresh reads the proven origin without selecting it again", ProviderId.BANDEC) { h ->
+            h.main { h.executor.execute(h.bankTransfer(), h.target(), "12345".toCharArray(), approved = true) }
+            h.authenticate(); h.await { h.modem.services == listOf(40, 60) }; h.acknowledgeSelectionAndRead()
+            h.balance("0000XXXXXXXX0001", "CUP")
+            h.await { h.modem.services == listOf(40, 60, 46, 45) }
+            h.main { h.modem.reply(Harness.processing) }
+            h.await { !h.executor.busy }
+            h.elapseRefresh()
+            h.await { h.modem.services == listOf(40, 60, 46, 45, 46) }
+            check(h.repository.snapshot().operations.single { it.parameters["refreshOf"] != null }.source == "0000000000000001")
+        }
         return passed
     }
 
@@ -1010,6 +1138,7 @@ object OperationExecutorChecks {
         val results = mutableListOf<String>()
         val confirmations = mutableListOf<OperationRecord>()
         private val timeoutCallbacks = mutableListOf<Pair<Instant, () -> Unit>>()
+        val refreshCallbacks = mutableListOf<Pair<Instant, () -> Unit>>()
         private val controllers = mutableListOf<BankController>()
         val fuelProtector = FuelSecretStore { javax.crypto.spec.SecretKeySpec(ByteArray(32) { it.toByte() }, "AES") }
         init {
@@ -1022,17 +1151,34 @@ object OperationExecutorChecks {
         private fun createExecutor() {
             modem = FakeModem { check(wallet.snapshot.operations.any { it.status == OperationStatus.SUBMITTING }) {
                 "El módem recibió una orden sin persistencia previa"
-            } }
+            }
+                wallet.snapshot.operations.filter { it.status == OperationStatus.SUBMITTING && it.parameters["refreshOf"] != null }.forEach { query ->
+                    check(wallet.snapshot.operations.single { it.id == query.parameters["refreshOf"] }.refreshTaken) {
+                        "La consulta automática llegó al módem antes de persistir su latch"
+                    }
+                }
+            }
             executor = OperationExecutor(wallet, modem, { clock }, { true }, { results += it }, { nativeRequests += it; it.complete(false) }, { operation, _ -> confirmations += operation },
                 accessGeneration = { generation },
                 scheduleTimeout = { milliseconds, callback ->
-                    check(milliseconds == 30_000L)
+                    check(milliseconds in 1..30_000L)
                     timeoutCallbacks += clock.plusMillis(milliseconds) to callback
+                }, scheduleBalanceRefresh = { milliseconds, callback ->
+                    check(milliseconds == 10_000L)
+                    refreshCallbacks += clock.plusMillis(milliseconds) to callback
                 })
         }
         fun recreateExecutor() {
-            main { executor.close(); timeoutCallbacks.clear(); createExecutor() }
+            main { executor.close(); timeoutCallbacks.clear(); refreshCallbacks.clear(); createExecutor() }
             await { !executor.busy }
+        }
+        fun elapseRefresh(seconds: Long = 10) {
+            clock = clock.plusSeconds(seconds)
+            main {
+                val due = refreshCallbacks.filter { it.first <= clock }
+                refreshCallbacks.removeAll(due.toSet())
+                due.forEach { it.second() }
+            }
         }
         fun target() = ServiceExecutionContext(registration.id, ProviderIdentity(ProviderId.valueOf(registration.providerId)), 7, null, registration, accessGeneration = generation)
         fun controller(protector: FuelEnvelopeProtector? = null) = main {
@@ -1045,6 +1191,13 @@ object OperationExecutorChecks {
         fun bankTransfer(source: SourceSelector = SourceSelector.Explicit("0000000000000001"), amount: String = "1.00") =
             ServiceRequest("${registration.providerId.lowercase()}.transfer", target().identity, source, Currency.CUP,
                 mapOf("destination" to "0000000000000002", "amount" to amount))
+        fun acknowledgedTransfer(): OperationRecord {
+            main { executor.execute(bankTransfer(), target(), "1234".toCharArray(), approved = true) }
+            authenticate(); await { modem.services == listOf(40, 45) }
+            main { modem.reply(processing) }
+            await { !executor.busy && wallet.snapshot.operations.any { it.specId == "bpa.transfer" && it.status == OperationStatus.AWAITING_CONFIRMATION } }
+            return repository.snapshot().operations.single { it.specId == "bpa.transfer" && it.status == OperationStatus.AWAITING_CONFIRMATION }
+        }
         fun nautaRequest() = ServiceRequest("service.nauta.home", target().identity, currency = Currency.CUP,
             values = mapOf("username" to "fixture", "accountType" to "1", "amount" to "300"))
         fun nautaReceipt(reference: String) = "Banco Bandec: La cuenta Nauta Hogar: fixture@nauta.com.cu ha sido pagada con 300 CUP. Monto Pagado: 270 CUP. Id Transaccion: $reference."
@@ -1090,6 +1243,7 @@ object OperationExecutorChecks {
                 due.forEach { it.second() }
             }
         }
+        fun latestTimeoutDeadline(): Instant = timeoutCallbacks.maxOf { it.first }
         fun beginBandecQuery() {
             main { executor.queryBandecCard(target(), SourceSelector.Explicit("0000000000000001"), "12345".toCharArray()) }
             authenticate(); await { modem.services == listOf(40, 60) }

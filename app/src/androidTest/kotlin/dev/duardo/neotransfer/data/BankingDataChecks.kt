@@ -137,6 +137,165 @@ object BankingDataChecks {
             check(runCatching { r.upsertBalances(listOf(first.copy(accountId = "another"))) }.isFailure)
         }
 
+        case("Confirmed transfer applies its attributed remaining balance and consumes refresh") { r, _ ->
+            transferBalanceFixture(r)
+            val original = r.snapshot().balances.single()
+            val receiptId = transferReceipt(r)
+            check(r.confirmOperation("operation", receiptId, 1_200_000, RefreshRequest("02", 7, 1_200_000)))
+            val state = r.snapshot()
+            check(state.operations.single().refreshTaken && state.refresh == null)
+            check(state.balances.single() == original.copy(at = 1_100_000, sentAt = 1_050_000,
+                available = "90.00", ledger = null))
+            check(state.receipts.single().let { it.amount == "10.00" && it.account == null })
+            check(state.events.single().body?.contains("Saldo restante: CR 90.00 CUP") == true)
+        }
+
+        case("Remaining balance follows SMSC order in both delivery orders") { r, _ ->
+            transferBalanceFixture(r)
+            val receiptId = transferReceipt(r, receivedAt = 1_120_000)
+            val newer = balanceSms(1_130_000, 1_060_000, "80.00", "0000000000000001")
+            SmsIngestor(r, now = { Instant.ofEpochMilli(1_300_000) }).ingest(newer)
+            check(r.confirmOperation("operation", receiptId, 1_200_000, null))
+            check(r.snapshot().balances.let { rows -> rows.size == 2 && rows.all {
+                it.available == "80.00" && it.sentAt == 1_060_000L
+            } })
+            check(r.snapshot().operations.single().refreshTaken)
+        }
+
+        case("Contradictory balance at the same SMSC time keeps one refresh pending") { r, _ ->
+            transferBalanceFixture(r)
+            SmsIngestor(r, now = { Instant.ofEpochMilli(1_300_000) }).ingest(
+                balanceSms(1_090_000, 1_050_000, "80.00"))
+            val receiptId = transferReceipt(r)
+            check(r.confirmOperation("operation", receiptId, 1_200_000, RefreshRequest("02", 7, 1_200_000)))
+            val state = r.snapshot()
+            check(state.operations.single().let { it.status == OperationStatus.CONFIRMED && !it.refreshTaken })
+            check(state.balances.single().let { it.available == "80.00" && it.sentAt == 1_050_000L })
+            check(state.refresh == RefreshRequest("02", 7, 1_200_000))
+        }
+
+        case("Later balance SMS replaces already applied transfer balance") { r, _ ->
+            transferBalanceFixture(r)
+            val receiptId = transferReceipt(r)
+            check(r.confirmOperation("operation", receiptId, 1_200_000, null))
+            SmsIngestor(r, now = { Instant.ofEpochMilli(1_300_000) }).ingest(
+                balanceSms(1_130_000, 1_060_000, "80.00", "0000000000000001"))
+            check(r.snapshot().balances.let { rows -> rows.size == 2 && rows.all {
+                it.available == "80.00" && it.sentAt == 1_060_000L
+            } })
+        }
+
+        case("Late older full account query cannot replace a newer masked transfer balance") { r, _ ->
+            transferBalanceFixture(r)
+            check(r.confirmOperation("operation", transferReceipt(r), 1_200_000, null))
+            SmsIngestor(r, now = { Instant.ofEpochMilli(1_300_000) }).ingest(
+                balanceSms(1_130_000, 1_040_000, "999.00", "0000000000000001"))
+            check(r.snapshot().balances.single().let { it.available == "90.00" && it.sentAt == 1_050_000L })
+        }
+
+        case("Newer remaining synchronizes old full and masked IDs without touching another card") { r, _ ->
+            transferBalanceFixture(r, extraCard = true)
+            r.upsertBalances(listOf(BalanceRecord("other-balance", "02", 7, 1_140_000,
+                "0000000000000003", "50.00", "CUP", registrationId = "registration", cardId = "other", sentAt = 1_040_000)))
+            SmsIngestor(r, now = { Instant.ofEpochMilli(1_300_000) }).ingest(
+                balanceSms(1_140_000, 1_040_000, "100.00", "0000000000000001"))
+            check(r.confirmOperation("operation", transferReceipt(r, receivedAt = 1_120_000), 1_200_000, null))
+            val rows = r.snapshot().balances
+            check(rows.filter { it.cardId == "card" }.let { it.size == 2 && it.all { row ->
+                row.available == "90.00" && row.at == 1_120_000L && row.sentAt == 1_050_000L
+            } })
+            check(rows.single { it.cardId == "other" }.let { it.available == "50.00" && it.at == 1_140_000L })
+        }
+
+        case("Missing remaining balance keeps the refresh available") { r, _ ->
+            transferBalanceFixture(r)
+            val receiptId = transferReceipt(r, remaining = null)
+            check(r.confirmOperation("operation", receiptId, 1_200_000, RefreshRequest("02", 7, 1_200_000)))
+            check(!r.snapshot().operations.single().refreshTaken && r.snapshot().balances.single().available == "100.00")
+            check(r.snapshot().refresh != null)
+        }
+
+        case("One saved card does not prove the bank default source") { r, _ ->
+            transferBalanceFixture(r, source = "0000")
+            check(r.confirmOperation("operation", transferReceipt(r), 1_200_000, RefreshRequest("02", 7, 1_200_000)))
+            check(!r.snapshot().operations.single().refreshTaken && r.snapshot().balances.single().available == "100.00")
+            check(r.snapshot().refresh != null)
+        }
+
+        case("Exact explicit source creates a stable balance row without prior balance") { r, _ ->
+            transferBalanceFixture(r, includeBalance = false)
+            check(r.confirmOperation("operation", transferReceipt(r), 1_200_000, null))
+            val created = r.snapshot().balances.single()
+            check(created.id == "02:7:registration:card:0000000000000001:CUP" &&
+                created.account == "0000000000000001" && created.cardId == "card" && created.accountId == null &&
+                created.available == "90.00" && created.ledger == null && created.sentAt == 1_050_000L)
+            check(r.snapshot().operations.single().refreshTaken)
+            SmsIngestor(r, now = { Instant.ofEpochMilli(1_300_000) }).ingest(
+                balanceSms(1_130_000, 1_060_000, "80.00", "0000000000000001"))
+            check(r.snapshot().balances.single().let { it.id == created.id && it.available == "80.00" })
+        }
+
+        case("Masked source does not identify an explicit product") { r, _ ->
+            transferBalanceFixture(r, source = "0000XXXXXXXX0001")
+            check(r.confirmOperation("operation", transferReceipt(r), 1_200_000, null))
+            check(!r.snapshot().operations.single().refreshTaken && r.snapshot().balances.single().available == "100.00")
+        }
+
+        case("Default source without a unique product never consumes remaining") { r, _ ->
+            transferBalanceFixture(r, source = "0000", extraCard = true)
+            check(r.confirmOperation("operation", transferReceipt(r), 1_200_000, null))
+            check(!r.snapshot().operations.single().refreshTaken && r.snapshot().balances.single().available == "100.00")
+        }
+
+        case("Default source without a known product never consumes remaining") { r, _ ->
+            identity(r)
+            r.putOperation(operation().copy(registrationId = "registration", source = "0000", startedAt = 1_000_000))
+            check(r.updateOperationStatus("operation", OperationStatus.PREPARED, OperationStatus.SUBMITTING, 1_000_001))
+            check(r.confirmOperation("operation", transferReceipt(r), 1_200_000, null))
+            check(!r.snapshot().operations.single().refreshTaken && r.snapshot().balances.isEmpty())
+        }
+
+        case("Ambiguous source masks do not attribute a transfer balance") { r, _ ->
+            transferBalanceFixture(r, extraCard = true, secondNumber = "0000111100000001")
+            check(r.confirmOperation("operation", transferReceipt(r), 1_200_000, null))
+            check(!r.snapshot().operations.single().refreshTaken && r.snapshot().balances.single().available == "100.00")
+        }
+
+        case("Different remaining currency does not consume refresh") { r, _ ->
+            transferBalanceFixture(r)
+            check(r.confirmOperation("operation", transferReceipt(r, remaining = "CR 90.00 USD"), 1_200_000, null))
+            check(!r.snapshot().operations.single().refreshTaken && r.snapshot().balances.single().available == "100.00")
+        }
+
+        case("Another bank balance cannot receive the transfer remainder") { r, _ ->
+            transferBalanceFixture(r, balanceBankCode = "01")
+            check(r.confirmOperation("operation", transferReceipt(r), 1_200_000, null))
+            check(r.snapshot().operations.single().refreshTaken)
+            check(r.snapshot().balances.single { it.bankCode == "01" }.available == "100.00")
+            check(r.snapshot().balances.single { it.bankCode == "02" }.available == "90.00")
+        }
+
+        case("Another SIM balance cannot receive the transfer remainder") { r, _ ->
+            transferBalanceFixture(r, balanceSubscriptionId = 8)
+            check(r.confirmOperation("operation", transferReceipt(r), 1_200_000, null))
+            check(r.snapshot().operations.single().refreshTaken)
+            check(r.snapshot().balances.single { it.subscriptionId == 8 }.available == "100.00")
+            check(r.snapshot().balances.single { it.subscriptionId == 7 }.available == "90.00")
+        }
+
+        case("Restored or ineligible transfer evidence cannot apply remaining") { r, _ ->
+            transferBalanceFixture(r)
+            val restored = operation().copy(id = "restored", registrationId = "registration", source = "0000000000000001",
+                startedAt = 1_000_000, status = OperationStatus.UNCERTAIN, updatedAt = 1_000_001, restored = true)
+            r.putOperation(restored)
+            val receiptId = transferReceipt(r)
+            check(!r.confirmOperation(restored.id, receiptId, 1_200_000, null))
+            check(r.snapshot().balances.single().available == "100.00")
+            r.dao.events().forEach { row -> r.dao.update(row.copy(value = row.value.copy(evidenceEligible = false))) }
+            check(!r.confirmOperation("operation", receiptId, 1_200_000, null))
+            check(r.snapshot().balances.single().available == "100.00" && !r.snapshot().operations.single { it.id == "operation" }.refreshTaken)
+        }
+
         case("SMSC order keeps a delayed older balance from replacing the latest balance") { r, _ ->
             val body = "Banco Bandec La consulta de saldo fue completada.\nCuenta;Saldo Contable;Saldo Disponible;Moneda\n0000XXXXXXXX0002; CR 100.00 ; CR 90.00 ;CUP |"
             val ingestor = SmsIngestor(r, now = { Instant.ofEpochMilli(1_200_000) })
@@ -651,6 +810,32 @@ object BankingDataChecks {
         r.putIdentity(IdentityRecord("identity", "Perfil sintético"))
         r.putRegistration(registration("registration", 7))
     }
+    private fun transferBalanceFixture(r: RoomWalletRepository, source: String = "0000000000000001",
+                                       extraCard: Boolean = false, secondNumber: String = "0000000000000003",
+                                       balanceBankCode: String = "02", balanceSubscriptionId: Int = 7,
+                                       includeBalance: Boolean = true) {
+        identity(r)
+        r.putCard(CardRecord("card", "registration", "0000000000000001", "Origen", currency = "CUP"))
+        if (extraCard) r.putCard(CardRecord("other", "registration", secondNumber, "Otro", currency = "CUP"))
+        if (includeBalance) r.upsertBalances(listOf(BalanceRecord(
+            "$balanceBankCode:$balanceSubscriptionId:registration:card:0000XXXXXXXX0001:CUP",
+            balanceBankCode, balanceSubscriptionId, 1_010_000, "0000XXXXXXXX0001", "100.00", "CUP",
+            ledger = "110.00", registrationId = "registration", cardId = "card", sentAt = 1_005_000)))
+        r.putOperation(operation().copy(registrationId = "registration", source = source, startedAt = 1_000_000))
+        check(r.updateOperationStatus("operation", OperationStatus.PREPARED, OperationStatus.SUBMITTING, 1_000_001))
+    }
+    private fun transferReceipt(r: RoomWalletRepository, remaining: String? = "CR 90.00 CUP",
+                                receivedAt: Long = 1_100_000): String {
+        val body = "Banco Bandec: La Transferencia fue completada.\nBeneficiario: 0000XXXXXXXX0002\n" +
+            "Monto: 10.00 CUP\nNro. Transaccion: REMAIN01" + remaining?.let { "\nSaldo restante: $it" }.orEmpty()
+        return checkNotNull(SmsIngestor(r, now = { Instant.ofEpochMilli(1_300_000) }).ingest(
+            BankSmsRecord(null, body, Instant.ofEpochMilli(receivedAt), 7, sentAt = Instant.ofEpochMilli(1_050_000))).stored.receiptId)
+    }
+    private fun balanceSms(receivedAt: Long, sentAt: Long, available: String,
+                           account: String = "0000XXXXXXXX0001") = BankSmsRecord(null,
+        "Banco Bandec La consulta de saldo fue completada.\nCuenta;Saldo Contable;Saldo Disponible;Moneda\n" +
+            "$account; CR 110.00; CR $available;CUP |",
+        Instant.ofEpochMilli(receivedAt), 7, sentAt = Instant.ofEpochMilli(sentAt))
     private fun registration(id: String, subscription: Int) = RegistrationRecord(id, "identity", "BANDEC", "PERSONAL", "02", subscription, null, "BANDEC")
     private fun operation() = OperationRecord("operation", "TRANSFER", "02", 7, "0000000000000002", "10.00", "CUP", 900)
     private fun receipt() = ReceiptRecord("", "", "02", 7, "SENT", "ref-01", "10.00", "CUP", "0000000000000002")

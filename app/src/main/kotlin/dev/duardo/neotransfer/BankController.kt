@@ -64,6 +64,7 @@ class BankController(
     private val now: () -> Instant = Instant::now,
     val wallet: WalletCoordinator? = null,
     private val fuelProtector: FuelEnvelopeProtector? = null,
+    private val scheduleBalanceRefresh: ((Long, () -> Unit) -> Unit)? = null,
 ) {
     val store = BankStore(context)
     val vault = BankPinVault(context)
@@ -128,7 +129,10 @@ class BankController(
         dial = { request -> onSystemDial?.invoke(request) ?: request.complete(false) }, onConfirmed = { operation, message ->
             if (pendingRecord?.id == operation.id) pending = null
             if (operation.timeoutAt == null && message is BankMessage.TransferSent) confirmed = message
-        }, accessGeneration = ::currentAccessGeneration) }
+        }, accessGeneration = ::currentAccessGeneration, scheduleBalanceRefresh = scheduleBalanceRefresh,
+        canRefreshBalance = { target -> !closed && foreground && unlocked && target.registration?.let(::hasCredential) == true &&
+            context.checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED &&
+            listSims().any { it.id == target.subscriptionId } }) }
 
     private fun currentAccessGeneration(registrationId: String): Long = accessGenerations[registrationId] ?: store.accessGeneration(registrationId)
 
@@ -163,7 +167,7 @@ class BankController(
     }
 
     fun selectProduct(id: String) {
-        if (busy) { notice = "Espera a que termine la solicitud"; return }
+        if (wallet == null && busy) { notice = "Espera a que termine la solicitud"; return }
         if (id.startsWith("registration:")) return selectRegistration(id.removePrefix("registration:"))
         if (id.startsWith("default:")) return selectBank(Bank.valueOf(id.removePrefix("default:")))
         val coordinator = wallet ?: run { notice = "La cartera no está disponible"; return }
@@ -171,7 +175,6 @@ class BankController(
     }
 
     fun selectRegistration(id: String) {
-        if (busy) { notice = "Espera a que termine la solicitud"; return }
         val coordinator = wallet ?: run { notice = "La cartera no está disponible"; return }
         coordinator.transact(block = {
             val state = snapshot()
@@ -879,7 +882,7 @@ class BankController(
     private fun tick() {
         main.removeCallbacks(ticker)
         if (!unlocked) return
-        if (wallet != null) return // Durable operations never schedule automatic money retries or an unscoped refresh.
+        if (wallet != null) return // OperationExecutor owns the one-shot, source-scoped balance refresh.
         val p = pending
         if (!busy && gateway.isIdle() && store.refreshDue(bank, subscription, now()) && canOperate()) {
             // Persist the latch before sending so a restart cannot repeat the refresh.
