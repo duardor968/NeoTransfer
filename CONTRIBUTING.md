@@ -21,3 +21,7 @@ En Windows, usa `gradlew.bat`. La tarea `assembleDebugAndroidTest` solo compila 
 - Si cambias una pantalla, revisa ambos temas, texto grande y el flujo en un dispositivo; comparte únicamente imágenes con datos ficticios.
 
 Los textos de producto y la documentación principal están en español. Las contribuciones al código se distribuyen bajo [Apache 2.0](LICENSE); cada dependencia conserva su licencia.
+
+## Integrar desarrollo
+
+El desarrollo se mantiene en `dev`. La integración en `main` se hace exclusivamente con `git merge --ff-only dev` desde `main`, seguido del push. El PR se usa para revisar el cambio; no se aplica squash, rebase ni se crea un commit de merge.

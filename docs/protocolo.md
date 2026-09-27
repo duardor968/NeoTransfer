@@ -171,6 +171,8 @@ Nauta Plus34 tiene dos rutas activas en `rR6oImkdEU.showDialogNautaPlus` y el ac
 
 ## 5. SMS de resultado
 
+En la línea 1.0, el transporte y el diario conservan por separado recepción y marca temporal SMSC. A los 30 segundos se muestra «Tiempo de espera agotado» y se libera la espera; una respuesta posterior se procesa sin reactivar pagos ni exigir revisión. La interfaz habitual no expone los SMS originales. Los comportamientos de 0.2 descritos en los cotejos históricos no sustituyen esta política; véase [arquitectura](arquitectura.md).
+
 - Remitente `PAGOxMOVIL`. La app lo recibe por `SMS_RECEIVED` y además lee la bandeja (`content://sms/inbox` con `address = 'PAGOxMOVIL'`) para reconstruir el historial: nuestro historial puede nacer de la bandeja el primer día.
 - Texto libre en español sin tildes. La app extrae campos por marcadores `Etiqueta:` (`getElement("Id Transaccion:", sms)`); tras el importe viene la moneda en 3 letras.
 - Marcadores de éxito conocidos: "La Transferencia fue completada.", "El pago de la factura de electricidad fue completado", "El pago de la factura telefonica fue completado", "El pago de la factura del agua fue completado.", "El pago de la factura del Gas fue completado.", "El pago de la ONAT fue completado", "El pago de la multa fue completado.", "La recarga se realizo con exito", "Pago completado", "La compra fue completada.", "Giro Postal fue completado.", "Bienvenido al sistema TRANSFERMOVIL".

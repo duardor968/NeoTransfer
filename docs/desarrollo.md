@@ -18,6 +18,8 @@ adb shell am instrument -w dev.duardo.neotransfer.debug.test/dev.duardo.neotrans
 
 Comprueba en la salida los casos `PASS` y el resultado final del runner; cualquier `FAIL` exige revisión. Este flujo de ADB se ha usado con el runner `BankingChecks`. La tarea Gradle `connectedDebugAndroidTest` no está validada para este runner propio. El CI público solo compila el APK instrumentado: no ejecuta la suite en un dispositivo ni comprueba aceptación bancaria.
 
+El contenido de las notificaciones se omite con `SKIP` si Android o la aplicación las tienen deshabilitadas. Para repetir solo ese bloque con el permiso habilitado en la aplicación de pruebas, usa `adb shell am instrument -w -e suite notifications dev.duardo.neotransfer.debug.test/dev.duardo.neotransfer.BankingChecks`. Restaura cualquier permiso modificado al terminar; el caso elimina su aviso sintético.
+
 Antes de considerar una publicación, comprueba por separado:
 
 1. Pruebas JVM, compilación, lint y suite instrumentada del commit que se publicará.
