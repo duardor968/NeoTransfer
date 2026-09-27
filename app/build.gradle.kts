@@ -20,8 +20,8 @@ android {
         applicationId = "dev.duardo.neotransfer"
         minSdk = 35
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.0.0-dev.3"
+        versionCode = 6
+        versionName = "1.0.0-dev.4"
         testInstrumentationRunner = "dev.duardo.neotransfer.BankingChecks"
     }
 
