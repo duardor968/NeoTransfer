@@ -1,7 +1,8 @@
 package dev.duardo.neotransfer.core
 
 /** Never log the wire value: authentication payloads encode the banking PIN. */
-class UssdCommand internal constructor(val service: Int, private val value: String) {
+class UssdCommand internal constructor(val service: Int, private val value: String,
+    internal val partialPayload: String? = null, internal val partialAgency: String? = null) {
     fun valueForTransport(): String = value
     override fun toString(): String = "UssdCommand(service=$service)"
 }
@@ -10,6 +11,7 @@ class BankCommands(private val codec: ParameterCodec = ParameterCodec()) {
     fun qrPayment(bank: Bank, pin: CharArray, qr: QrPayment, amount: Money,
                   description: String, sourceAccount: String = "0000", phone: String? = null,
                   sequence: String, seed: Int? = null): List<UssdCommand> {
+        require(bank != Bank.BFI) { "BFI no está disponible" }
         require(pin.size == bank.pinLength && pin.all { it in '0'..'9' }) { "Clave bancaria no válida" }
         validateAccount(sourceAccount)
         qr.validateDate(java.time.LocalDate.now())
@@ -36,6 +38,7 @@ class BankCommands(private val codec: ParameterCodec = ParameterCodec()) {
     }
 
     fun recharge(bank: Bank, mobile: String, amount: Money, sourceAccount: String = "0000"): UssdCommand {
+        require(bank == Bank.BPA || bank == Bank.BANDEC) { "Selecciona el contrato de recarga de este banco" }
         require(mobile.matches(Regex("[0-9]{8}|[0-9]{10}"))) { "Móvil no válido" }
         require(amount.currency == Currency.CUP && amount.amount >= java.math.BigDecimal.ONE) { "Importe no válido" }
         validateAccount(sourceAccount)
@@ -45,6 +48,7 @@ class BankCommands(private val codec: ParameterCodec = ParameterCodec()) {
     }
 
     fun bill(bank: Bank, electricity: Boolean, invoice: String, amount: Money, sourceAccount: String = "0000"): UssdCommand {
+        require(bank == Bank.BPA || bank == Bank.BANDEC) { "Selecciona el contrato de facturación de este banco" }
         require(invoice.matches(if (electricity) Regex("[0-9]{11}|[0-9]{13}") else Regex("[0-9]{14,15}"))) { "Identificador de factura no válido" }
         require(amount.currency == Currency.CUP) { "Moneda no válida" }
         validateAccount(sourceAccount)
@@ -55,6 +59,7 @@ class BankCommands(private val codec: ParameterCodec = ParameterCodec()) {
     }
 
     fun authenticate(bank: Bank, pin: CharArray, seed: Int? = null): UssdCommand {
+        require(bank != Bank.BFI) { "BFI no está disponible" }
         require(pin.size == bank.pinLength && pin.all { it in '0'..'9' }) { "Clave bancaria no válida" }
         return encoded(40, listOf(bank.code, String(pin)), seed)
     }
@@ -63,11 +68,14 @@ class BankCommands(private val codec: ParameterCodec = ParameterCodec()) {
     fun disconnect(): UssdCommand = UssdCommand(70, "*444*70#")
 
     fun bpaBalance(currency: Currency, sourceAccount: String = "0000", seed: Int? = null): UssdCommand {
+        currency.code()
         validateAccount(sourceAccount)
         return encoded(46, listOf(if (sourceAccount == "0000") currency.code() else "0", sourceAccount), seed)
     }
 
     fun transfer(request: TransferRequest, seed: Int? = null): UssdCommand {
+        require(request.bank != Bank.BFI) { "BFI no está disponible" }
+        request.amount.currency.code()
         val amountCurrency = if (request.bank == Bank.BANDEC) "0" else request.amount.currency.code()
         val accountCurrency = if (request.bank == Bank.BANDEC || request.sourceAccount != "0000") "0"
             else request.amount.currency.code()
@@ -84,6 +92,74 @@ class BankCommands(private val codec: ParameterCodec = ParameterCodec()) {
         ), seed)
     }
 
+    /** BPA/BANMET select a currency or card; BANDEC's balance action uses the active account. */
+    fun balance(bank: Bank, currency: Currency? = null, source: SourceSelector = SourceSelector.Default,
+                seed: Int? = null): UssdCommand {
+        require(bank != Bank.BFI) { "BFI no está disponible" }
+        validateBankSource(source)
+        if (bank == Bank.BANDEC) {
+            require(source == SourceSelector.Default && currency == null) { "El saldo BANDEC consulta la cuenta actual" }
+            return defaultBalance()
+        }
+        return encoded(46, listOf(accountCurrency(currency, source), source.wireValue), seed)
+    }
+
+    fun recentOperations(bank: Bank, currency: Currency? = null, source: SourceSelector = SourceSelector.Default,
+                         filter: BankOperationFilter? = null, seed: Int? = null): UssdCommand {
+        require(bank != Bank.BFI) { "BFI no está disponible" }
+        validateBankSource(source)
+        val parameters = when (bank) {
+            Bank.BPA -> {
+                require(filter == null) { "BPA consulta todas las operaciones" }
+                listOf("0", accountCurrency(currency, source), source.wireValue)
+            }
+            Bank.BANDEC -> {
+                require(currency == null && filter == null) { "BANDEC usa la cuenta actual o una cuenta explícita" }
+                listOf("0", if (source == SourceSelector.Default) "1" else "0", source.wireValue)
+            }
+            Bank.BANMET -> listOf(requireNotNull(filter) { "Selecciona el tipo de operación" }.code,
+                accountCurrency(currency, source), source.wireValue)
+            Bank.BFI -> throw IllegalArgumentException("BFI no está disponible")
+        }
+        return encoded(48, parameters, seed)
+    }
+
+    fun allAccounts(bank: Bank): UssdCommand {
+        require(bank == Bank.BANDEC || bank == Bank.BANMET) { "Consulta de todas las cuentas no disponible en este banco" }
+        return UssdCommand(58, "*444*58#")
+    }
+
+    /** This simple 60 contract is distinct from other banks' coordinate challenge flows. */
+    fun associateAccount(bank: Bank, account: String, seed: Int? = null): UssdCommand {
+        require(bank == Bank.BPA || bank == Bank.BANDEC) { "Este banco requiere otro contrato de asociación" }
+        validateBankSource(SourceSelector.Explicit(account))
+        return encoded(60, listOf(account), seed)
+    }
+
+    fun recentPayments(bank: Bank, filter: BankPaymentFilter, source: SourceSelector = SourceSelector.Default,
+                       seed: Int? = null): UssdCommand {
+        require(bank == Bank.BANDEC) { "Este contrato de últimos pagos corresponde a BANDEC" }
+        validateBankSource(source)
+        return encoded(63, listOf(filter.code) + if (source is SourceSelector.Explicit) listOf(source.account) else emptyList(), seed)
+    }
+
+    fun paymentStatus(bank: Bank, reference: String, source: SourceSelector = SourceSelector.Default,
+                      seed: Int? = null): UssdCommand {
+        require(bank == Bank.BANDEC) { "Este contrato de estado de pago corresponde a BANDEC" }
+        validateBankSource(source)
+        require(reference.isNotBlank() && reference.none { it == '*' || it == '#' || it.isISOControl() }) { "Referencia no válida" }
+        return encoded(89, listOf(reference, source.wireValue), seed)
+    }
+
+    private fun validateBankSource(source: SourceSelector) {
+        if (source is SourceSelector.Explicit) require(source.account.matches(Regex("[0-9]{16}"))) { "La cuenta debe tener 16 dígitos" }
+    }
+
+    private fun accountCurrency(currency: Currency?, source: SourceSelector): String {
+        currency?.code()
+        return if (source is SourceSelector.Explicit) "0" else requireNotNull(currency) { "Selecciona la moneda" }.code()
+    }
+
     private fun encoded(service: Int, parameters: List<String>, seed: Int?): UssdCommand {
         val payload = if (seed == null) codec.encode(parameters) else codec.encode(parameters, seed)
         // sendUssdRequest expects the final # directly, unlike a tel: URI.
@@ -94,9 +170,8 @@ class BankCommands(private val codec: ParameterCodec = ParameterCodec()) {
         require(value == "0000" || value.matches(Regex("[0-9]{16}"))) { "Cuenta de origen no válida" }
     }
 
-    private fun Currency.code(): String = when (this) {
-        Currency.CUP -> "1"
-        Currency.CUC -> "2"
-        Currency.USD -> "3"
+    private fun Currency.code(): String {
+        require(this in CurrencyContract.BANK.active) { "Moneda no disponible" }
+        return CurrencyContract.BANK.code(this)
     }
 }

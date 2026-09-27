@@ -9,9 +9,9 @@ internal fun parseServiceReceipt(text: String): BankMessage.ServicePaymentComple
     fun bank(value: String) = if (value.equals("Bandec", true)) Bank.BANDEC else Bank.BPA
     fun money(value: String, currency: String) = Money(value.toBigDecimal(), Currency.valueOf(currency.uppercase()))
     fun amount(label: String) = Regex("$label:\\s*$SERVICE_MONEY(?:\\.|\\s|$)", RegexOption.IGNORE_CASE)
-        .find(text)?.let { money(it.groupValues[1], it.groupValues[2]) }
+        .findAll(text).singleOrNull()?.let { money(it.groupValues[1], it.groupValues[2]) }
     fun reference(label: String) = Regex("$label:\\s*([A-Za-z0-9]+)(?:\\.|\\s|$)", RegexOption.IGNORE_CASE)
-        .find(text)?.groupValues?.get(1)
+        .findAll(text).singleOrNull()?.groupValues?.get(1)
     nautaReceipt.find(text)?.let { match ->
         val home = match.groupValues[2].isNotEmpty()
         if (home != match.groupValues[4].equals("pagada", true)) return null
@@ -25,8 +25,13 @@ internal fun parseServiceReceipt(text: String): BankMessage.ServicePaymentComple
         val nominal = amount("Valor del sello") ?: return null
         val paid = amount("Importe Pagado") ?: return null
         if (paid.currency != nominal.currency) return null
+        val payer = reference("\\bCI")?.takeIf { it.all(Char::isDigit) }
+        val entity = Regex("^\\s*Entidad:[ \\t]*([^\\r\\n]+)", setOf(RegexOption.IGNORE_CASE, RegexOption.MULTILINE))
+            .findAll(text).singleOrNull()?.groupValues?.get(1)?.trim()?.takeIf(String::isNotEmpty)
+        val stampReference = reference("\\bIdSello")
+        val details = if (payer != null && entity != null && stampReference != null) StampReceiptDetails(payer, entity, stampReference) else null
         return BankMessage.ServicePaymentCompleted(bank(match.groupValues[1]), "Sello del timbre", null,
-            nominal, paid, reference("Nro\\. Transaccion Banco") ?: return null)
+            nominal, paid, reference("Nro\\. Transaccion Banco") ?: return null, details)
     }
     return null
 }

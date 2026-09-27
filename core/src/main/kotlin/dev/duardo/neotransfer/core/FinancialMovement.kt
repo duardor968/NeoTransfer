@@ -1,6 +1,6 @@
 package dev.duardo.neotransfer.core
 
-enum class MovementKind { SENT, RECEIVED, PAYMENT, RECHARGE }
+enum class MovementKind { SENT, RECEIVED, PAYMENT, RECHARGE, LEDGER_CREDIT, LEDGER_DEBIT, FUEL_REFUND }
 
 /** Financial receipts only. Administrative messages never become transactions. */
 data class FinancialMovement(
@@ -15,7 +15,7 @@ data class FinancialMovement(
     val amountIsNominal: Boolean = false,
     val nominalAmount: Money? = null,
 ) {
-    val incoming get() = kind == MovementKind.RECEIVED
+    val incoming get() = kind == MovementKind.RECEIVED || kind == MovementKind.LEDGER_CREDIT || kind == MovementKind.FUEL_REFUND
     fun matches(query: String): Boolean {
         val parts = query.trim().lowercase().split(Regex("\\s+")).filter(String::isNotEmpty)
         val content = listOf(party, account, reference, purchaseId, amount.amount.toPlainString(), amount.currency.name, bank?.name)
@@ -34,7 +34,12 @@ data class FinancialMovement(
             is BankMessage.RechargeCompleted -> FinancialMovement(MovementKind.RECHARGE, message.amount, message.bank,
                 message.phone, reference = message.reference)
             is BankMessage.ServicePaymentCompleted -> FinancialMovement(MovementKind.PAYMENT, message.paid ?: message.nominal,
-                message.bank, listOfNotNull(message.service, message.account).joinToString(" · "), reference = message.reference,
+                message.bank, listOfNotNull(message.service, message.account, message.stamp?.payerIdentity, message.stamp?.recipientEntity).joinToString(" · "),
+                reference = message.reference, purchaseId = message.stamp?.stampReference,
+                amountIsNominal = message.paid == null, nominalAmount = message.nominal)
+            is BankMessage.BillPaymentCompleted -> FinancialMovement(MovementKind.PAYMENT, message.paid ?: checkNotNull(message.nominal),
+                message.bank, listOfNotNull(message.service.label, message.account).joinToString(" · "),
+                account = message.account, reference = message.reference,
                 amountIsNominal = message.paid == null, nominalAmount = message.nominal)
             else -> null
         }

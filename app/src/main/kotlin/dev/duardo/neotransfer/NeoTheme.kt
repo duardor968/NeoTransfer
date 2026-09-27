@@ -52,8 +52,11 @@ fun NeoTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> U
     MaterialTheme(colorScheme = colors, typography = Typography(
         displayLarge = type.displayLarge.copy(fontFamily = inter, fontFeatureSettings = "tnum"),
         displayMedium = type.displayMedium.copy(fontFamily = inter, fontFeatureSettings = "tnum"),
+        displaySmall = type.displaySmall.copy(fontFamily = inter, fontFeatureSettings = "tnum"),
         headlineLarge = type.headlineLarge.copy(fontFamily = inter), headlineMedium = type.headlineMedium.copy(fontFamily = inter),
+        headlineSmall = type.headlineSmall.copy(fontFamily = inter),
         titleLarge = type.titleLarge.copy(fontFamily = inter), titleMedium = type.titleMedium.copy(fontFamily = inter),
+        titleSmall = type.titleSmall.copy(fontFamily = inter),
         bodyLarge = type.bodyLarge.copy(fontFamily = inter, fontFeatureSettings = "tnum"), bodyMedium = type.bodyMedium.copy(fontFamily = inter, fontFeatureSettings = "tnum"),
         bodySmall = type.bodySmall.copy(fontFamily = inter, fontFeatureSettings = "tnum"), labelLarge = type.labelLarge.copy(fontFamily = inter),
         labelMedium = type.labelMedium.copy(fontFamily = inter), labelSmall = type.labelSmall.copy(fontFamily = inter),

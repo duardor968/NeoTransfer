@@ -1,0 +1,20 @@
+name: Mejora
+description: Proponer una capacidad o una mejora de uso.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Qué necesitas hacer
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Cómo debería funcionar
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: Referencias
+      description: Documentación pública o ejemplos con datos ficticios, si los tienes.

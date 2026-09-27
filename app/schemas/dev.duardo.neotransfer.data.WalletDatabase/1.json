@@ -1,0 +1,1567 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "4cdb48f5630b912d6e3e897103135207",
+    "entities": [
+      {
+        "tableName": "identities",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `label` TEXT NOT NULL, `documentNumber` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "value.id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.label",
+            "columnName": "label",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.documentNumber",
+            "columnName": "documentNumber",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "registrations",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `identityId` TEXT NOT NULL, `providerId` TEXT NOT NULL, `profileId` TEXT NOT NULL, `bankCode` TEXT, `subscriptionId` INTEGER, `linePhone` TEXT, `label` TEXT NOT NULL, `credentialAlias` TEXT, `enabled` INTEGER NOT NULL, `previousSubscriptionId` INTEGER, `previousLinePhone` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`identityId`) REFERENCES `identities`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "value.id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.identityId",
+            "columnName": "identityId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.providerId",
+            "columnName": "providerId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.profileId",
+            "columnName": "profileId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.bankCode",
+            "columnName": "bankCode",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.subscriptionId",
+            "columnName": "subscriptionId",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "value.linePhone",
+            "columnName": "linePhone",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.label",
+            "columnName": "label",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.credentialAlias",
+            "columnName": "credentialAlias",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.enabled",
+            "columnName": "enabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.previousSubscriptionId",
+            "columnName": "previousSubscriptionId",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "value.previousLinePhone",
+            "columnName": "previousLinePhone",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_registrations_identityId",
+            "unique": false,
+            "columnNames": [
+              "identityId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_registrations_identityId` ON `${TABLE_NAME}` (`identityId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "identities",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "identityId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "accounts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `registrationId` TEXT NOT NULL, `number` TEXT NOT NULL, `label` TEXT NOT NULL, `currency` TEXT, `isDefault` INTEGER NOT NULL, `favorite` INTEGER NOT NULL, `profileId` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`registrationId`) REFERENCES `registrations`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "value.id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.registrationId",
+            "columnName": "registrationId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.number",
+            "columnName": "number",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.label",
+            "columnName": "label",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.currency",
+            "columnName": "currency",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.isDefault",
+            "columnName": "isDefault",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.favorite",
+            "columnName": "favorite",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.profileId",
+            "columnName": "profileId",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_accounts_registrationId",
+            "unique": false,
+            "columnNames": [
+              "registrationId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_accounts_registrationId` ON `${TABLE_NAME}` (`registrationId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "registrations",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "registrationId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "cards",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `registrationId` TEXT NOT NULL, `number` TEXT NOT NULL, `label` TEXT NOT NULL, `accountId` TEXT, `currency` TEXT, `isDefault` INTEGER NOT NULL, `favorite` INTEGER NOT NULL, `profileId` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`registrationId`) REFERENCES `registrations`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`accountId`) REFERENCES `accounts`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "fields": [
+          {
+            "fieldPath": "value.id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.registrationId",
+            "columnName": "registrationId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.number",
+            "columnName": "number",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.label",
+            "columnName": "label",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.accountId",
+            "columnName": "accountId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.currency",
+            "columnName": "currency",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.isDefault",
+            "columnName": "isDefault",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.favorite",
+            "columnName": "favorite",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.profileId",
+            "columnName": "profileId",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_cards_registrationId",
+            "unique": false,
+            "columnNames": [
+              "registrationId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_cards_registrationId` ON `${TABLE_NAME}` (`registrationId`)"
+          },
+          {
+            "name": "index_cards_accountId",
+            "unique": false,
+            "columnNames": [
+              "accountId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_cards_accountId` ON `${TABLE_NAME}` (`accountId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "registrations",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "registrationId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "accounts",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "accountId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "contacts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `favorite` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "favorite",
+            "columnName": "favorite",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "contact_phones",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`contactId` TEXT NOT NULL, `position` INTEGER NOT NULL, `number` TEXT NOT NULL, `label` TEXT NOT NULL, PRIMARY KEY(`contactId`, `position`), FOREIGN KEY(`contactId`) REFERENCES `contacts`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "contactId",
+            "columnName": "contactId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "number",
+            "columnName": "number",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "label",
+            "columnName": "label",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "contactId",
+            "position"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "contacts",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "contactId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "contact_cards",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`contactId` TEXT NOT NULL, `position` INTEGER NOT NULL, `number` TEXT NOT NULL, `label` TEXT NOT NULL, `bankCode` TEXT, PRIMARY KEY(`contactId`, `position`), FOREIGN KEY(`contactId`) REFERENCES `contacts`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "contactId",
+            "columnName": "contactId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "number",
+            "columnName": "number",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "label",
+            "columnName": "label",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bankCode",
+            "columnName": "bankCode",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "contactId",
+            "position"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "contacts",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "contactId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "saved_services",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `kind` TEXT NOT NULL, `label` TEXT NOT NULL, `identifier` TEXT NOT NULL, `registrationId` TEXT, `amount` TEXT, `currency` TEXT, `fieldKey` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`registrationId`) REFERENCES `registrations`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "fields": [
+          {
+            "fieldPath": "value.id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.label",
+            "columnName": "label",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.identifier",
+            "columnName": "identifier",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.registrationId",
+            "columnName": "registrationId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.amount",
+            "columnName": "amount",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.currency",
+            "columnName": "currency",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.fieldKey",
+            "columnName": "fieldKey",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_saved_services_registrationId",
+            "unique": false,
+            "columnNames": [
+              "registrationId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_saved_services_registrationId` ON `${TABLE_NAME}` (`registrationId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "registrations",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "registrationId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "operations",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `kind` TEXT NOT NULL, `bankCode` TEXT, `subscriptionId` INTEGER NOT NULL, `destination` TEXT NOT NULL, `amount` TEXT, `currency` TEXT, `startedAt` INTEGER NOT NULL, `registrationId` TEXT, `source` TEXT NOT NULL, `phone` TEXT, `description` TEXT NOT NULL, `qr` TEXT, `status` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, `refreshTaken` INTEGER NOT NULL, `restored` INTEGER NOT NULL, `reviewRequired` INTEGER NOT NULL, `legacyState` TEXT, `specId` TEXT NOT NULL, `providerId` TEXT, `profileId` TEXT NOT NULL, `parameters` TEXT NOT NULL, `httpEvidence` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "value.id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.bankCode",
+            "columnName": "bankCode",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.subscriptionId",
+            "columnName": "subscriptionId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.destination",
+            "columnName": "destination",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.amount",
+            "columnName": "amount",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.currency",
+            "columnName": "currency",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.startedAt",
+            "columnName": "startedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.registrationId",
+            "columnName": "registrationId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.phone",
+            "columnName": "phone",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.description",
+            "columnName": "description",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.qr",
+            "columnName": "qr",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.refreshTaken",
+            "columnName": "refreshTaken",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.restored",
+            "columnName": "restored",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.reviewRequired",
+            "columnName": "reviewRequired",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.legacyState",
+            "columnName": "legacyState",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.specId",
+            "columnName": "specId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.providerId",
+            "columnName": "providerId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.profileId",
+            "columnName": "profileId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.parameters",
+            "columnName": "parameters",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.httpEvidence",
+            "columnName": "httpEvidence",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_operations_status",
+            "unique": false,
+            "columnNames": [
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_operations_status` ON `${TABLE_NAME}` (`status`)"
+          },
+          {
+            "name": "index_operations_registrationId",
+            "unique": false,
+            "columnNames": [
+              "registrationId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_operations_registrationId` ON `${TABLE_NAME}` (`registrationId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "events",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`bodyHash` TEXT NOT NULL, `id` TEXT NOT NULL, `source` TEXT NOT NULL, `sourceId` TEXT, `sender` TEXT NOT NULL, `body` TEXT, `receivedAt` INTEGER NOT NULL, `subscriptionId` INTEGER, `canonicalEventId` TEXT NOT NULL, `bodyWithheld` INTEGER NOT NULL, `originalSource` TEXT, `originalSourceId` TEXT, `evidenceEligible` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "bodyHash",
+            "columnName": "bodyHash",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.sourceId",
+            "columnName": "sourceId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.sender",
+            "columnName": "sender",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.body",
+            "columnName": "body",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.receivedAt",
+            "columnName": "receivedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.subscriptionId",
+            "columnName": "subscriptionId",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "value.canonicalEventId",
+            "columnName": "canonicalEventId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.bodyWithheld",
+            "columnName": "bodyWithheld",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.originalSource",
+            "columnName": "originalSource",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.originalSourceId",
+            "columnName": "originalSourceId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.evidenceEligible",
+            "columnName": "evidenceEligible",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_events_canonicalEventId",
+            "unique": false,
+            "columnNames": [
+              "canonicalEventId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_events_canonicalEventId` ON `${TABLE_NAME}` (`canonicalEventId`)"
+          },
+          {
+            "name": "index_events_bodyHash",
+            "unique": false,
+            "columnNames": [
+              "bodyHash"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_events_bodyHash` ON `${TABLE_NAME}` (`bodyHash`)"
+          },
+          {
+            "name": "index_events_source_sourceId",
+            "unique": true,
+            "columnNames": [
+              "source",
+              "sourceId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_events_source_sourceId` ON `${TABLE_NAME}` (`source`, `sourceId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "receipts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`normalizedReference` TEXT, `id` TEXT NOT NULL, `eventId` TEXT NOT NULL, `bankCode` TEXT, `subscriptionId` INTEGER, `kind` TEXT NOT NULL, `reference` TEXT, `amount` TEXT NOT NULL, `currency` TEXT NOT NULL, `party` TEXT NOT NULL, `account` TEXT, `purchaseId` TEXT, `bankDate` TEXT, `nominalAmount` TEXT, `amountIsNominal` INTEGER NOT NULL, `operationId` TEXT, `referenceConflict` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`eventId`) REFERENCES `events`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "normalizedReference",
+            "columnName": "normalizedReference",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.eventId",
+            "columnName": "eventId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.bankCode",
+            "columnName": "bankCode",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.subscriptionId",
+            "columnName": "subscriptionId",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "value.kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.reference",
+            "columnName": "reference",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.amount",
+            "columnName": "amount",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.currency",
+            "columnName": "currency",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.party",
+            "columnName": "party",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.account",
+            "columnName": "account",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.purchaseId",
+            "columnName": "purchaseId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.bankDate",
+            "columnName": "bankDate",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.nominalAmount",
+            "columnName": "nominalAmount",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.amountIsNominal",
+            "columnName": "amountIsNominal",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.operationId",
+            "columnName": "operationId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.referenceConflict",
+            "columnName": "referenceConflict",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_receipts_eventId",
+            "unique": true,
+            "columnNames": [
+              "eventId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_receipts_eventId` ON `${TABLE_NAME}` (`eventId`)"
+          },
+          {
+            "name": "index_receipts_normalizedReference",
+            "unique": false,
+            "columnNames": [
+              "normalizedReference"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_receipts_normalizedReference` ON `${TABLE_NAME}` (`normalizedReference`)"
+          },
+          {
+            "name": "index_receipts_operationId",
+            "unique": false,
+            "columnNames": [
+              "operationId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_receipts_operationId` ON `${TABLE_NAME}` (`operationId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "events",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "eventId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "movements",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `receiptId` TEXT NOT NULL, `kind` TEXT NOT NULL, `amount` TEXT NOT NULL, `currency` TEXT NOT NULL, `occurredAt` INTEGER NOT NULL, `incoming` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`receiptId`) REFERENCES `receipts`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "value.id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.receiptId",
+            "columnName": "receiptId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.amount",
+            "columnName": "amount",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.currency",
+            "columnName": "currency",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.occurredAt",
+            "columnName": "occurredAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.incoming",
+            "columnName": "incoming",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_movements_receiptId",
+            "unique": true,
+            "columnNames": [
+              "receiptId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_movements_receiptId` ON `${TABLE_NAME}` (`receiptId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "receipts",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "receiptId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "balances",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `bankCode` TEXT NOT NULL, `subscriptionId` INTEGER NOT NULL, `at` INTEGER NOT NULL, `account` TEXT, `available` TEXT NOT NULL, `currency` TEXT NOT NULL, `ledger` TEXT, `label` TEXT, `registrationId` TEXT, `cardId` TEXT, `accountId` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "value.id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.bankCode",
+            "columnName": "bankCode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.subscriptionId",
+            "columnName": "subscriptionId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.at",
+            "columnName": "at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.account",
+            "columnName": "account",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.available",
+            "columnName": "available",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.currency",
+            "columnName": "currency",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.ledger",
+            "columnName": "ledger",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.label",
+            "columnName": "label",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.registrationId",
+            "columnName": "registrationId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.cardId",
+            "columnName": "cardId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.accountId",
+            "columnName": "accountId",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_balances_bankCode_subscriptionId",
+            "unique": false,
+            "columnNames": [
+              "bankCode",
+              "subscriptionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_balances_bankCode_subscriptionId` ON `${TABLE_NAME}` (`bankCode`, `subscriptionId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "used_references",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`normalizedReference` TEXT NOT NULL, `bankCode` TEXT NOT NULL, `reference` TEXT NOT NULL, `operationId` TEXT, PRIMARY KEY(`bankCode`, `normalizedReference`))",
+        "fields": [
+          {
+            "fieldPath": "normalizedReference",
+            "columnName": "normalizedReference",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.bankCode",
+            "columnName": "bankCode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.reference",
+            "columnName": "reference",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.operationId",
+            "columnName": "operationId",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "bankCode",
+            "normalizedReference"
+          ]
+        }
+      },
+      {
+        "tableName": "wallet_settings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`singleton` INTEGER NOT NULL, `activeBankCode` TEXT NOT NULL, `subscriptionId` INTEGER NOT NULL, `selectedRegistrationId` TEXT, `selectedCardId` TEXT, `selectedAccountId` TEXT, PRIMARY KEY(`singleton`))",
+        "fields": [
+          {
+            "fieldPath": "singleton",
+            "columnName": "singleton",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.activeBankCode",
+            "columnName": "activeBankCode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.subscriptionId",
+            "columnName": "subscriptionId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.selectedRegistrationId",
+            "columnName": "selectedRegistrationId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.selectedCardId",
+            "columnName": "selectedCardId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.selectedAccountId",
+            "columnName": "selectedAccountId",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "singleton"
+          ]
+        }
+      },
+      {
+        "tableName": "refresh_request",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`singleton` INTEGER NOT NULL, `bankCode` TEXT NOT NULL, `subscriptionId` INTEGER NOT NULL, `dueAt` INTEGER NOT NULL, PRIMARY KEY(`singleton`))",
+        "fields": [
+          {
+            "fieldPath": "singleton",
+            "columnName": "singleton",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.bankCode",
+            "columnName": "bankCode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.subscriptionId",
+            "columnName": "subscriptionId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.dueAt",
+            "columnName": "dueAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "singleton"
+          ]
+        }
+      },
+      {
+        "tableName": "metadata",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`key` TEXT NOT NULL, `value` TEXT NOT NULL, PRIMARY KEY(`key`))",
+        "fields": [
+          {
+            "fieldPath": "key",
+            "columnName": "key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value",
+            "columnName": "value",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "key"
+          ]
+        }
+      },
+      {
+        "tableName": "legacy_archive",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`key` TEXT NOT NULL, `safeValue` TEXT NOT NULL, `issue` TEXT, PRIMARY KEY(`key`))",
+        "fields": [
+          {
+            "fieldPath": "key",
+            "columnName": "key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "safeValue",
+            "columnName": "safeValue",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "issue",
+            "columnName": "issue",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "key"
+          ]
+        }
+      },
+      {
+        "tableName": "history_entries",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`normalizedReference` TEXT, `id` TEXT NOT NULL, `bankCode` TEXT NOT NULL, `subscriptionId` INTEGER, `postedOn` TEXT NOT NULL, `service` TEXT NOT NULL, `incoming` INTEGER NOT NULL, `amount` TEXT NOT NULL, `currency` TEXT NOT NULL, `reference` TEXT, `transactionNumber` TEXT, `account` TEXT, `registrationId` TEXT, `accountId` TEXT, `cardId` TEXT, `queryOperationId` TEXT, `receiptId` TEXT, `ambiguous` INTEGER NOT NULL, `referenceConflict` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`receiptId`) REFERENCES `receipts`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "fields": [
+          {
+            "fieldPath": "normalizedReference",
+            "columnName": "normalizedReference",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.bankCode",
+            "columnName": "bankCode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.subscriptionId",
+            "columnName": "subscriptionId",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "value.postedOn",
+            "columnName": "postedOn",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.service",
+            "columnName": "service",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.incoming",
+            "columnName": "incoming",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.amount",
+            "columnName": "amount",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.currency",
+            "columnName": "currency",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.reference",
+            "columnName": "reference",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.transactionNumber",
+            "columnName": "transactionNumber",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.account",
+            "columnName": "account",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.registrationId",
+            "columnName": "registrationId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.accountId",
+            "columnName": "accountId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.cardId",
+            "columnName": "cardId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.queryOperationId",
+            "columnName": "queryOperationId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.receiptId",
+            "columnName": "receiptId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.ambiguous",
+            "columnName": "ambiguous",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.referenceConflict",
+            "columnName": "referenceConflict",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_history_entries_normalizedReference",
+            "unique": false,
+            "columnNames": [
+              "normalizedReference"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_history_entries_normalizedReference` ON `${TABLE_NAME}` (`normalizedReference`)"
+          },
+          {
+            "name": "index_history_entries_receiptId",
+            "unique": false,
+            "columnNames": [
+              "receiptId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_history_entries_receiptId` ON `${TABLE_NAME}` (`receiptId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "receipts",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "receiptId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "history_observations",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`eventId` TEXT NOT NULL, `position` INTEGER NOT NULL, `entryId` TEXT NOT NULL, PRIMARY KEY(`eventId`, `position`), FOREIGN KEY(`eventId`) REFERENCES `events`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`entryId`) REFERENCES `history_entries`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "value.eventId",
+            "columnName": "eventId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.entryId",
+            "columnName": "entryId",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "eventId",
+            "position"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_history_observations_entryId",
+            "unique": false,
+            "columnNames": [
+              "entryId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_history_observations_entryId` ON `${TABLE_NAME}` (`entryId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "events",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "eventId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "history_entries",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "entryId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "notification_outbox",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`receiptId` TEXT NOT NULL, `queuedAt` INTEGER NOT NULL, PRIMARY KEY(`receiptId`), FOREIGN KEY(`receiptId`) REFERENCES `receipts`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "receiptId",
+            "columnName": "receiptId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "queuedAt",
+            "columnName": "queuedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "receiptId"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "receipts",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "receiptId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '4cdb48f5630b912d6e3e897103135207')"
+    ]
+  }
+}

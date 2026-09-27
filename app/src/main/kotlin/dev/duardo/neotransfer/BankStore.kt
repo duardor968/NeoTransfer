@@ -25,11 +25,13 @@ class MoneyAction(
 }
 
 class PendingRecord(val action: MoneyAction, val subscription: Int, val startedAt: Instant,
-                    var refreshTaken: Boolean = false, val id: String = java.util.UUID.randomUUID().toString()) {
+                    var refreshTaken: Boolean = false, val id: String = java.util.UUID.randomUUID().toString(),
+                    val registrationId: String? = null) {
     val transfer = if (action.kind == ActionKind.TRANSFER) PendingTransfer(action.transferRequest(), startedAt, subscription) else null
 }
 
 data class Recipient(val name: String, val card: String, val phone: String?)
+
 class UncertainTransfer(val id: String, val request: TransferRequest, val subscription: Int, val startedAt: Instant) {
     fun matches(message: BankMessage, time: Instant, sim: Int?): Boolean =
         PendingTransfer(request, startedAt, subscription).accept(message, time, sim)
@@ -45,12 +47,37 @@ class BankStore(context: Context) {
         get() = prefs.getInt("subscription", -1)
         set(value) { check(prefs.edit().putInt("subscription", value).commit()) }
 
+    /** Freeze the legacy vault's line once; changing the UI SIM never rebinds its credentials. */
+    val legacyAccessSubscription: Int
+        get() {
+            if (prefs.contains("legacy_access_subscription")) return prefs.getInt("legacy_access_subscription", -1)
+            val original = subscription
+            if (original >= 0) check(prefs.edit().putInt("legacy_access_subscription", original).commit())
+            return original
+        }
+
+    fun accessGeneration(registrationId: String): Long = prefs.getLong("access_generation_$registrationId", 0)
+
+    @Synchronized
+    fun advanceAccessGeneration(registrationId: String) {
+        require(registrationId.isNotBlank())
+        val current = accessGeneration(registrationId)
+        check(current < Long.MAX_VALUE)
+        check(prefs.edit().putLong("access_generation_$registrationId", current + 1).commit())
+    }
+
     fun pending(): PendingRecord? = prefs.getString("pending", null)?.let {
         val json = JSONObject(it)
         PendingRecord(MoneyAction(ActionKind.valueOf(json.getString("kind")), Bank.valueOf(json.getString("bank")),
             json.getString("destination"), Money(json.getString("amount").toBigDecimal(), Currency.valueOf(json.getString("currency"))),
-            json.getString("source"), json.optString("phone").takeIf(String::isNotEmpty)),
-            json.getInt("subscription"), Instant.ofEpochMilli(json.getLong("started")), json.getBoolean("refresh"), json.getString("id"))
+            json.getString("source"), json.optString("phone").takeIf(String::isNotEmpty),
+            json.optJSONObject("qr")?.let { qr -> QrPayment(qr.getString("transactionId"), qr.getString("provider"),
+                Money(qr.getString("amount").toBigDecimal(), Currency.valueOf(qr.getString("currency"))),
+                qr.getString("auxiliary"), qr.optString("description"), qr.optString("descriptionHint"),
+                qr.optString("qrId").takeIf(String::isNotEmpty), qr.optString("validFrom").takeIf(String::isNotEmpty)?.let(java.time.LocalDate::parse),
+                qr.optString("validThrough").takeIf(String::isNotEmpty)?.let(java.time.LocalDate::parse)) }, json.optString("description")),
+            json.getInt("subscription"), Instant.ofEpochMilli(json.getLong("started")), json.getBoolean("refresh"), json.getString("id"),
+            json.optString("registrationId").takeIf(String::isNotEmpty))
     }
 
     fun savePending(record: PendingRecord?) {
@@ -60,6 +87,13 @@ class BankStore(context: Context) {
             put("destination", r.action.destination); put("amount", r.action.amount.amount.toPlainString())
             put("currency", r.action.amount.currency.name); put("source", r.action.source)
             put("phone", r.action.phone.orEmpty()); put("subscription", r.subscription)
+            put("description", r.action.description); put("registrationId", r.registrationId.orEmpty())
+            r.action.qr?.let { qr -> put("qr", JSONObject().apply {
+                put("transactionId", qr.transactionId); put("provider", qr.provider); put("amount", qr.amount.amount.toPlainString())
+                put("currency", qr.amount.currency.name); put("auxiliary", qr.auxiliary); put("description", qr.description)
+                put("descriptionHint", qr.descriptionHint); put("qrId", qr.qrId.orEmpty())
+                put("validFrom", qr.validFrom?.toString().orEmpty()); put("validThrough", qr.validThrough?.toString().orEmpty())
+            }) }
             put("started", r.startedAt.toEpochMilli()); put("refresh", r.refreshTaken)
         }.toString() }
         // Commit before touching the modem. A failed write must prevent submission.

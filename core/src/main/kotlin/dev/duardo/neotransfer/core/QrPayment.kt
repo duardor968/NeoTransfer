@@ -80,22 +80,5 @@ data class QrPayment(
 }
 
 /** Reproduces the original Android 8+ grouping, including its comparison before adding '*'. */
-internal fun partialCommands(service: Int, bank: Bank, payload: String, sequence: String): List<UssdCommand> {
-    require(sequence.matches(Regex("(?:[0-9]|[1-5][0-9])[0-5][0-9]")))
-    val groups = mutableListOf<String>()
-    var group = ""
-    for (atom in payload.split('*')) {
-        require(atom.isNotEmpty())
-        if (group.isNotEmpty() && atom.length + group.length + 32 > 52) {
-            groups += group
-            group = ""
-        }
-        group += "*$atom"
-    }
-    groups += group
-    require(groups.size <= 99) { "El QR contiene demasiados datos" }
-    return groups.mapIndexed { index, part ->
-        val position = (index + 1).toString().padStart(2, '0') + groups.size.toString().padStart(2, '0')
-        UssdCommand(service, "*444*110*$position*$sequence*$service*${bank.code}$part*1260416#")
-    }
-}
+internal fun partialCommands(service: Int, bank: Bank, payload: String, sequence: String): List<UssdCommand> =
+    partialEncodedCommands(service, bank.code, payload, sequence)
