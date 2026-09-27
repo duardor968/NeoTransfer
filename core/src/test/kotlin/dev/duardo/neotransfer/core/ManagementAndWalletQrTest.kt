@@ -8,6 +8,20 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ManagementAndWalletQrTest {
+    @Test fun `obsolete CUC QR remains parseable but cannot become a wallet payment`() {
+        val qr = QrPayment.parse(mapOf("id_transaccion" to "TEST", "importe" to "10.50", "moneda" to "CUC", "numero_proveedor" to "12"))
+        assertEquals(Currency.CUC, qr.amount.currency)
+        val identity = ProviderIdentity(ProviderId.MITRANSFER)
+        assertFailsWith<IllegalArgumentException> {
+            WalletQrOperations.fromQr(identity, SourceSelector.Default, Currency.CUP, qr, qr.amount)
+        }
+        val valid = load("wallet-qr").first { it.request.operationId == "wallet.qr.dynamic" }.request
+        val direct = ServiceRequest(valid.operationId, valid.identity, valid.source, valid.currency,
+            valid.values + ("amountCurrency" to "2"))
+        assertTrue(WalletQrOperations.validate(direct).any { it.fieldKey == "amountCurrency" })
+        assertFailsWith<IllegalArgumentException> { WalletQrOperations.encode(direct, 0) }
+    }
+
     @Test
     fun `metro association update and direct inquiries remain distinct contracts`() {
         val metro = ProviderIdentity(ProviderId.BANMET)

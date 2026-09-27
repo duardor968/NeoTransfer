@@ -7,7 +7,7 @@ object WalletQrOperations {
     private val pin = contractField("pin", "PIN del monedero MiTransfer", FieldKind.SECRET).copy(suppliedByAccess = true)
     private val baseFields = listOf(pin, contractField("transaction", "Identificador del pago", FieldKind.TEXT),
         contractField("amount", "Importe", FieldKind.AMOUNT),
-        contractChoice("amountCurrency", "Moneda del importe", "1" to "CUP", "2" to "CUC", "3" to "USD"),
+        contractChoice("amountCurrency", "Moneda del importe", "1" to "CUP", "3" to "USD"),
         contractField("provider", "Número del proveedor", FieldKind.TEXT), contractField("auxiliary", "Referencia auxiliar", FieldKind.TEXT),
         contractField("phone", "Móvil de confirmación", FieldKind.PHONE, false))
     private fun route(profile: ProfileId): String = when (profile) {

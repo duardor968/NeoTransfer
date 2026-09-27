@@ -12,6 +12,29 @@ class BankCommandsTest {
     private val commands = BankCommands()
 
     @Test
+    fun `direct builders reject retired CUC while USD keeps its original wire code`() {
+        val source = SourceSelector.Explicit("0000000000000001")
+        val retired = Money(BigDecimal.ONE, Currency.CUC)
+        assertFailsWith<IllegalArgumentException> { commands.bpaBalance(Currency.CUC) }
+        assertFailsWith<IllegalArgumentException> { commands.bpaBalance(Currency.CUC, source.account) }
+        assertFailsWith<IllegalArgumentException> { commands.balance(Bank.BPA, Currency.CUC, source) }
+        assertFailsWith<IllegalArgumentException> { commands.recentOperations(Bank.BPA, Currency.CUC, source) }
+        for (bank in listOf(Bank.BPA, Bank.BANDEC, Bank.BANMET)) {
+            assertFailsWith<IllegalArgumentException> {
+                commands.transfer(TransferRequest(bank, "0000000000000002", retired))
+            }
+        }
+        val qr = QrPayment.parse(mapOf("id_transaccion" to "OLD-CURRENCY", "importe" to "1.00",
+            "moneda" to "CUC", "numero_proveedor" to "123"))
+        assertFailsWith<IllegalArgumentException> {
+            commands.qrPayment(Bank.BPA, "1234".toCharArray(), qr, retired, "", sequence = "001")
+        }
+        val payload = ParameterCodec().encode(listOf("3", "0000"), 0)
+        assertEquals("*444*46*$payload*1260416#", commands.bpaBalance(Currency.USD, seed = 0).valueForTransport())
+        assertEquals("2", CurrencyContract.BANK.code(Currency.CUC))
+    }
+
+    @Test
     fun `bank authentication envelopes match independent reference examples`() {
         assertEquals("*444*40*000217*047527*1260416#", commands.authenticate(Bank.BPA, "1234".toCharArray(), 0).valueForTransport())
         assertEquals("*444*40*000257*0545323*1260416#", commands.authenticate(Bank.BANDEC, "12345".toCharArray(), 0).valueForTransport())

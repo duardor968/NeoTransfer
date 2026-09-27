@@ -17,10 +17,11 @@ object OperationCatalog {
         setOf(Bank.BPA, Bank.BANDEC, Bank.BANMET).map(ProviderIdentity::forBank).toSet(), null, emptyList(),
         OperationEffect.MONEY, OperationTransport.ENCODED_USSD, requiresSession = false,
         evidence = listOf(ContractReference("BankCommands.qrPayment", "QR validado con identidad e importe inmutables")),
-        sourcePolicy = SourcePolicy.DEFAULT_OR_EXPLICIT, currencies = CurrencyContract.BANK.supported)
+        sourcePolicy = SourcePolicy.DEFAULT_OR_EXPLICIT, currencies = CurrencyContract.BANK.active)
     val all: List<OperationSpec> = (BankingOperations.all + BankManagementOperations.all +
         ServiceOperations.all + WalletOperations.all + WalletQrOperations.all + TelecomOperations.all + cardBalance)
         .filter { it.identities.all(::supports) }
+        .map { spec -> if (Currency.CUC in spec.currencies) spec.copy(currencies = spec.currencies - Currency.CUC) else spec }
 
     fun find(id: String): OperationSpec? = listOf(bankQr, cardSelect, originBalance).singleOrNull { it.id == id }
         ?: all.singleOrNull { it.id == id }

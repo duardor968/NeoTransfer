@@ -6,6 +6,11 @@ import kotlin.test.*
 class BankHistoryTest {
     private val parser = BankSmsParser()
 
+    @Test fun `historical CUC statement remains readable without conversion`() {
+        val result = assertIs<BankHistory>(parser.parse("PAGOxMOVIL", statement().replace(";CUP;", ";CUC;")))
+        assertEquals(listOf(Currency.CUC, Currency.CUC, Currency.CUC), result.entries.map { it.amount.currency })
+    }
+
     @Test fun `BANDEC statement preserves day direction reference and service without inventing account or clock`() {
         val result = assertIs<BankHistory>(parser.parse("PAGOxMOVIL", statement()))
         assertEquals(Bank.BANDEC, result.bank)

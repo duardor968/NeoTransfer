@@ -53,6 +53,10 @@ data class OperationSpec(
             add(OperationValidationError("source", "Selecciona un origen compatible"))
         if (request.currency != null && currencies.isNotEmpty() && request.currency !in currencies)
             add(OperationValidationError("currency", "Moneda no admitida por esta operación"))
+        if (request.currency == Currency.CUC)
+            add(OperationValidationError("currency", "CUC ya no está disponible"))
+        if (request.values["amountCurrency"] == CurrencyContract.BANK.code(Currency.CUC))
+            add(OperationValidationError("amountCurrency", "CUC ya no está disponible"))
         for (field in fields) {
             val value = request.values[field.key].orEmpty()
             if (value.isBlank()) {

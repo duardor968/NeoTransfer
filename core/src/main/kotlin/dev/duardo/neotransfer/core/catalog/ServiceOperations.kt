@@ -5,7 +5,7 @@ import dev.duardo.neotransfer.core.miturno.MiTurnoContracts
 /** Independently implemented contracts observed in Transfermóvil 1.260416. No network acceptance is implied. */
 object ServiceOperations {
     private val banks = setOf(ProviderId.BPA, ProviderId.BANDEC, ProviderId.BANMET)
-    private val bankCurrencies = listOf(Currency.CUP, Currency.CUC, Currency.USD)
+    private val bankCurrencies = CurrencyContract.BANK.active
     private val amount = contractField("amount", "Importe en CUP", FieldKind.AMOUNT)
     private val optionalAmount = amount.copy(required = false, label = "Importe parcial en CUP (vacío: total)")
     private val phone = contractField("phone", "Móvil de confirmación", FieldKind.PHONE, false)
@@ -49,7 +49,7 @@ object ServiceOperations {
             contractField("entity", "Código de entidad receptora"))),
         spec("fine.contravention", "Multa de contravención", 96, "j9EpxD26FF:217", listOf(
             contractField("fine", "Número de multa"), identity, amount,
-            contractChoice("amountCurrency", "Moneda de la multa", "1" to "CUP", "2" to "CUC"),
+            contractChoice("amountCurrency", "Moneda de la multa", "1" to "CUP"),
             contractField("decree", "Decreto"), contractField("article", "Artículo"), contractField("section", "Inciso"), date)),
         spec("fine.traffic", "Multa de tránsito", 97, "cLvoxQAY8E:386", listOf(contractField("fine", "Número de multa"),
             contractField("article", "Artículo"), contractField("section", "Inciso"), contractField("municipality", "Código de municipio"),
@@ -100,7 +100,7 @@ object ServiceOperations {
             OperationEffect.QUERY, sourcePolicy = SourcePolicy.NONE),
         spec("cash.extra", "Caja Extra", 32, "UTk9UWZYxf:363", listOf(contractField("pin", "Clave bancaria", FieldKind.SECRET).copy(suppliedByAccess = true),
             contractField("transaction", "Identificador del pago", FieldKind.TEXT), amount,
-            contractChoice("amountCurrency", "Moneda del importe", "1" to "CUP", "2" to "CUC", "3" to "USD"),
+            contractChoice("amountCurrency", "Moneda del importe", "1" to "CUP", "3" to "USD"),
             contractField("provider", "Número del proveedor"), contractField("auxiliary", "Referencia auxiliar", FieldKind.TEXT),
             contractField("description", "Descripción", FieldKind.TEXT, false), phone)),
     ) + ServiceQueryOperations.all

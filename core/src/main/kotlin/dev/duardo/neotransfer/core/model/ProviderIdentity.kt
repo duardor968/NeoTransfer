@@ -49,4 +49,6 @@ enum class CurrencyContract(private val currencies: List<Currency>) {
     }
 
     val supported: List<Currency> get() = currencies
+    /** Currencies offered for new operations; [supported] retains historical wire codes. */
+    val active: List<Currency> get() = currencies.filterNot { it == Currency.CUC }
 }

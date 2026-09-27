@@ -143,8 +143,8 @@ private fun serviceOrigins(spec: OperationSpec, state: AppUiState): List<Service
         val authentication = spec.authenticationIdentity ?: execution
         val registrations = state.wallet.registrations.filter { it.identity() == authentication }
         val linkedCard = execution.profile == ProfileId.CLASSIC && authentication != execution
-        val compatible = products.filter { it.identity == execution &&
-            (execution.provider != ProviderId.MITRANSFER || spec.currencies.isEmpty() || it.currency == null || it.currency in spec.currencies) &&
+        val compatible = products.filter { it.identity == execution && it.currency != Currency.CUC &&
+            (execution.provider != ProviderId.MITRANSFER || spec.activeCurrencies.isEmpty() || it.currency == null || it.currency in spec.activeCurrencies) &&
             (it.registrationId == null || registrations.any { registration -> registration.id == it.registrationId }) }
         if (linkedCard) {
             compatible.filter { it.source is SourceSelector.Explicit }.forEach { product ->
@@ -200,7 +200,7 @@ internal fun ServiceForm(spec: OperationSpec, state: AppUiState, actions: UiActi
     var secretValues by remember(spec.id) { mutableStateOf(emptyMap<String, String>()) }
     val values = savedValues + secretValues
     var currency by rememberSaveable(spec.id) { mutableStateOf(selectedProduct(state)?.takeIf {
-        spec.supports(it.identity) && it.currency in spec.currencies
+        spec.supports(it.identity) && it.currency in spec.activeCurrencies
     }?.currency?.name) }
     var manualSource by rememberSaveable(spec.id) { mutableStateOf("") }
     var errors by remember(spec.id) { mutableStateOf(emptyList<OperationValidationError>()) }
@@ -273,10 +273,11 @@ internal fun ServiceForm(spec: OperationSpec, state: AppUiState, actions: UiActi
             Detail("Tarjeta vinculada", origin.product.number?.let(::readableAccount).orEmpty())
         if (origin?.manual == true) Field("Cuenta de origen", manualSource, { manualSource = digits(it, 30) }, KeyboardType.Number)
         if (spec.sourcePolicy != SourcePolicy.NONE) TextButton(onClick = addSource) { Text("Añadir tarjeta o cuenta") }
-        if (spec.currencies.isNotEmpty()) {
-            if (origin?.product?.currency != null && !spec.hasAmountCurrency(identity)) Detail("Moneda", origin.product.currency.name)
-            else if (spec.currencies.size == 1) Detail(if (identity?.provider == ProviderId.MITRANSFER) "Monedero" else "Moneda", spec.currencies.single().name)
-            else ChoiceField(selectedCurrency?.name ?: if (identity?.provider == ProviderId.MITRANSFER) "Monedero" else "Moneda", spec.currencies.map { it.name to it.name }) { currency = it }
+        if (spec.activeCurrencies.isNotEmpty()) {
+            if (origin?.product?.currency in spec.activeCurrencies && !spec.hasAmountCurrency(identity))
+                Detail("Moneda", requireNotNull(origin?.product?.currency).name)
+            else if (spec.activeCurrencies.size == 1) Detail(if (identity?.provider == ProviderId.MITRANSFER) "Monedero" else "Moneda", spec.activeCurrencies.single().name)
+            else ChoiceField(selectedCurrency?.name ?: if (identity?.provider == ProviderId.MITRANSFER) "Monedero" else "Moneda", spec.activeCurrencies.map { it.name to it.name }) { currency = it }
         }
         if (references.isNotEmpty()) {
             ChoiceField(selectedReference?.label ?: "Elegir referencia guardada", references.map { it.id to "${it.label} · ${it.identifier}" }) { id ->
@@ -368,6 +369,7 @@ internal fun ServiceForm(spec: OperationSpec, state: AppUiState, actions: UiActi
                     val original = (QrInput.parse(text) as? QrInput.Payment)?.value ?: error("Lee el QR del comercio")
                     original.validateDate(java.time.LocalDate.now())
                     require(original.service == 31) { "Caja Extra requiere un QR estático" }
+                    require(original.amount.currency in CurrencyContract.BANK.active) { "CUC ya no está disponible" }
                     original
                 }.onSuccess { original ->
                     cashQr = original

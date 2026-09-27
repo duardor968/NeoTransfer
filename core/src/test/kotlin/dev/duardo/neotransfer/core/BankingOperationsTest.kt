@@ -29,11 +29,26 @@ class BankingOperationsTest {
 
     @Test
     fun `currency belongs to the operation contract not the account`() {
+        assertEquals(listOf(Currency.CUP, Currency.USD), CurrencyContract.BANK.active)
+        assertEquals(listOf(Currency.CUP, Currency.CUC, Currency.USD), CurrencyContract.BANK.supported)
+        assertEquals("2", CurrencyContract.BANK.code(Currency.CUC))
         assertEquals("3", CurrencyContract.BANK.code(Currency.USD))
         assertFailsWith<IllegalArgumentException> { CurrencyContract.BANK.code(Currency.EUR) }
         assertEquals("12345678901234567890", SourceSelector.Explicit("12345678901234567890").wireValue)
         assertEquals(SourceSelector.Default, SourceSelector.fromLegacy("0000"))
         assertFailsWith<IllegalArgumentException> { commands.balance(Bank.BFI, source = SourceSelector.Explicit("12345")) }
+    }
+
+    @Test fun `new bank transfer rejects CUC while USD retains wire code three`() {
+        val identity = ProviderIdentity.forBank(Bank.BPA)
+        val values = mapOf("destination" to "0000000000000001", "amount" to "10.50")
+        val obsolete = ServiceRequest("bpa.transfer", identity, currency = Currency.CUC, values = values)
+        assertTrue(BankingOperations.validate(obsolete).any { it.fieldKey == "currency" })
+        assertFailsWith<IllegalArgumentException> { BankingOperations.encode(obsolete, 0) }
+        val usd = ServiceRequest("bpa.transfer", identity, currency = Currency.USD, values = values)
+        assertEquals(emptyList(), BankingOperations.validate(usd))
+        assertEquals(envelope(45, "0000000000000001", "10.50", "3", "3", "0000", "0000", "0", "0000", "0"),
+            BankingOperations.encode(usd, 0).valueForTransport())
     }
 
     @Test

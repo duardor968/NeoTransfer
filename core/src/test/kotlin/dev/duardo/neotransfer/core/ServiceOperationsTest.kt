@@ -115,6 +115,21 @@ class ServiceOperationsTest {
             values = dateRequest.values + ("date" to "31/02/2026"))).any { it.fieldKey == "date" })
     }
 
+    @Test fun `service amount currency code two and CUC account requests cannot be submitted`() {
+        val cash = fixtureRows().first { it.request.operationId == "service.cash.extra" }.request
+        assertEquals(listOf("1", "3"), ServiceOperations.all.single { it.id == cash.operationId }
+            .fields.single { it.key == "amountCurrency" }.options.map { it.value })
+        val obsoleteAmount = ServiceRequest(cash.operationId, cash.identity, cash.source, cash.currency,
+            cash.values + ("amountCurrency" to "2"))
+        assertTrue(ServiceOperations.validate(obsoleteAmount).any { it.fieldKey == "amountCurrency" })
+        assertFailsWith<IllegalArgumentException> { ServiceOperations.encode(obsoleteAmount, 0) }
+        val obsoleteSource = ServiceRequest(cash.operationId, cash.identity, cash.source, Currency.CUC, cash.values)
+        assertTrue(ServiceOperations.validate(obsoleteSource).any { it.fieldKey == "currency" })
+        assertFailsWith<IllegalArgumentException> { ServiceOperations.encode(obsoleteSource, 0) }
+        assertEquals(listOf("1"), ServiceOperations.all.single { it.id == "service.fine.contravention" }
+            .fields.single { it.key == "amountCurrency" }.options.map { it.value })
+    }
+
     @Test
     fun `vault PIN is absent from the form but required by the encoder`() {
         val fixture = fixtureRows().first { it.name == "cash-extra" }.request

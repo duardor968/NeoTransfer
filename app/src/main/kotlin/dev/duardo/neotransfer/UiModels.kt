@@ -49,7 +49,7 @@ internal fun productCurrencies(identity: ProviderIdentity): List<Currency> = whe
     !OperationCatalog.supports(identity) -> emptyList()
     identity.provider == ProviderId.MITRANSFER && identity.profile == ProfileId.CLASSIC -> listOf(Currency.USD)
     identity.provider == ProviderId.MITRANSFER -> listOf(Currency.CUP, Currency.USD)
-    else -> CurrencyContract.BANK.supported
+    else -> CurrencyContract.BANK.active
 }
 
 internal fun hasAccess(state: AppUiState, identity: ProviderIdentity): Boolean =

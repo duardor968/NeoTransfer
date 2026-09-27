@@ -250,7 +250,7 @@ internal fun ProductEditor(state: AppUiState, existing: WalletProductUi?, action
         !(miTransfer && existing?.card != null && profile == ProfileId.PERSONAL)
     val currencies = identity?.let(::productCurrencies).orEmpty()
     val selectedCurrency = currency?.let { runCatching { Currency.valueOf(it) }.getOrNull() }?.takeIf { it in currencies }
-        ?: currencies.singleOrNull()
+        ?: currencies.singleOrNull().takeIf { currency == null }
     val validNumber = monedero || number.matches(Regex("[0-9]{16}"))
     val resultingKind = if (monedero) ProductKind.WALLET else if (miTransfer && !editingStoredProduct) ProductKind.CARD else kind
     val validExpiry = resultingKind != ProductKind.CARD || expiry.isEmpty() || expiry.matches(Regex("(0[1-9]|1[0-2])[0-9]{2}"))

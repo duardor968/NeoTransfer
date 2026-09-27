@@ -4,7 +4,7 @@ import java.math.BigDecimal
 
 /** Banking contracts traced in Transfermóvil 1.260416. Live network acceptance is not implied. */
 object BankingOperations {
-    private val legacyCurrencies = CurrencyContract.BANK.supported
+    private val bankCurrencies = CurrencyContract.BANK.active
     private fun field(key: String, label: String, kind: FieldKind, required: Boolean = true,
                       options: List<FieldOption> = emptyList()) = OperationField(key, label, kind, required, options)
 
@@ -29,7 +29,7 @@ object BankingOperations {
                 Bank.BANDEC -> SourcePolicy.DEFAULT_ONLY
                 else -> SourcePolicy.DEFAULT_OR_EXPLICIT
             }
-            val currencies = if (bank == Bank.BPA || bank == Bank.BANMET) legacyCurrencies else emptyList()
+            val currencies = if (bank == Bank.BPA || bank == Bank.BANMET) bankCurrencies else emptyList()
             add(spec(bank, "balance", "Consultar saldo · ${bank.name}", 46, source, currencies = currencies,
                 direct = bank == Bank.BANDEC,
                 reference = when (bank) {
@@ -54,7 +54,7 @@ object BankingOperations {
                 fields = listOf(field("account", "Cuenta bancaria", FieldKind.ACCOUNT)), effect = OperationEffect.MANAGE,
                 category = OperationCategory.ACCOUNTS, reference = "Ittht2aX4N.java:68-94; o9swVUfDl4q.java:67-90"))
             add(spec(bank, "transfer", "Transferir · ${bank.name}", 45,
-                source = SourcePolicy.DEFAULT_OR_EXPLICIT, currencies = legacyCurrencies,
+                source = SourcePolicy.DEFAULT_OR_EXPLICIT, currencies = bankCurrencies,
                 fields = listOf(field("destination", "Tarjeta de destino", FieldKind.ACCOUNT),
                     field("amount", "Importe", FieldKind.AMOUNT), field("notificationPhone", "Móvil de aviso", FieldKind.PHONE, false)),
                 effect = OperationEffect.MONEY, category = OperationCategory.TRANSFERS,

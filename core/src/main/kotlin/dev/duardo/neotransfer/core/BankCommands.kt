@@ -68,13 +68,14 @@ class BankCommands(private val codec: ParameterCodec = ParameterCodec()) {
     fun disconnect(): UssdCommand = UssdCommand(70, "*444*70#")
 
     fun bpaBalance(currency: Currency, sourceAccount: String = "0000", seed: Int? = null): UssdCommand {
+        currency.code()
         validateAccount(sourceAccount)
         return encoded(46, listOf(if (sourceAccount == "0000") currency.code() else "0", sourceAccount), seed)
     }
 
     fun transfer(request: TransferRequest, seed: Int? = null): UssdCommand {
         require(request.bank != Bank.BFI) { "BFI no está disponible" }
-        CurrencyContract.BANK.code(request.amount.currency)
+        request.amount.currency.code()
         val amountCurrency = if (request.bank == Bank.BANDEC) "0" else request.amount.currency.code()
         val accountCurrency = if (request.bank == Bank.BANDEC || request.sourceAccount != "0000") "0"
             else request.amount.currency.code()
@@ -154,8 +155,10 @@ class BankCommands(private val codec: ParameterCodec = ParameterCodec()) {
         if (source is SourceSelector.Explicit) require(source.account.matches(Regex("[0-9]{16}"))) { "La cuenta debe tener 16 dígitos" }
     }
 
-    private fun accountCurrency(currency: Currency?, source: SourceSelector): String =
-        if (source is SourceSelector.Explicit) "0" else CurrencyContract.BANK.code(requireNotNull(currency) { "Selecciona la moneda" })
+    private fun accountCurrency(currency: Currency?, source: SourceSelector): String {
+        currency?.code()
+        return if (source is SourceSelector.Explicit) "0" else requireNotNull(currency) { "Selecciona la moneda" }.code()
+    }
 
     private fun encoded(service: Int, parameters: List<String>, seed: Int?): UssdCommand {
         val payload = if (seed == null) codec.encode(parameters) else codec.encode(parameters, seed)
@@ -167,5 +170,8 @@ class BankCommands(private val codec: ParameterCodec = ParameterCodec()) {
         require(value == "0000" || value.matches(Regex("[0-9]{16}"))) { "Cuenta de origen no válida" }
     }
 
-    private fun Currency.code(): String = CurrencyContract.BANK.code(this)
+    private fun Currency.code(): String {
+        require(this in CurrencyContract.BANK.active) { "Moneda no disponible" }
+        return CurrencyContract.BANK.code(this)
+    }
 }
