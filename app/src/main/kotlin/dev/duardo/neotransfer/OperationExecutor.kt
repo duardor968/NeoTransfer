@@ -566,7 +566,10 @@ internal class OperationExecutor(
                 if (wait.accepted && wait !in acknowledgedAccesses) acknowledgedAccesses += wait
                 completeAuthentication(wait)
             } else {
-                if (execution.refreshOf == null) onResult("Solicitud enviada. El proveedor aún no ha confirmado el resultado.")
+                val awaitingQuery = response == BankResponse.PROCESSING &&
+                    OperationCatalog.find(request.operationId)?.effect == OperationEffect.QUERY
+                if (execution.refreshOf == null && !awaitingQuery)
+                    onResult("Solicitud enviada. El proveedor aún no ha confirmado el resultado.")
                 finish(execution)
             }
         }

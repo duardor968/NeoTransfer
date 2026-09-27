@@ -529,15 +529,28 @@ object OperationExecutorChecks {
             check(h.repository.snapshot().operations.single { it.specId == request.operationId }.status == OperationStatus.CONFIRMED)
             check(h.main { 45 !in h.modem.services })
             check(h.main { "Últimas operaciones recibidas de BANDEC." in h.results })
+            check(h.main { h.results.none { it.startsWith("Solicitud enviada.") } })
+        }
+        case("A query transport failure remains visible instead of being silenced as an acknowledgement") { h ->
+            val request = ServiceRequest("bpa.balance", h.target().identity, SourceSelector.Explicit("0000000000000001"))
+            h.main { h.executor.execute(request, h.target(), "1234".toCharArray(), approved = false) }
+            h.authenticate(); h.await { h.modem.services == listOf(40, 46) }
+            h.main { h.modem.reply(UssdResult.NetworkFailure(-1)) }
+            h.await { !h.executor.busy }
+            check(h.main { h.results.last() == "No se pudo confirmar el resultado." })
         }
         case("A history response received after timeout retains its original query context", ProviderId.BANDEC) { h ->
             val request = ServiceRequest("bandec.recent-operations", h.target().identity, SourceSelector.Explicit("0000000000000001"))
             h.main { h.executor.execute(request, h.target(), "12345".toCharArray(), approved = false) }
             h.authenticate(); h.await { h.modem.services == listOf(40, 48) }
+            val beforeAck = h.main { h.results.toList() }
             h.main { h.modem.reply(Harness.processing) }
+            h.await { !h.executor.busy }
+            check(h.main { h.results == beforeAck })
             val sent = h.clock.plusSeconds(1)
             h.elapseTimeout()
             h.await { h.wallet.snapshot.operations.single { it.specId == request.operationId }.timeoutAt != null }
+            h.await { h.results == beforeAck + "Tiempo de espera agotado" }
             val before = h.main { h.results.toList() }
             h.clock = h.clock.plusSeconds(132)
             h.observe(BankSmsRecord(null, "Banco Bandec Ultimas operaciones.\nFecha;Servicio;Operacion;Monto;Moneda;NoTransaccion\n23/09/2026;Intereses Ref: HSTLATE;Cr;1.00;CUP; |", h.clock, 7, sentAt = sent))
