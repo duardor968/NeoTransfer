@@ -75,6 +75,27 @@ internal fun appFinancialHistory(state: AppUiState): List<MovementItem> {
                 .map { registration.bankCode to it.second }
         }.distinct().singleOrNull()?.second ?: number
     }
+    fun resolveReceived(item: MovementItem): MovementItem {
+        if (item.movement.kind != MovementKind.RECEIVED) return item
+        val number = item.movement.account ?: return item
+        if (!number.matches(Regex("[0-9]{16}"))) return item
+        val bankCode = item.movement.bank?.code
+        val candidates = state.wallet.registrations.filter { registration ->
+            (item.subscriptionId == null || registration.subscriptionId == item.subscriptionId) &&
+                (bankCode == null || registration.bankCode == bankCode)
+        }.flatMap { registration ->
+            state.wallet.cards.filter { it.registrationId == registration.id && it.number == number }
+                .map { Triple(registration, it.id, true) } +
+                state.wallet.accounts.filter { account -> account.registrationId == registration.id &&
+                    account.number == number && state.wallet.cards.none { it.accountId == account.id } }
+                    .map { Triple(registration, it.id, false) }
+        }
+        val (registration, productId, isCard) = candidates.singleOrNull() ?: return item
+        return item.copy(movement = item.movement.copy(bank = item.movement.bank ?:
+            Bank.entries.firstOrNull { it.code == registration.bankCode }),
+            registrationId = registration.id,
+            cardId = productId.takeIf { isCard }, accountId = productId.takeUnless { isCard })
+    }
     val receipts = state.wallet.receipts.associateBy { it.id }
     val persisted = state.wallet.movements.mapNotNull { row ->
         val receipt = receipts[row.receiptId] ?: return@mapNotNull null
@@ -107,7 +128,16 @@ internal fun appFinancialHistory(state: AppUiState): List<MovementItem> {
             subscriptionId = row.subscriptionId, referenceConflict = row.referenceConflict || row.ambiguous,
             postedOn = date, registrationId = row.registrationId, cardId = row.cardId, accountId = row.accountId)
     }
-    return (persisted + legacy + recovered).sortedWith(compareByDescending<MovementItem> { it.date }.thenByDescending { it.occurredAt })
+    return (persisted + legacy + recovered).map(::resolveReceived)
+        .sortedWith(compareByDescending<MovementItem> { it.date }.thenByDescending { it.occurredAt })
+}
+
+internal fun movementBelongsToProduct(item: MovementItem, product: WalletProductUi): Boolean {
+    if (item.movement.kind == MovementKind.RECEIVED) return item.cardId == product.id || item.accountId == product.id
+    return item.cardId == product.id || item.accountId == product.id ||
+        (product.number != null && product.number.isNotEmpty() && (item.sourceAccount == product.number ||
+            item.movement.account?.let { matchesAccount(it, product.number) } == true) &&
+            (item.registrationId == null || item.registrationId == product.registrationId))
 }
 
 private val locale = Locale.forLanguageTag("es")
@@ -178,10 +208,7 @@ internal fun MovementsScreen(state: AppUiState, actions: UiActions, resolve: (Un
             val date = item.date
             (bankFilter == "Todos" || (m.bank?.name ?: "Sin identificar") == bankFilter) &&
                 (kindFilter == "Todos" || m.kind.name == kindFilter) &&
-                (product == null || item.cardId == product.id || item.accountId == product.id ||
-                    (product.number != null && product.number.isNotEmpty() && (item.sourceAccount == product.number ||
-                        m.account?.let { matchesAccount(it, product.number) } == true) &&
-                        (item.registrationId == null || item.registrationId == product.registrationId))) &&
+                (product == null || movementBelongsToProduct(item, product)) &&
                 (from == null || date >= LocalDate.parse(from)) && (through == null || date <= LocalDate.parse(through)) &&
                 (m.matches(query) || m.contactName(displayRecipients(state))?.contains(query.trim(), true) == true)
         }
