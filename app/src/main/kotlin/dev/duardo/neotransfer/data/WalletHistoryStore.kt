@@ -59,7 +59,7 @@ internal class WalletHistoryStore(private val repository: RoomWalletRepository) 
         val history = dao.historiesWithReference(reference)
         if (history.isEmpty()) return
         val receipts = dao.receiptsWithReference(reference).map { it.value }.filter {
-            !it.amountIsNominal && !it.referenceConflict && it.bankCode != null && it.subscriptionId != null &&
+            !it.amountIsNominal && !it.referenceConflict && resolvedBankCode(it) != null && it.subscriptionId != null &&
                 dao.event(it.eventId)?.value?.evidenceEligible == true
         }
         val eligibleHistory = history.filter { row -> row.value.subscriptionId != null &&
@@ -72,7 +72,7 @@ internal class WalletHistoryStore(private val repository: RoomWalletRepository) 
             if (eligibleHistory.none { it.value.id == entry.id }) return@forEach
             val candidates = matches[entry.id].orEmpty()
             val receipt = candidates.singleOrNull()?.takeIf { reverse[it.id]?.size == 1 }
-            val related = receipts.filter { it.bankCode == entry.bankCode && it.subscriptionId == entry.subscriptionId &&
+            val related = receipts.filter { resolvedBankCode(it) == entry.bankCode && it.subscriptionId == entry.subscriptionId &&
                 (it.kind == "RECEIVED") == entry.incoming && dao.event(it.eventId)?.value?.let { event ->
                     Instant.ofEpochMilli(event.receivedAt).atZone(bankingZone).toLocalDate().toString() == entry.postedOn
                 } == true }
@@ -135,12 +135,28 @@ internal class WalletHistoryStore(private val repository: RoomWalletRepository) 
 
     private fun matches(entry: HistoryEntryRecord, receipt: ReceiptRecord): Boolean {
         val event = dao.event(receipt.eventId)?.value ?: return false
-        if (receipt.bankCode != entry.bankCode || receipt.subscriptionId != entry.subscriptionId ||
+        if (resolvedBankCode(receipt) != entry.bankCode || receipt.subscriptionId != entry.subscriptionId ||
             receipt.currency != entry.currency || !sameValue(receipt.amount, entry.amount) ||
             (receipt.kind == "RECEIVED") != entry.incoming ||
             Instant.ofEpochMilli(event.receivedAt).atZone(bankingZone).toLocalDate().toString() != entry.postedOn) return false
         val subject = receiptSubject(receipt)
         return entry.account == null || subject?.account == null || compatibleAccounts(entry.account, subject.account)
+    }
+
+    /** An incoming SMS names no bank; only a unique saved own product on its SIM can supply one. */
+    private fun resolvedBankCode(receipt: ReceiptRecord): String? {
+        receipt.bankCode?.let { return it }
+        val pan = receipt.account?.takeIf { receipt.kind == "RECEIVED" && it.matches(Regex("[0-9]{16}")) } ?: return null
+        val sim = receipt.subscriptionId ?: return null
+        val cards = dao.cards().map { it.value }
+        val accounts = dao.accounts().map { it.value }
+        val registrations = dao.registrations().map { it.value }.filter { it.subscriptionId == sim && it.bankCode != null }
+        val banks = registrations.flatMap { registration ->
+            cards.filter { it.registrationId == registration.id && it.number == pan }.map { registration.bankCode } +
+                accounts.filter { it.registrationId == registration.id && it.number == pan &&
+                    cards.none { card -> card.accountId == it.id } }.map { registration.bankCode }
+        }
+        return banks.singleOrNull()
     }
 
     private data class Subject(val account: String, val registrationId: String?, val accountId: String?, val cardId: String?)

@@ -57,6 +57,72 @@ object BankHistoryDataChecks {
             check(r.snapshot().histories.single().receiptId == receipt.stored.receiptId)
         }
 
+        case("A late bankless incoming receipt replaces a recovered BANDEC credit once") { r, ingestor ->
+            val pan = "0000111122220001"
+            r.putIdentity(IdentityRecord("owner", "Perfil sintético"))
+            r.putRegistration(RegistrationRecord("bandec", "owner", "BANDEC", "PERSONAL", "02", 7, null, "BANDEC"))
+            r.putCard(CardRecord("card", "bandec", pan, "Propia"))
+            r.putOperation(query("query", NOW.minusSeconds(30), pan).copy(
+                registrationId = "bandec", status = OperationStatus.UNCERTAIN))
+            val history = ingestor.ingest(record(1, statement(row("REF01", "Cr")), NOW.minusSeconds(20)))
+            check(r.bindHistoryToQuery(history.stored.eventId, "query", NOW.minusSeconds(15).toEpochMilli()))
+            check(r.snapshot().histories.single().let { it.receiptId == null && it.account == pan })
+
+            val received = ingestor.ingest(record(2, incomingReceipt("REF01", pan), NOW.minusSeconds(10)))
+            val snapshot = r.snapshot()
+            check(snapshot.receipts.single().let { it.id == received.stored.receiptId && it.bankCode == null && it.account == pan })
+            check(snapshot.histories.single().let { it.receiptId == received.stored.receiptId && it.cardId == "card" })
+            check(snapshot.movements.size == 1 && snapshot.operations.single().status == OperationStatus.CONFIRMED)
+            check(snapshot.usedReferences.isEmpty()) // A history query and an incoming receipt never confirm a payment.
+        }
+
+        case("A bankless incoming receipt also joins a later BANDEC credit") { r, ingestor ->
+            val pan = "0000111122220001"
+            r.putIdentity(IdentityRecord("owner", "Perfil sintético"))
+            r.putRegistration(RegistrationRecord("bandec", "owner", "BANDEC", "PERSONAL", "02", 7, null, "BANDEC"))
+            r.putCard(CardRecord("card", "bandec", pan, "Propia"))
+            val received = ingestor.ingest(record(1, incomingReceipt("REF01", pan), NOW.minusSeconds(20)))
+            check(r.snapshot().receipts.single().bankCode == null)
+            ingestor.ingest(record(2, statement(row("REF01", "Cr")), NOW.minusSeconds(10)))
+            val snapshot = r.snapshot()
+            check(snapshot.histories.single().receiptId == received.stored.receiptId)
+            check(snapshot.movements.size == 1 && snapshot.usedReferences.isEmpty())
+        }
+
+        case("A wrong or ambiguous own PAN cannot assign a bank to a bankless receipt") { r, ingestor ->
+            val pan = "0000111122220001"
+            r.putIdentity(IdentityRecord("owner", "Perfil sintético"))
+            r.putRegistration(RegistrationRecord("bandec", "owner", "BANDEC", "PERSONAL", "02", 7, null, "BANDEC"))
+            r.putRegistration(RegistrationRecord("bpa", "owner", "BPA", "PERSONAL", "01", 7, null, "BPA"))
+            r.putCard(CardRecord("bandec-card", "bandec", "0000111122220002", "BANDEC"))
+            r.putCard(CardRecord("bpa-card", "bpa", pan, "BPA"))
+            ingestor.ingest(record(1, statement(row("WRONG01", "Cr")), NOW.minusSeconds(30)))
+            ingestor.ingest(record(2, incomingReceipt("WRONG01", pan), NOW.minusSeconds(20)))
+            check(r.snapshot().histories.single().receiptId == null)
+
+            r.putCard(CardRecord("bandec-match", "bandec", pan, "Otra propia"))
+            ingestor.ingest(record(3, statement(row("AMBIG01", "Cr")), NOW.minusSeconds(15)))
+            ingestor.ingest(record(4, incomingReceipt("AMBIG01", pan), NOW.minusSeconds(10)))
+            check(r.snapshot().histories.all { it.receiptId == null })
+            check(r.snapshot().receipts.all { it.bankCode == null })
+        }
+
+        case("Bankless incoming matching still requires the same reference SIM day amount unit and direction") { r, ingestor ->
+            val pan = "0000111122220001"
+            r.putIdentity(IdentityRecord("owner", "Perfil sintético"))
+            r.putRegistration(RegistrationRecord("bandec", "owner", "BANDEC", "PERSONAL", "02", 7, null, "BANDEC"))
+            r.putCard(CardRecord("card", "bandec", pan, "Propia"))
+            ingestor.ingest(record(1, statement(row("DAY01", "Cr", "21/09/2026"), row("SIM01", "Cr"),
+                row("AMOUNT01", "Cr"), row("UNIT01", "Cr"), row("DIRECTION01", "Db"), row("REF01", "Cr")), NOW.minusSeconds(30)))
+            ingestor.ingest(record(2, incomingReceipt("DAY01", pan), NOW.minusSeconds(20)))
+            ingestor.ingest(record(3, incomingReceipt("SIM01", pan), NOW.minusSeconds(19), 8))
+            ingestor.ingest(record(4, incomingReceipt("AMOUNT01", pan).replace("10.00 CUP", "99.00 CUP"), NOW.minusSeconds(18)))
+            ingestor.ingest(record(5, incomingReceipt("UNIT01", pan).replace("10.00 CUP", "10.00 USD"), NOW.minusSeconds(17)))
+            ingestor.ingest(record(6, incomingReceipt("DIRECTION01", pan), NOW.minusSeconds(16)))
+            ingestor.ingest(record(7, incomingReceipt("OTHER01", pan), NOW.minusSeconds(15)))
+            check(r.snapshot().histories.all { it.receiptId == null })
+        }
+
         case("History matching rejects wrong day SIM bank amount currency and unknown SIM") { r, ingestor ->
             ingestor.ingest(record(1, statement(row("DAY01", date = "21/09/2026"), row("SIM01"), row("BANK01"),
                 row("AMOUNT01"), row("CURRENCY01"), row(null)), NOW.minusSeconds(30)))
@@ -173,6 +239,8 @@ object BankHistoryDataChecks {
         "$date;Banca Movil Transferencia${reference?.let { " Ref: $it" }.orEmpty()};$direction;10.00;CUP; |"
     private fun statement(vararg rows: String) = "Banco Bandec Ultimas operaciones.\n\nFecha;Servicio;Operacion;Monto;Moneda;NoTransaccion\n\n" + rows.joinToString("\n")
     private fun receipt(reference: String) = "Banco Bandec: La Transferencia fue completada.\nBeneficiario: 0000XXXXXXXX0002\nMonto: 10.00 CUP\nNro. Transaccion: $reference"
+    private fun incomingReceipt(reference: String, pan: String) =
+        "El titular del telefono 50123456 le ha realizado una transferencia a la cuenta $pan de 10.00 CUP. Nro. Transaccion: $reference"
     private fun query(id: String, started: Instant, source: String) = OperationRecord(id, "bandec.recent-operations", "02", 7,
         "", null, null, started.toEpochMilli(), source = source, status = OperationStatus.AWAITING_CONFIRMATION,
         providerId = "BANDEC", parameters = mapOf("type" to "1"))
