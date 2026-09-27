@@ -702,6 +702,11 @@ internal class OperationExecutor(
             }
         }
         val message = result.message
+        if (message is BankMessage.Balance) result.completedQueryIds.forEach { id ->
+            presentResult(id, message.accounts.joinToString("\n") {
+                "${it.available.amount.toPlainString()} ${it.available.currency.name}"
+            })
+        }
         if (message is BankHistory && message.bank == Bank.BANDEC) {
             val waits = historyQueries.filter { it.context.authenticationIdentity == ProviderIdentity(ProviderId.BANDEC) &&
                 it.context.subscriptionId == record.subscriptionId && fresh(record, it.sentAt) }

@@ -624,6 +624,87 @@ object BankingDataChecks {
             check(current.evidenceEligible && current.newFinancialMovement && !current.stored.duplicate)
             check(r.snapshot().receipts.none { it.referenceConflict })
         }
+        case("BPA flat balance updates the explicitly queried card through shared ingestion") { r, _ ->
+            r.putIdentity(IdentityRecord("identity", "Prueba"))
+            r.putRegistration(RegistrationRecord("bpa", "identity", "BPA", "PERSONAL", "01", 7, null, "BPA"))
+            r.putCard(CardRecord("bpa-card", "bpa", "0000000000000001", "Tarjeta", currency = "CUP"))
+            r.putOperation(OperationRecord("bpa-query", "bpa.balance", "01", 7, "", null, "CUP", 1_000_000,
+                registrationId = "bpa", source = "0000000000000001", providerId = "BPA",
+                status = OperationStatus.AWAITING_CONFIRMATION, parameters = mapOf("sourceCurrency" to "CUP")))
+            val body = "Banco Popular de Ahorro:  La consulta de saldo fue completada. \n\n Saldo Disponible: CR 42.00 CUP"
+            val ingestor = SmsIngestor(r, now = { Instant.ofEpochMilli(1_020_000) })
+            val record = BankSmsRecord(90, body, Instant.ofEpochMilli(1_015_000), 7, sentAt = Instant.ofEpochMilli(1_010_000))
+            val result = ingestor.ingest(record)
+            val balance = r.snapshot().balances.singleOrNull { it.cardId == "bpa-card" }
+            check(balance?.available == "42.00") { "BPA response parsed but not linked to the queried card" }
+            check(r.snapshot().operations.single().status == OperationStatus.CONFIRMED)
+            check(result.completedQueryIds == setOf("bpa-query"))
+            check(ingestor.ingest(record).completedQueryIds.isEmpty())
+            check(r.snapshot().movements.isEmpty())
+        }
+        case("Repeated BPA reads preserve ambiguity before a different source and a delayed second reply") { r, _ ->
+            bpaBalanceFixture(r)
+            val first = r.snapshot().operations.single()
+            r.putOperation(first.copy(id = "bpa-second", startedAt = 1_001_000, updatedAt = 1_001_000))
+            val ingestor = SmsIngestor(r, now = { Instant.ofEpochMilli(1_100_000) })
+            ingestor.ingest(bpaFlatSms(1, 1_015_000, 1_010_000, "42.00"))
+            check(r.snapshot().balances.single { it.cardId == "bpa-card" }.available == "42.00")
+            check(r.snapshot().operations.none { it.status == OperationStatus.CONFIRMED })
+            r.putCard(CardRecord("other-card", "bpa", "0000000000000002", "Otra", currency = "CUP"))
+            r.putOperation(first.copy(id = "other-query", source = "0000000000000002", startedAt = 1_020_000, updatedAt = 1_020_000))
+            ingestor.ingest(bpaFlatSms(2, 1_040_000, 1_030_000, "37.00"))
+            check(r.snapshot().balances.none { it.cardId == "other-card" })
+            check(r.snapshot().operations.none { it.status == OperationStatus.CONFIRMED })
+        }
+        case("BPA flat evidence can update after timeout and repository recreation without executing anything") { r, name ->
+            bpaBalanceFixture(r)
+            check(r.expireWaitingOperation("bpa-query", 1_030_000))
+            r.close()
+            RoomWalletRepository.open(context, name).use { reopened ->
+                SmsIngestor(reopened, now = { Instant.ofEpochMilli(1_200_000) })
+                    .ingest(bpaFlatSms(1, 1_150_000, 1_010_000, "42.00"))
+                check(reopened.snapshot().balances.single { it.cardId == "bpa-card" }.available == "42.00")
+                check(reopened.snapshot().operations.single().let {
+                    it.status == OperationStatus.CONFIRMED && it.timeoutAt == 1_030_000L
+                })
+                check(reopened.snapshot().movements.isEmpty())
+            }
+        }
+        case("Equal-SMSC conflicting BPA balance cannot complete a query or replace an existing identified balance") { r, _ ->
+            bpaBalanceFixture(r)
+            r.upsertBalances(listOf(BalanceRecord("previous", "01", 7, 1_012_000, null, "50.00", "CUP",
+                registrationId = "bpa", cardId = "bpa-card", sentAt = 1_010_000)))
+            val result = SmsIngestor(r, now = { Instant.ofEpochMilli(1_100_000) })
+                .ingest(bpaFlatSms(1, 1_015_000, 1_010_000, "42.00"))
+            check(result.completedQueryIds.isEmpty())
+            check(r.snapshot().operations.single().status == OperationStatus.AWAITING_CONFIRMATION)
+            check(r.snapshot().balances.single { it.cardId == "bpa-card" }.available == "50.00")
+        }
+        case("BPA broadcast inbox replay cannot confirm another card queried later within the same SMSC second") { r, _ ->
+            bpaBalanceFixture(r)
+            val first = r.snapshot().operations.single()
+            val ingestor = SmsIngestor(r, now = { Instant.ofEpochMilli(1_100_000) })
+            val broadcast = bpaFlatSms(1, 1_010_100, 1_010_000, "42.00")
+            ingestor.ingest(broadcast, EventSource.BROADCAST)
+            check(r.snapshot().operations.single().status == OperationStatus.CONFIRMED)
+            r.putCard(CardRecord("other-card", "bpa", "0000000000000002", "Otra", currency = "CUP"))
+            r.putOperation(first.copy(id = "other-query", source = "0000000000000002", startedAt = 1_010_200, updatedAt = 1_010_200))
+            val replay = ingestor.ingest(bpaFlatSms(2, 1_010_300, 1_010_000, "42.00"))
+            check(replay.stored.duplicate && replay.completedQueryIds.isEmpty())
+            check(!r.completeQuery("other-query", replay.stored.eventId, 1_100_000))
+            check(r.snapshot().balances.none { it.cardId == "other-card" })
+            check(r.snapshot().operations.single { it.id == "other-query" }.status == OperationStatus.AWAITING_CONFIRMATION)
+        }
+        case("BPA reread may supply missing SMSC to an earlier broadcast for the original query") { r, _ ->
+            bpaBalanceFixture(r)
+            val ingestor = SmsIngestor(r, now = { Instant.ofEpochMilli(1_100_000) })
+            val record = bpaFlatSms(1, 1_015_000, 1_010_000, "42.00")
+            ingestor.ingest(BankSmsRecord(null, record.body, record.receivedAt, 7), EventSource.BROADCAST)
+            check(r.snapshot().operations.single().status == OperationStatus.AWAITING_CONFIRMATION)
+            val enriched = ingestor.ingest(record)
+            check(enriched.stored.duplicate && enriched.completedQueryIds == setOf("bpa-query"))
+            check(r.snapshot().balances.single { it.cardId == "bpa-card" }.available == "42.00")
+        }
         case("Query completion requires parsed bank SIM account and fresh eligible evidence") { r, _ ->
             val body = "Banco Bandec La consulta de saldo fue completada.\nCuenta;Saldo Contable;Saldo Disponible;Moneda\n0000XXXXXXXX0002; CR 100.00 ; CR 90.00 ;CUP |"
             val query = operation().copy(id = "query", kind = "bandec.balance", specId = "bandec.balance", source = "0000000000000002",
@@ -810,6 +891,18 @@ object BankingDataChecks {
         r.putIdentity(IdentityRecord("identity", "Perfil sintético"))
         r.putRegistration(registration("registration", 7))
     }
+    private fun bpaBalanceFixture(r: RoomWalletRepository) {
+        r.putIdentity(IdentityRecord("identity", "Prueba"))
+        r.putRegistration(RegistrationRecord("bpa", "identity", "BPA", "PERSONAL", "01", 7, null, "BPA"))
+        r.putCard(CardRecord("bpa-card", "bpa", "0000000000000001", "Propia", currency = "CUP"))
+        r.putOperation(OperationRecord("bpa-query", "bpa.balance", "01", 7, "", null, "CUP", 1_000_000,
+            registrationId = "bpa", source = "0000000000000001", providerId = "BPA",
+            status = OperationStatus.AWAITING_CONFIRMATION, parameters = mapOf("sourceCurrency" to "CUP")))
+    }
+    private fun bpaFlatSms(id: Long, received: Long, sent: Long, amount: String) = BankSmsRecord(id,
+        "Banco Popular de Ahorro:  La consulta de saldo fue completada. \n\n Saldo Disponible: CR $amount CUP",
+        Instant.ofEpochMilli(received), 7, sentAt = Instant.ofEpochMilli(sent))
+
     private fun transferBalanceFixture(r: RoomWalletRepository, source: String = "0000000000000001",
                                        extraCard: Boolean = false, secondNumber: String = "0000000000000003",
                                        balanceBankCode: String = "02", balanceSubscriptionId: Int = 7,

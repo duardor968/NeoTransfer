@@ -15,6 +15,7 @@ import dev.duardo.neotransfer.core.fuel.FuelSmsParser
 data class SmsIngestResult(
     val stored: IngestResult, val message: BankMessage, val movement: FinancialMovement?,
     val evidenceEligible: Boolean,
+    val completedQueryIds: Set<String> = emptySet(),
 ) {
     val newFinancialMovement: Boolean get() = movement != null && evidenceEligible && !stored.duplicate
 }
@@ -32,6 +33,7 @@ class SmsIngestor(
         message: BankMessage = parser.parse("PAGOxMOVIL", record.body) ?: BankMessage.Unrecognized,
     ): SmsIngestResult {
         val financial = FinancialMovement.from(message)
+        val completedQueries = mutableSetOf<String>()
         val observedAt = now()
         val eligible = record.receivedAt <= observedAt
         val receipt = financial?.let { movement -> ReceiptRecord(
@@ -72,8 +74,18 @@ class SmsIngestor(
                         checkNotNull(record.sentAt).toEpochMilli())
                 }
                 repository.upsertBalances(rows)
+                // This association must also run during background delivery and an inbox reread;
+                // it depends on the persisted request, never the card currently shown on screen.
+                if (message.bank == dev.duardo.neotransfer.core.Bank.BPA) {
+                    for (query in snapshot.operations.filter { it.specId == "bpa.balance" }) {
+                        if (repository.completeQuery(query.id, stored.eventId, observedAt.toEpochMilli())) {
+                            completedQueries += query.id
+                            break
+                        }
+                    }
+                }
             }
         }
-        return SmsIngestResult(stored, message, financial, eligible)
+        return SmsIngestResult(stored, message, financial, eligible, completedQueries)
     }
 }

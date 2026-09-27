@@ -503,6 +503,16 @@ class RoomWalletRepository internal constructor(internal val database: WalletDat
             event.subscriptionId != operation.subscriptionId || !event.after(operation, at))
             return@write false
         val message = event.body?.let { BankSmsParser().parse(event.sender, it) } ?: return@write false
+        if (message is BankMessage.Balance && message.bank == dev.duardo.neotransfer.core.Bank.BPA &&
+            message.accounts.singleOrNull()?.let { it.account == null && it.label == null } == true) {
+            val binding = bpaBalanceBinding(snapshot(), event, message, at) ?: return@write false
+            if (binding.queries.none { it.id == operationId } || !putBalances(listOf(binding.balance))) return@write false
+            // Preserve unresolved repeated requests: a second reply may still arrive after a
+            // query of another card. Completing all here would erase that ambiguity.
+            val query = binding.queries.singleOrNull() ?: return@write false
+            dao.put(OperationRow(query.copy(status = OperationStatus.CONFIRMED, updatedAt = at, reviewRequired = false)))
+            return@write true
+        }
         fun matches(candidate: OperationRecord): Boolean {
             val content = when (message) {
                 is BankMessage.Authenticated -> candidate.specId == "${message.bank.name.lowercase()}.authenticate" &&
