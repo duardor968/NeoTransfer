@@ -125,7 +125,7 @@ private fun BackupDialogs(flow: BackupFlow) {
                         Text("No compatibles: ${state.mapping.omittedByKind.values.sum()}")
                     }
                     if (state.source.skippedSensitive.isNotEmpty()) Text("Claves de acceso antiguas excluidas: ${state.source.skippedSensitive.values.sum()}")
-                    if (state.source.unsupported.isNotEmpty()) Text("Tablas no reconocidas: ${state.source.unsupported.values.sum()}")
+                    if (state.source.unsupported.isNotEmpty()) Text("Elementos no compatibles: ${state.source.unsupported.values.sum()}")
                     if (state.mapping.snapshot.registrations.isNotEmpty()) Text("Los accesos bancarios requieren reasociación")
                 }
             },

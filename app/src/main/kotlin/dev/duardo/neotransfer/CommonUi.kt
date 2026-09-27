@@ -45,10 +45,11 @@ internal fun BrandArtwork(resource: Int, size: Dp, padding: Dp = 10.dp) {
 
 @Composable
 internal fun Field(label: String, value: String, change: (String) -> Unit, type: KeyboardType = KeyboardType.Text,
-                   readOnly: Boolean = false, secret: Boolean = false, trailing: (@Composable () -> Unit)? = null) {
+                   readOnly: Boolean = false, secret: Boolean = false, trailing: (@Composable () -> Unit)? = null,
+                   visualTransformation: VisualTransformation = VisualTransformation.None) {
     OutlinedTextField(value, change, Modifier.fillMaxWidth(), label = { Text(label) }, singleLine = true,
         readOnly = readOnly, keyboardOptions = KeyboardOptions(keyboardType = type),
-        visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
+        visualTransformation = if (secret) PasswordVisualTransformation() else visualTransformation,
         trailingIcon = trailing, shape = MaterialTheme.shapes.medium,
         colors = OutlinedTextFieldDefaults.colors(focusedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
             focusedBorderColor = MaterialTheme.colorScheme.onSecondaryContainer, cursorColor = MaterialTheme.colorScheme.onSecondaryContainer))

@@ -40,6 +40,7 @@ class MainActivity : ComponentActivity() {
     private val controller get() = neoApplication.controller
     private var biometric: CancellationSignal? = null
     private var biometricActive by mutableStateOf(false)
+    private var accessRecoveryAvailable by mutableStateOf(false)
     private var biometricCleanup: (() -> Unit)? = null
     private var permissionsVersion by mutableIntStateOf(0)
     private var selectedContact by mutableStateOf<PickedContact?>(null)
@@ -142,9 +143,9 @@ class MainActivity : ComponentActivity() {
                     wallet = controller.walletSnapshot, selectedProductId = controller.selectedProductId,
                     configuredRegistrationIds = controller.configuredRegistrationIds,
                     notificationsEnabled = transferNotifications.enabled, services = controller.services,
-                    serviceResult = controller.serviceResult),
+                    serviceResult = controller.serviceResult, accessRecoveryAvailable = accessRecoveryAvailable && !biometricActive),
                 actions = UiActions(
-                    unlock = { unlock() }, enroll = { bank, pin, done -> enroll(bank, pin, done) },
+                    unlock = { if (controller.vault.hasStoredMaterial()) unlock() else initializeLocalAccess() }, enroll = { bank, pin, done -> enroll(bank, pin, done) },
                     permissions = { askPermissions(BANK_PERMISSIONS) },
                     cameraPermission = { askPermissions(arrayOf(Manifest.permission.CAMERA)) },
                     selectBank = controller::selectBank, selectSim = controller::selectSim,
@@ -242,7 +243,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateScreenProtection() {
-        val secure = screenHasSecrets || biometricActive || !controller.unlocked
+        val secure = screenHasSecrets || biometricActive
         val currentlySecure = window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE != 0
         if (secure != currentlySecure) {
             if (secure) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
@@ -279,12 +280,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun gate(title: String, subtitle: String, encrypt: Boolean = false, cleanup: () -> Unit = {},
-                     onFailure: () -> Unit = {}, success: (javax.crypto.Cipher) -> Unit) {
+    private fun gate(title: String, subtitle: String? = null, encrypt: Boolean = false, cleanup: () -> Unit = {},
+                     onFailure: () -> Unit = {}, recoverAccessOnFailure: Boolean = false, success: (javax.crypto.Cipher) -> Unit) {
         if (biometricActive) { cleanup(); onFailure(); return }
         val gate = BiometricGate(this)
         if (gate.availability() != BiometricManager.BIOMETRIC_SUCCESS) {
-            controller.notice = "Configura una huella o biometría fuerte en los ajustes del teléfono"
+            controller.notice = "Configura la biometría en los ajustes del teléfono"
             cleanup()
             onFailure()
             return
@@ -297,32 +298,38 @@ class MainActivity : ComponentActivity() {
             biometric = gate.authenticate(cipher, title, subtitle,
                 onSuccess = {
                     biometricActive = false; biometric = null
-                    try { runCatching { success(it) }.onFailure { controller.notice = "No se pudo abrir el acceso guardado"; onFailure() } }
+                    try { runCatching { success(it) }.onFailure {
+                        if (recoverAccessOnFailure) accessRecoveryAvailable = true
+                        controller.notice = "No se pudo abrir el acceso guardado"; onFailure()
+                    } }
                     finally { cleanup(); biometricCleanup = null; updateScreenProtection() }
                 }, onCancelled = { cleanup(); biometricCleanup = null; biometricActive = false; biometric = null; updateScreenProtection(); onFailure() },
                 onError = { cleanup(); biometricCleanup = null; biometricActive = false; biometric = null; updateScreenProtection(); controller.notice = it; onFailure() })
         } catch (_: Exception) {
+            if (recoverAccessOnFailure) accessRecoveryAvailable = true
             biometricActive = false
             cleanup(); biometricCleanup = null
             updateScreenProtection()
-            controller.notice = "No se pudo abrir el acceso guardado. La biometría del teléfono puede haber cambiado."
+            controller.notice = "No se pudo abrir el acceso guardado"
             onFailure()
         }
     }
 
     private fun initializeLocalAccess() {
+        accessRecoveryAvailable = false
+        neoApplication.accessSession.markManualPrompt()
         val bytes = AccessCredentials.empty().use { it.encode() }
-        gate("Abrir NeoTransfer", "Protege tu cartera con tu huella", encrypt = true, cleanup = { bytes.fill(0) }) { cipher ->
+        gate("Desbloquear", encrypt = true, cleanup = { bytes.fill(0) }) { cipher ->
             controller.vault.finishEncryption(cipher, bytes)
             controller.unlock(bytes)
         }
     }
 
-    private fun confirmWithoutSavedAccess(title: String, subtitle: String, onFailure: () -> Unit = {}, success: () -> Unit) {
+    private fun confirmWithoutSavedAccess(title: String, subtitle: String? = null, onFailure: () -> Unit = {}, success: () -> Unit) {
         if (biometricActive || !resumed) { onFailure(); return }
         val nativeGate = BiometricGate(this)
         if (nativeGate.availability() != BiometricManager.BIOMETRIC_SUCCESS) {
-            controller.notice = "Configura una huella o biometría fuerte en los ajustes del teléfono"
+            controller.notice = "Configura la biometría en los ajustes del teléfono"
             onFailure()
             return
         }
@@ -364,8 +371,8 @@ class MainActivity : ComponentActivity() {
                 runOnUiThread { permissionsVersion++ }
             },
             decryptVault = { result ->
-                if (!controller.vault.hasStoredMaterial()) confirmWithoutSavedAccess("Autorizar respaldo", "Accede a tus datos guardados", onFailure = { result(null) }) { result(ByteArray(0)) }
-                else gate("Autorizar respaldo", "Accede a tus claves guardadas", onFailure = { result(null) }) { cipher ->
+                if (!controller.vault.hasStoredMaterial()) confirmWithoutSavedAccess("Exportar respaldo", onFailure = { result(null) }) { result(ByteArray(0)) }
+                else gate("Exportar respaldo", onFailure = { result(null) }) { cipher ->
                     result(controller.vault.finishDecryption(cipher))
                 }
             },
@@ -384,7 +391,7 @@ class MainActivity : ComponentActivity() {
 
     private fun saveProtectedAccess(bytes: ByteArray, result: (Boolean) -> Unit) {
         val owned = bytes.copyOf()
-        gate("Guardar accesos", "Protege los accesos restaurados con tu huella", encrypt = true,
+        gate("Restaurar accesos", encrypt = true,
             cleanup = { owned.fill(0) }, onFailure = { result(false) }) { cipher ->
             controller.vault.finishEncryption(cipher, owned)
             controller.unlock(owned.copyOf())
@@ -453,10 +460,10 @@ class MainActivity : ComponentActivity() {
         }
         val registration = executionContext.registration
         if (registration == null || registration.credentialAlias == null || !spec.requiresSession && spec.fields.none { it.suppliedByAccess }) {
-            confirmWithoutSavedAccess("Autorizar ${spec.title.lowercase()}", spec.title) {
+            confirmWithoutSavedAccess(spec.title) {
                 controller.runService(request, executionContext = executionContext, approved = true)
             }
-        } else gate("Autorizar ${spec.title.lowercase()}", registration.label) { cipher ->
+        } else gate(spec.title, registration.label.takeUnless { spec.title.contains(it, ignoreCase = true) }) { cipher ->
             val pin = controller.pinFrom(controller.vault.finishDecryption(cipher), registration)
             controller.runService(request, pin, executionContext, approved = true)
         }
@@ -500,8 +507,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun unlock() {
+        accessRecoveryAvailable = false
         neoApplication.accessSession.markManualPrompt()
-        gate("Abrir NeoTransfer", "Accede a tus cuentas") { cipher ->
+        gate("Desbloquear", recoverAccessOnFailure = true) { cipher ->
             controller.unlock(controller.vault.finishDecryption(cipher))
         }
     }
@@ -528,7 +536,8 @@ class MainActivity : ComponentActivity() {
             (action.kind == ActionKind.TELEPHONE && action.amount.amount.signum() == 0))
             "${action.bank.name} · Factura completa · ${action.destination}"
         else "${action.amount.amount.toPlainString()} ${action.amount.currency} · ${action.destination}"
-        gate("Autorizar ${action.kind.label.lowercase()}", subtitle) { cipher ->
+        val title = when (action.kind) { ActionKind.TRANSFER -> "Transferir"; ActionKind.RECHARGE -> "Recargar"; else -> "Pagar" }
+        gate(title, subtitle) { cipher ->
             val pin = controller.pinFrom(controller.vault.finishDecryption(cipher), registration)
             controller.submit(action, pin, executionContext)
         }

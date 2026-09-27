@@ -13,7 +13,7 @@ class BiometricGate(private val activity: Activity) {
     /** Explicit confirmation for an initial registration which has no saved credential yet. */
     fun confirm(
         title: String,
-        subtitle: String,
+        subtitle: String?,
         onSuccess: () -> Unit,
         onCancelled: () -> Unit,
         onError: (String) -> Unit,
@@ -23,7 +23,7 @@ class BiometricGate(private val activity: Activity) {
         fun cancelOnce() { if (!finished) { finished = true; onCancelled() } }
         val prompt = BiometricPrompt.Builder(activity)
             .setTitle(title)
-            .setSubtitle(subtitle)
+            .apply { subtitle?.takeIf(String::isNotBlank)?.let { setSubtitle(it) } }
             .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
             .setNegativeButton("Cancelar", activity.mainExecutor) { _, _ -> cancelOnce() }
             .build()
@@ -47,7 +47,7 @@ class BiometricGate(private val activity: Activity) {
     fun authenticate(
         cipher: Cipher,
         title: String,
-        subtitle: String,
+        subtitle: String?,
         onSuccess: (Cipher) -> Unit,
         onCancelled: () -> Unit,
         onError: (String) -> Unit,
@@ -62,7 +62,7 @@ class BiometricGate(private val activity: Activity) {
         }
         val prompt = BiometricPrompt.Builder(activity)
             .setTitle(title)
-            .setSubtitle(subtitle)
+            .apply { subtitle?.takeIf(String::isNotBlank)?.let { setSubtitle(it) } }
             .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
             .setNegativeButton("Cancelar", activity.mainExecutor) { _, _ -> cancelOnce() }
             .build()
@@ -74,7 +74,7 @@ class BiometricGate(private val activity: Activity) {
                     finished = true
                     val authorized = result.cryptoObject?.cipher
                     if (authorized === cipher) onSuccess(authorized)
-                    else onError("No se pudo autorizar el acceso a las claves")
+                    else onError("No se pudo completar la verificación")
                 }
 
                 override fun onAuthenticationError(code: Int, message: CharSequence) {

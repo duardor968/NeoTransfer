@@ -39,6 +39,7 @@ data class AppUiState(
     val notificationsEnabled: Boolean = true,
     val services: List<OperationSpec> = BankingOperations.all,
     val serviceResult: String? = null,
+    val accessRecoveryAvailable: Boolean = false,
 )
 
 class UiActions(
@@ -179,12 +180,12 @@ fun NeoTransferApp(state: AppUiState, actions: UiActions, initialQr: QrPayment? 
     LaunchedEffect(state.notice) {
         if (review == null && qr == null) state.notice?.let { snackbar.showSnackbar(it, actionLabel = "Cerrar", duration = SnackbarDuration.Long); actions.dismissNotice() }
     }
-    LaunchedEffect(state.pending, state.confirmed) {
-        if (state.pending != null || state.confirmed != null) { review = null; qr = null; stack = listOf(Page.HOME.name) }
+    LaunchedEffect(state.pending) {
+        if (state.pending != null) { review = null; qr = null; stack = listOf(Page.HOME.name) }
     }
     BackHandler(enabled = (state.unlocked || !state.hasCredentials) && page != Page.HOME && review == null && qr == null && scanTarget == null) { back() }
-    SideEffect { actions.protectScreen(!state.unlocked || !state.hasCredentials || page == Page.ENROLL || (page == Page.FUEL && fuelSensitive) ||
-        (page == Page.SERVICE_FORM && state.services.firstOrNull { it.id == selectedServiceId }?.fields?.any { it.sensitive && !it.suppliedByAccess } == true)) }
+    SideEffect { actions.protectScreen(state.unlocked && (!state.hasCredentials || page == Page.ENROLL || (page == Page.FUEL && fuelSensitive) ||
+        (page == Page.SERVICE_FORM && state.services.firstOrNull { it.id == selectedServiceId }?.fields?.any { it.sensitive && !it.suppliedByAccess } == true))) }
 
     NeoTheme(when (theme) { ThemePreference.SYSTEM -> systemDark; ThemePreference.LIGHT -> false; ThemePreference.DARK -> true }) {
         Scaffold(snackbarHost = { if (review == null && qr == null) SnackbarHost(snackbar) }, bottomBar = {
@@ -197,14 +198,14 @@ fun NeoTransferApp(state: AppUiState, actions: UiActions, initialQr: QrPayment? 
         }) { padding ->
             Box(Modifier.fillMaxSize().padding(padding).imePadding()) {
                 when {
-                    !state.unlocked && state.hasCredentials -> LockScreen(state.busy, actions.unlock) { resetAccess = true }
+                    !state.unlocked -> LockScreen(state.busy, state.accessRecoveryAvailable && state.hasCredentials, actions.unlock) { resetAccess = true }
                     (!state.hasCredentials && page != Page.SERVICE_FORM) || page == Page.ENROLL -> Enrollment(state, actions, enrollIdentity, ::back, ::openService)
                     else -> AnimatedContent(page, label = "Navegación") { destination ->
                         savedState.SaveableStateProvider(destination.name) {
                             when (destination) {
                                 Page.HOME -> WalletHome(state, actions, { go(Page.SETTINGS) }, { go(Page.WALLET) }, { go(Page.BANKS) },
                                     { newPayment(Page.TRANSFER) }, { scannerMode = ScanMode.QR; go(Page.SCAN) }, { newPayment(Page.RECHARGE) },
-                                    { go(Page.SERVICES) }, { go(Page.ACTIVITY) }, { selectedReceipt = it }, { resolve = true }, ::configure, { go(Page.RECEIVE) })
+                                    { go(Page.SERVICES) }, { go(Page.ACTIVITY) }, { selectedReceipt = it }, { resolve = true }, ::configure, { go(Page.RECEIVE) }, ::editProduct)
                                 Page.ACTIVITY -> {
                                     val identity = selectedProduct(state)?.identity ?: ProviderIdentity.forBank(state.bank)
                                     val query = state.services.firstOrNull { it.id.endsWith(".recent-operations") && it.supports(identity) }
@@ -256,7 +257,7 @@ fun NeoTransferApp(state: AppUiState, actions: UiActions, initialQr: QrPayment? 
                         }
                     }
                 }
-                if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
+                if (state.busy && state.unlocked) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
             }
         }
         if (state.unlocked || !state.hasCredentials) {
@@ -301,7 +302,7 @@ fun NeoTransferApp(state: AppUiState, actions: UiActions, initialQr: QrPayment? 
                 confirmButton = { TextButton(onClick = { actions.resolvePending(); resolve = false }, enabled = !state.busy) { Text("Cerrar revisión") } },
                 dismissButton = { TextButton(onClick = { resolve = false }) { Text("Seguir esperando") } })
             state.serviceResult?.let { result -> AlertDialog(onDismissRequest = actions.clearServiceResult, title = { Text("Resultado") },
-                text = { LazyColumn { item { Text(result) } } }, confirmButton = { TextButton(onClick = actions.clearServiceResult) { Text("Cerrar resultado") } }) }
+                text = { LazyColumn { item { Text(result) } } }, confirmButton = { TextButton(onClick = actions.clearServiceResult) { Text("Cerrar") } }) }
         }
         if (resetAccess) AlertDialog(onDismissRequest = { resetAccess = false }, title = { Text("Restablecer acceso") },
             text = { Text("Se borrarán las claves guardadas en este teléfono. La cartera y la actividad se conservarán.") },

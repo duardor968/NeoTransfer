@@ -69,6 +69,13 @@ class PreviewActivity : ComponentActivity() {
                 initial.copy(wallet = initial.wallet.copy(fuelCoupons = domainFixtures.fuelCoupons,
                     operations = initial.wallet.operations + domainFixtures.miTurnoRequests))
             }) }
+            LaunchedEffect(Unit) {
+                if (intent.getStringExtra("scenario") == "late-confirmation") {
+                    kotlinx.coroutines.delay(10_000)
+                    state = state.copy(confirmed = BankMessage.TransferSent(Bank.BANDEC, "0000000000000002",
+                        Money(BigDecimal("350.00"), Currency.CUP), "LATE-DEMO", null))
+                }
+            }
             val fuel = remember { FuelController(domainFixtures.fuelSecretStore,
                 readEnvelope = { id, revision -> domainFixtures.protectedFuelEnvelopes[id]?.takeIf { it.revision == revision } },
                 currentCoupon = { id -> state.wallet.fuelCoupons.singleOrNull { it.id == id } }) }
@@ -103,7 +110,8 @@ class PreviewActivity : ComponentActivity() {
                 permissions = { state = state.copy(permissions = true) },
                 cameraPermission = { requestPermissions(arrayOf(Manifest.permission.CAMERA), 10) },
                 selectBank = { state = state.copy(bank = it) }, selectSim = { state = state.copy(subscription = it) },
-                balance = { state = state.copy(notice = "Consulta simulada") }, refresh = { state = state.copy(notice = "Actividad de prueba actualizada") },
+                balance = { state = state.copy(notice = if (intent.getStringExtra("scenario") == "timeout") "Tiempo de espera agotado" else "Consulta simulada") },
+                refresh = { state = state.copy(notice = "Actividad de prueba actualizada") },
                 pay = { state = state.copy(pending = PendingRecord(it, 1, Instant.now())) },
                 saveRecipient = { state = state.copy(recipients = state.recipients + it) },
                 resolvePending = { state = state.copy(pending = null) }, dismissNotice = { state = state.copy(notice = null) },
@@ -191,8 +199,19 @@ class PreviewActivity : ComponentActivity() {
             HistoryEntry(BankSmsRecord(7, "Comprobante sintético de transferencia enviada.", now.minusSeconds(259200), 1),
                 BankMessage.TransferSent(Bank.BPA, "0000XXXXXXXX0003", money("1234567.89"), "DEMO07", null)),
         )
-        val wallet = if (scenario in listOf("empty", "enroll")) WalletSnapshot() else fixtureWallet(now)
-        return AppUiState(unlocked = scenario != "locked" && scenario != "enroll", hasCredentials = scenario != "enroll",
+        val wallet = when (scenario) {
+            "empty", "enroll" -> WalletSnapshot()
+            "access-only" -> fixtureWallet(now).let { initial -> initial.copy(
+                registrations = initial.registrations.filter { it.id == "BANDEC" }, cards = emptyList(),
+                accounts = emptyList(), balances = emptyList()) }
+            "timeout" -> fixtureWallet(now).let { initial -> initial.copy(operations = listOf(OperationRecord(
+                "preview-timeout", "TRANSFER", Bank.BANDEC.code, 1, "0000000000000002", "350.00", "CUP",
+                now.minusSeconds(90).toEpochMilli(), registrationId = "BANDEC", source = "0000000000000001",
+                status = OperationStatus.UNCERTAIN, reviewRequired = false, specId = "bandec.transfer",
+                providerId = "BANDEC", timeoutAt = now.minusSeconds(60).toEpochMilli()))) }
+            else -> fixtureWallet(now)
+        }
+        return AppUiState(unlocked = scenario !in listOf("locked", "locked-prompt"), hasCredentials = scenario != "enroll",
             bank = if (scenario == "bpa") Bank.BPA else Bank.BANDEC, subscription = 1, sims = listOf(SimChoice(1, "SIM 1 · CUBACEL")),
             configuredBanks = wallet.registrations.mapNotNull { row -> Bank.entries.firstOrNull { it.code == row.bankCode } }.toSet(), busy = false,
             accounts = if (scenario == "empty") emptyList() else if (scenario == "bpa") listOf(AccountBalance(null, null, money("8240.50")))

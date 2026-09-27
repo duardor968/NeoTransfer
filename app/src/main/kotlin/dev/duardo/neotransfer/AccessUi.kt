@@ -21,14 +21,25 @@ import dev.duardo.neotransfer.core.*
 internal enum class ThemePreference(val title: String) { SYSTEM("Sistema"), LIGHT("Claro"), DARK("Oscuro") }
 
 @Composable
-internal fun LockScreen(busy: Boolean, unlock: () -> Unit, reset: () -> Unit) {
-    Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center) {
-        BrandArtwork(R.drawable.nt_brand_textured, 112.dp)
-        Spacer(Modifier.height(28.dp))
-        Text("NeoTransfer", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(40.dp))
-        Primary("Abrir con huella", !busy, unlock)
-        TextButton(onClick = reset, enabled = !busy, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Restablecer acceso") }
+internal fun LockScreen(busy: Boolean, recoveryAvailable: Boolean, unlock: () -> Unit, reset: () -> Unit) {
+    Box(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
+        Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(20.dp)) {
+            BrandArtwork(R.drawable.nt_brand_textured, 88.dp)
+            Text("NeoTransfer bloqueada", style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        }
+        Column(Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            if (recoveryAvailable) TextButton(onClick = reset, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp),
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSecondaryContainer)) {
+                Text("Restablecer acceso")
+            }
+            TextButton(onClick = unlock, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp),
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSecondaryContainer)) {
+                Text("Desbloquear")
+            }
+        }
     }
 }
 
@@ -101,7 +112,7 @@ internal fun RegistrationLineDialog(state: AppUiState, actions: UiActions, id: S
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         } }, confirmButton = { TextButton(onClick = {
             actions.dismissNotice(); reactivating = true; actions.reassociateRegistration(id, requireNotNull(selectedLine))
-        }, enabled = !state.busy && !reactivating && lineAvailable && state.permissions) { Text("Reactivar con huella") } },
+        }, enabled = !state.busy && !reactivating && lineAvailable && state.permissions) { Text("Reactivar") } },
         dismissButton = { TextButton(onClick = dismiss) { Text("Cancelar") } })
 }
 @OptIn(ExperimentalLayoutApi::class)
@@ -135,7 +146,7 @@ internal fun Enrollment(state: AppUiState, actions: UiActions, initial: Provider
             }
         }
         Field("Clave de ${identity.title()}", pin, { pin = digits(it, pinLength) }, KeyboardType.NumberPassword, secret = true)
-        Primary("Guardar con huella", enabled = pin.length == pinLength && pin.all(Char::isDigit) &&
+        Primary("Guardar", enabled = pin.length == pinLength && pin.all(Char::isDigit) &&
             !state.busy && state.permissions && state.sims.any { it.id == state.subscription }) {
             val value = pin.toCharArray(); pin = ""
             actions.enrollProvider(identity, value, back)
@@ -174,7 +185,6 @@ internal fun SettingsScreen(state: AppUiState, actions: UiActions, theme: ThemeP
     }
     if (help) AlertDialog(onDismissRequest = { help = false }, title = { Text("NeoTransfer") },
         text = { Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("Cartera, contactos y servicios bancarios.")
             Text("Las operaciones necesitan cobertura de la línea registrada. Los resultados aparecen en Actividad.")
             Text("La clave de un respaldo es necesaria para restaurarlo. NeoTransfer no puede recuperarla.")
         } }, confirmButton = { TextButton(onClick = { help = false }) { Text("Cerrar ayuda") } })

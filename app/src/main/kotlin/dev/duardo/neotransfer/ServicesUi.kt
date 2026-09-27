@@ -400,7 +400,7 @@ internal fun ServiceForm(spec: OperationSpec, state: AppUiState, actions: UiActi
                             choices.firstOrNull { it.value == displayValue }?.label ?: text)
                     }
                 }
-                Primary("Confirmar con huella", !state.busy && state.pending == null) {
+                Primary("Confirmar", !state.busy && state.pending == null) {
                     val currentOrigin = origins.singleOrNull { it.key == reviewed.origin.key }
                     if (currentOrigin == null || !currentOrigin.sameContext(reviewed.origin) || !reviewed.origin.isSelected(state) ||
                         (currentOrigin.registration?.subscriptionId ?: state.subscription) != reviewed.subscriptionId) {

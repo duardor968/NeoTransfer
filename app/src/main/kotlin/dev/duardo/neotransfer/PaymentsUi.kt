@@ -108,7 +108,7 @@ internal fun MoneyReview(action: MoneyAction, state: AppUiState, actions: UiActi
             Detail("Desde · ${action.bank.name}", if (action.source == "0000") "Cuenta predeterminada" else readableAccount(action.source))
             Detail(if (action.kind == ActionKind.TRANSFER) "Para" else if (action.kind == ActionKind.RECHARGE) "Móvil" else "Factura", readableAccount(action.destination))
             action.phone?.let { Detail("Notificar al móvil", it) }
-            Primary(if (action.kind == ActionKind.TRANSFER) "Transferir con huella" else "Pagar con huella", !state.busy && state.pending == null) { actions.pay(action) }
+            Primary(if (action.kind == ActionKind.TRANSFER) "Transferir" else "Pagar", !state.busy && state.pending == null) { actions.pay(action) }
             state.notice?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
     }
@@ -139,7 +139,6 @@ internal fun QrPaymentReview(qr: QrPayment, state: AppUiState, actions: UiAction
                 ChoiceField("Clásica vinculada", products.map { it.id to if (it.identity.profile == ProfileId.CLASSIC) "Clásica vinculada · ${it.identity.title()}" else "${it.identity.title()} · ${it.name}" }) { id ->
                     products.firstOrNull { it.id == id }?.let { productId = it.id; actions.selectProduct(it.id) }
                 }
-                Text("Este pago utiliza la tarjeta Clásica vinculada a MiTransfer.", style = MaterialTheme.typography.bodyMedium)
             } else SourcePicker(products, product, { productId = it.id; actions.selectProduct(it.id) }, addSource)
             Detail("Proveedor", qr.provider); Detail("Referencia", qr.transactionId)
             Field("Importe · ${qr.amount.currency}", amount, { amount = decimalInput(it, amount) }, KeyboardType.Decimal, readOnly = !qr.editableAmount)
@@ -147,7 +146,7 @@ internal fun QrPaymentReview(qr: QrPayment, state: AppUiState, actions: UiAction
             Field("Móvil a notificar (opcional)", phone, { phone = digits(it, 8) }, KeyboardType.Phone)
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             if (product != null && !hasProductAccess(state, product)) Primary("Configurar ${product.identity.title()}") { configure(requireNotNull(product).identity) }
-            else Primary("Pagar con huella", product != null && selectedProduct(state)?.id == product.id && !state.busy && state.pending == null && validAmount(amount) && (phone.isEmpty() || phone.matches(Regex("[0-9]{8}")))) {
+            else Primary("Pagar", product != null && selectedProduct(state)?.id == product.id && !state.busy && state.pending == null && validAmount(amount) && (phone.isEmpty() || phone.matches(Regex("[0-9]{8}")))) {
                 runCatching {
                     require(product != null && selectedProduct(state)?.id == product.id) { "Espera a que se seleccione el origen" }
                     if (wallet) {
