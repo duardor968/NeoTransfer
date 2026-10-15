@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Template of res/xml/shortcuts.xml: app/build.gradle.kts fills in each variant's applicationId. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="scan"
+        android:enabled="true"
+        android:icon="@drawable/ic_qr_code_scanner"
+        android:shortcutShortLabel="@string/scan">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetClass="dev.duardo.neotransfer.MainActivity"
+            android:targetPackage="${applicationId}">
+            <extra android:name="dev.duardo.neotransfer.route" android:value="scanner" />
+        </intent>
+    </shortcut>
+</shortcuts>

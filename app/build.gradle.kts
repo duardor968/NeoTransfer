@@ -22,6 +22,7 @@ android {
         targetSdk = 36
         versionCode = 100
         versionName = "1.0.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildFeatures { compose = true }
@@ -52,6 +53,36 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+    // Fakes of the modem, inbox, vault and store shared by JVM and device tests.
+    sourceSets["test"].kotlin.srcDir("src/sharedTest/kotlin")
+    sourceSets["androidTest"].kotlin.srcDir("src/sharedTest/kotlin")
+    testOptions.unitTests.all { test ->
+        // Local-only import of a private Transfermóvil backup; absent on other machines.
+        System.getenv("NEOTRANSFER_TRM")?.let { test.environment("NEOTRANSFER_TRM", it) }
+    }
+}
+
+/** Writes res/xml/shortcuts.xml from its template: a static shortcut must name its package, which differs per variant. */
+abstract class ShortcutsResource : DefaultTask() {
+    @get:InputFile abstract val template: RegularFileProperty
+    @get:Input abstract val applicationId: Property<String>
+    @get:OutputDirectory abstract val resources: DirectoryProperty
+
+    @TaskAction fun write() {
+        val xml = resources.file("xml/shortcuts.xml").get().asFile
+        xml.parentFile.mkdirs()
+        xml.writeText(template.get().asFile.readText().replace("\${applicationId}", applicationId.get()))
+    }
+}
+
+androidComponents {
+    onVariants { variant ->
+        val shortcuts = tasks.register<ShortcutsResource>("generate${variant.name.replaceFirstChar(Char::uppercase)}Shortcuts") {
+            template.set(layout.projectDirectory.file("src/main/shortcuts.xml"))
+            applicationId.set(variant.applicationId)
+        }
+        variant.sources.res?.addGeneratedSourceDirectory(shortcuts, ShortcutsResource::resources)
+    }
 }
 
 room { schemaDirectory("$projectDir/schemas") }
@@ -70,5 +101,10 @@ dependencies {
     ksp("androidx.room:room-compiler:2.8.5")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
+    implementation("androidx.lifecycle:lifecycle-process:2.10.0")
     testImplementation(kotlin("test-junit"))
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+    androidTestImplementation(kotlin("test-junit"))
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
 }
