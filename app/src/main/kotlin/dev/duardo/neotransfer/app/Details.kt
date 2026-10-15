@@ -11,17 +11,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import dev.duardo.neotransfer.core.model.Cards
 import dev.duardo.neotransfer.core.model.Contact
 import dev.duardo.neotransfer.core.model.Phones
 import dev.duardo.neotransfer.core.qr.CardQr
 import dev.duardo.neotransfer.core.qr.QrCode
 import dev.duardo.neotransfer.core.qr.QrContent
+import dev.duardo.neotransfer.designsystem.component.NeoAmountField
 import dev.duardo.neotransfer.designsystem.component.NeoBottomSheet
 import dev.duardo.neotransfer.designsystem.component.NeoButton
-import dev.duardo.neotransfer.designsystem.component.NeoTextField
 import dev.duardo.neotransfer.designsystem.format.formatCardNumber
 import dev.duardo.neotransfer.designsystem.format.formatMoney
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
@@ -290,8 +288,7 @@ private fun AmountSheet(currency: String, onDismiss: () -> Unit, onDone: (java.m
     val value = text.replace(',', '.').toBigDecimalOrNull()?.takeIf { it.signum() > 0 && it.scale() <= 2 }
     NeoBottomSheet(onDismissRequest = onDismiss, title = "Pedir importe") {
         Column(Modifier.padding(horizontal = NeoSpace.gutter), verticalArrangement = Arrangement.spacedBy(NeoSpace.l)) {
-            NeoTextField(text, { text = it.filter { c -> c.isDigit() || c == '.' || c == ',' }.take(12) }, "Importe",
-                keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done, suffix = currency)
+            NeoAmountField(text, { text = it.filter { c -> c.isDigit() || c == '.' || c == ',' }.take(12) }, currency)
             NeoButton("Mostrar importe", { value?.let(onDone) }, enabled = value != null)
         }
     }

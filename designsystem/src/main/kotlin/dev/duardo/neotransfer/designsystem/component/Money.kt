@@ -34,7 +34,8 @@ fun MoneyText(
 ) {
     val formatted = formatAmount(amount)
     val prefix = if (sign == MoneySign.Plus) "+" else ""
-    val muted = color.copy(alpha = if (hero) 0.55f else 0.7f)
+    // 0.6 keeps cents and currency at 4.5:1 or more on both backgrounds.
+    val muted = color.copy(alpha = if (hero) 0.6f else 0.7f)
     val text = buildAnnotatedString {
         if (hero) {
             val cut = formatted.lastIndexOf(DecimalSeparator)

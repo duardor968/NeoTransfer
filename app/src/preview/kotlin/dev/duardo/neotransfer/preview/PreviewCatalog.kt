@@ -8,6 +8,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -28,6 +33,7 @@ import dev.duardo.neotransfer.ui.lock.LockScreen
 import dev.duardo.neotransfer.ui.model.ActivityContent
 import dev.duardo.neotransfer.ui.model.ActivityFilter
 import dev.duardo.neotransfer.ui.model.ActivityUi
+import dev.duardo.neotransfer.ui.model.Appearance as Theme
 import dev.duardo.neotransfer.ui.model.BackupUi
 import dev.duardo.neotransfer.ui.model.BalanceUi
 import dev.duardo.neotransfer.ui.model.Bank
@@ -40,7 +46,6 @@ import dev.duardo.neotransfer.ui.model.CardSetupUi
 import dev.duardo.neotransfer.ui.model.ContactEditUi
 import dev.duardo.neotransfer.ui.model.ContactsContent
 import dev.duardo.neotransfer.ui.model.ContactsUi
-import dev.duardo.neotransfer.ui.model.CubacelPlansUi
 import dev.duardo.neotransfer.ui.model.CubacelQuery
 import dev.duardo.neotransfer.ui.model.CubacelResultUi
 import dev.duardo.neotransfer.ui.model.CubacelUi
@@ -58,10 +63,8 @@ import dev.duardo.neotransfer.ui.model.PayQrUi
 import dev.duardo.neotransfer.ui.model.PayReviewUi
 import dev.duardo.neotransfer.ui.model.PermissionKind
 import dev.duardo.neotransfer.ui.model.PermissionsUi
-import dev.duardo.neotransfer.ui.model.PlanGroupUi
-import dev.duardo.neotransfer.ui.model.PlanUi
-import dev.duardo.neotransfer.ui.model.RechargeTargetUi
 import dev.duardo.neotransfer.ui.model.ReceiveUi
+import dev.duardo.neotransfer.ui.model.RechargeTargetUi
 import dev.duardo.neotransfer.ui.model.RecipientPickUi
 import dev.duardo.neotransfer.ui.model.RecipientUi
 import dev.duardo.neotransfer.ui.model.ServiceFormUi
@@ -80,7 +83,6 @@ import dev.duardo.neotransfer.ui.onboarding.PermissionsScreen
 import dev.duardo.neotransfer.ui.pay.PayQrScreen
 import dev.duardo.neotransfer.ui.receive.QrCode
 import dev.duardo.neotransfer.ui.receive.ReceiveScreen
-import dev.duardo.neotransfer.ui.services.CubacelPlansScreen
 import dev.duardo.neotransfer.ui.services.CubacelScreen
 import dev.duardo.neotransfer.ui.services.ServiceFormScreen
 import dev.duardo.neotransfer.ui.services.ServicesScreen
@@ -95,7 +97,7 @@ import dev.duardo.neotransfer.ui.transfer.RecipientScreen
 import dev.duardo.neotransfer.ui.transfer.TransferAmountScreen
 import dev.duardo.neotransfer.ui.transfer.TransferResultScreen
 import dev.duardo.neotransfer.ui.transfer.TransferReviewScreen
-import dev.duardo.neotransfer.ui.model.Appearance as Theme
+import kotlinx.coroutines.delay
 
 /** Every screen and state, by id. Ids are what `--es screen` takes and how captures are named. */
 object PreviewCatalog {
@@ -185,14 +187,15 @@ object PreviewCatalog {
 
         // Services --------------------------------------------------------------------------------------------
         "services" to { Tabbed(Tab.Services) { ServicesScreen(ServicesUi(PreviewData.references), noop()) } },
+        "services-new" to { Tabbed(Tab.Services) { ServicesScreen(ServicesUi(emptyList()), noop()) } },
         "service-electricity" to {
             ServiceFormScreen(
                 ServiceFormUi(
                     ServiceKind.Electricity, "Electricidad",
                     PreviewData.references.filter { it.kind == ServiceKind.Electricity }, "ref-casa",
                     listOf(FieldUi("client", "Código de cliente", "01234567891", FieldInput.Number)),
-                    amount = null, currency = "CUP", due = cup("412.35"),
-                    cards = wallet, source = 0, canContinue = true, action = "Pagar 412.35 CUP",
+                    amount = null, currency = "CUP",
+                    cards = wallet, source = 0, canContinue = true, action = "Pagar factura",
                 ),
                 noop(),
             )
@@ -236,32 +239,6 @@ object PreviewCatalog {
                 noop(),
             )
         },
-        "cubacel-plans" to {
-            CubacelPlansScreen(
-                CubacelPlansUi(
-                    cup("125.40"),
-                    listOf(
-                        PlanGroupUi(
-                            "Datos",
-                            listOf(
-                                PlanUi("d1", "1 GB", "Todas las redes · 30 días", cup("100.00")),
-                                PlanUi("d2", "4 GB", "Todas las redes · 30 días", cup("240.00")),
-                                PlanUi("d3", "10 GB", "Todas las redes · 30 días", cup("480.00")),
-                            ),
-                        ),
-                        PlanGroupUi(
-                            "Combinados",
-                            listOf(
-                                PlanUi("c1", "3 GB + 100 min + 50 SMS", "30 días", cup("360.00")),
-                                PlanUi("c2", "6 GB + 200 min + 100 SMS", "30 días", cup("600.00")),
-                            ),
-                        ),
-                    ),
-                    selected = "d2",
-                ),
-                noop(),
-            )
-        },
 
         // Transfer --------------------------------------------------------------------------------------------
         "transfer-recipient" to {
@@ -276,6 +253,12 @@ object PreviewCatalog {
                     ),
                     contacts = PreviewData.contacts.filter { it.cards.isNotEmpty() },
                 ),
+                noop(),
+            )
+        },
+        "transfer-recipient-empty" to {
+            RecipientScreen(
+                RecipientPickUi("", null, null, recent = listOf(RecipientUi(ForeignCardUi("x", "9212333188042154", "BPA"))), contacts = emptyList(), canImport = true),
                 noop(),
             )
         },
@@ -307,6 +290,7 @@ object PreviewCatalog {
         "transfer-confirmed" to {
             TransferResultScreen(TransferResultUi(PreviewData.sentToJuan.copy(status = OperationStatus.Confirmed, transactionId = "TRF8826104190")), noop())
         },
+        "transfer-live" to { LiveResult() },
         "transfer-rejected" to {
             TransferResultScreen(TransferResultUi(PreviewData.sentToJuan.copy(status = OperationStatus.Rejected, reason = "Saldo insuficiente")), noop())
         },
@@ -361,6 +345,18 @@ private fun activity(content: ActivityContent) = ActivityUi("", ActivityFilter.A
 @Composable
 private fun Tabbed(tab: Tab, content: @Composable () -> Unit) {
     MainShell(tab, {}, content = content)
+}
+
+/** Sent, then confirmed 2.5 s later as the bank's SMS would do it: to watch the mark change on a device. */
+@Composable
+private fun LiveResult() {
+    var confirmed by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(2_500)
+        confirmed = true
+    }
+    val sent = PreviewData.sentToJuan
+    TransferResultScreen(TransferResultUi(if (confirmed) sent.copy(status = OperationStatus.Confirmed, transactionId = "TRF8826104190") else sent), noop())
 }
 
 /** Stand-in for the camera feed: a dim surface with a merchant QR on it. */

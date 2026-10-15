@@ -33,15 +33,16 @@ import dev.duardo.neotransfer.designsystem.component.EmptyState
 import dev.duardo.neotransfer.designsystem.component.GroupDivider
 import dev.duardo.neotransfer.designsystem.component.IconAvatar
 import dev.duardo.neotransfer.designsystem.component.NeoButton
-import dev.duardo.neotransfer.designsystem.component.NeoConfirmDialog
+import dev.duardo.neotransfer.designsystem.component.NeoConfirmSheet
 import dev.duardo.neotransfer.designsystem.component.NeoGroup
 import dev.duardo.neotransfer.designsystem.component.NeoIconButton
 import dev.duardo.neotransfer.designsystem.component.NeoRow
 import dev.duardo.neotransfer.designsystem.component.NeoSegmented
 import dev.duardo.neotransfer.designsystem.component.NeoTextField
 import dev.duardo.neotransfer.designsystem.component.NeoTopBar
-import dev.duardo.neotransfer.designsystem.component.SecureWindow
 import dev.duardo.neotransfer.designsystem.component.SectionHeader
+import dev.duardo.neotransfer.designsystem.component.SecureWindow
+import dev.duardo.neotransfer.designsystem.component.flushEnd
 import dev.duardo.neotransfer.designsystem.format.formatCardNumber
 import dev.duardo.neotransfer.designsystem.format.formatMoney
 import dev.duardo.neotransfer.designsystem.theme.Neo
@@ -51,9 +52,9 @@ import dev.duardo.neotransfer.ui.common.BrandMark
 import dev.duardo.neotransfer.ui.common.timeLabels
 import dev.duardo.neotransfer.ui.model.Appearance
 import dev.duardo.neotransfer.ui.model.BackupUi
+import dev.duardo.neotransfer.ui.model.BalanceUi
 import dev.duardo.neotransfer.ui.model.Bank
 import dev.duardo.neotransfer.ui.model.BankSettingsUi
-import dev.duardo.neotransfer.ui.model.BalanceUi
 import dev.duardo.neotransfer.ui.model.SettingsUi
 import dev.duardo.neotransfer.ui.model.TransfermovilImportUi
 import dev.duardo.neotransfer.ui.onboarding.BottomAction
@@ -179,7 +180,7 @@ fun BankSettingsScreen(state: BankSettingsUi, actions: BankSettingsActions, modi
                         (balance as? BalanceUi.Known)?.let { "Saldo ${formatMoney(it.money.amount, it.money.currency)}" },
                     ).joinToString(" · "),
                     leading = { BankCardThumb(wallet.card.bank) },
-                    trailing = { NeoIconButton(Ds.drawable.ic_delete, "Quitar tarjeta", { actions.removeCard(wallet.card.id) }) },
+                    trailing = { NeoIconButton(Ds.drawable.ic_delete, "Quitar tarjeta", { actions.removeCard(wallet.card.id) }, Modifier.flushEnd()) },
                 )
                 GroupDivider()
             }
@@ -202,7 +203,7 @@ fun BankSettingsScreen(state: BankSettingsUi, actions: BankSettingsActions, modi
             )
         }
     }
-    if (confirmingRemoval) NeoConfirmDialog(
+    if (confirmingRemoval) NeoConfirmSheet(
         title = "¿Quitar ${state.bank.shortName}?",
         text = "Se borran sus tarjetas y la clave guardada. La actividad se conserva.",
         confirm = "Quitar",
@@ -245,7 +246,7 @@ fun BackupScreen(state: BackupUi, actions: BackupActions, modifier: Modifier = M
         when (state) {
             is BackupUi.Export -> Column(verticalArrangement = Arrangement.spacedBy(NeoSpace.m)) {
                 Text(
-                    "Tarjetas, contactos, referencias y actividad, cifrados con tu contraseña. Las claves del banco no se incluyen.",
+                    "Tarjetas, contactos y referencias de servicios, cifrados con tu contraseña. Las claves del banco no se incluyen.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

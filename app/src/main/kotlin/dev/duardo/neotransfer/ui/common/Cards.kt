@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
@@ -46,6 +47,13 @@ val Bank.art: Int
     get() = when (this) {
         Bank.BPA -> R.drawable.card_bpa_red
         Bank.BANDEC -> R.drawable.card_bandec_red
+    }
+
+/** The card's own colour, sampled from its art: the halo behind it in the wallet. */
+val Bank.artColor: Color
+    get() = when (this) {
+        Bank.BPA -> Color(0xFF1E7A5E)
+        Bank.BANDEC -> Color(0xFFCC2A45)
     }
 
 private val Bank.print: CardFaceLayout

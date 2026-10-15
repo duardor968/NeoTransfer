@@ -14,6 +14,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.duardo.neotransfer.core.ledger.OperationStatus
 import dev.duardo.neotransfer.core.model.Bank as CoreBank
+import dev.duardo.neotransfer.core.model.Contact
 import dev.duardo.neotransfer.core.protocol.UssdRequest
 import dev.duardo.neotransfer.core.qr.QrCode
 import dev.duardo.neotransfer.core.qr.QrContent
@@ -362,6 +363,16 @@ class AppModel @JvmOverloads constructor(
     }
 
     fun launch(block: suspend () -> Unit): Job = viewModelScope.launch { block() }
+
+    /** One contact picked from the phone and kept; null when the person backs out or it fails (already said). */
+    suspend fun importPhoneContact(): Contact? {
+        val host = host ?: return null
+        if (!granted(Manifest.permission.READ_CONTACTS) && !host.requestPermission(Manifest.permission.READ_CONTACTS)) return null
+        val uri = host.pickContact() ?: return null
+        return runCatching { controller.importPhoneContact(uri.toString()) }
+            .onFailure { message(it.message ?: "No se pudo importar el contacto") }
+            .getOrNull()
+    }
 
     companion object {
         private const val LOCKOUT_SECONDS = 30

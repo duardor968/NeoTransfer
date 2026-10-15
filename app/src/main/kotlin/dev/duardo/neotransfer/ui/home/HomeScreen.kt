@@ -1,6 +1,7 @@
 package dev.duardo.neotransfer.ui.home
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -23,46 +24,60 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.designsystem.R as Ds
 import dev.duardo.neotransfer.designsystem.card.AddCardSlot
 import dev.duardo.neotransfer.designsystem.card.CardCarousel
 import dev.duardo.neotransfer.designsystem.card.PagerDots
+import dev.duardo.neotransfer.designsystem.component.AvatarBadge
 import dev.duardo.neotransfer.designsystem.component.GroupDivider
 import dev.duardo.neotransfer.designsystem.component.IconAvatar
 import dev.duardo.neotransfer.designsystem.component.MoneyText
 import dev.duardo.neotransfer.designsystem.component.NeoBottomSheet
-import dev.duardo.neotransfer.designsystem.component.NeoButton
-import dev.duardo.neotransfer.designsystem.component.NeoButtonStyle
 import dev.duardo.neotransfer.designsystem.component.NeoGroup
 import dev.duardo.neotransfer.designsystem.component.NeoIconButton
 import dev.duardo.neotransfer.designsystem.component.NeoRow
-import dev.duardo.neotransfer.designsystem.component.NeoTextButton
-import dev.duardo.neotransfer.designsystem.component.QuickAction
+import dev.duardo.neotransfer.designsystem.component.QuickActionGrid
+import dev.duardo.neotransfer.designsystem.component.QuickActionItem
 import dev.duardo.neotransfer.designsystem.component.SectionHeader
+import dev.duardo.neotransfer.designsystem.component.glow
 import dev.duardo.neotransfer.designsystem.component.skeleton
-import dev.duardo.neotransfer.designsystem.format.formatAmount
+import dev.duardo.neotransfer.designsystem.component.spinning
+import dev.duardo.neotransfer.designsystem.format.formatMoney
+import dev.duardo.neotransfer.designsystem.format.unbroken
 import dev.duardo.neotransfer.designsystem.theme.Neo
+import dev.duardo.neotransfer.designsystem.theme.NeoMotion
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
 import dev.duardo.neotransfer.ui.common.BankCard
 import dev.duardo.neotransfer.ui.common.BrandMark
 import dev.duardo.neotransfer.ui.common.OperationAmount
 import dev.duardo.neotransfer.ui.common.OperationAvatar
 import dev.duardo.neotransfer.ui.common.OperationRow
+import dev.duardo.neotransfer.ui.common.artColor
 import dev.duardo.neotransfer.ui.common.icon
 import dev.duardo.neotransfer.ui.common.label
 import dev.duardo.neotransfer.ui.common.timeLabels
@@ -110,47 +125,68 @@ fun HomeScreen(state: HomeUi, actions: HomeActions, modifier: Modifier = Modifie
     val labels = timeLabels
 
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = NeoSpace.xxl)) {
-        item(key = "header") {
-            Row(
-                Modifier.fillMaxWidth().statusBarsPadding().padding(start = NeoSpace.gutter, end = NeoSpace.xs).heightIn(min = 64.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                BrandMark(36.dp)
-                Spacer(Modifier.weight(1f))
-                NeoIconButton(Ds.drawable.ic_settings, "Ajustes", actions::settings)
-            }
-        }
         item(key = "wallet") {
-            CardCarousel(pager, key = { if (it < state.cards.size) state.cards[it].card.id else "add" }) { page ->
-                val wallet = state.cards.getOrNull(page)
-                if (wallet != null) BankCard(wallet.card, onClick = { actions.openCard(wallet.card.id) })
-                else AddCardSlot("Añadir tarjeta", actions::addCard)
-            }
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { PagerDots(pages, pager.currentPage) }
-        }
-        item(key = "balance") {
-            AnimatedContent(
-                current,
-                transitionSpec = { fadeIn() togetherWith fadeOut() },
-                contentKey = { it?.card?.id },
-                label = "balance",
-            ) { wallet ->
-                Box(Modifier.fillMaxWidth().heightIn(min = 112.dp), contentAlignment = Alignment.Center) {
-                    if (wallet != null) Balance(wallet, labels::ago) { actions.refreshBalance(wallet.card.id) }
+            // The card in hand lights the space around it in its own colour, behind the header and the balance too;
+            // swiping blends one colour into the next.
+            val strength = if (Neo.colors.isDark) 0.22f else 0.12f
+            val accent = Neo.colors.accent
+            fun tint(page: Int) = (state.cards.getOrNull(page)?.card?.bank?.artColor ?: accent).copy(alpha = strength)
+            val fraction = pager.currentPageOffsetFraction
+            val next = (pager.currentPage + if (fraction > 0) 1 else -1).coerceIn(0, pages - 1)
+            val halo = lerp(tint(pager.currentPage), tint(next), kotlin.math.abs(fraction))
+            var height by remember { mutableIntStateOf(0) }
+            var cardCenter by remember { mutableFloatStateOf(0f) }
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .onSizeChanged { height = it.height }
+                    .glow(halo, y = if (height > 0) cardCenter / height else 0.4f, reach = 0.62f),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().statusBarsPadding().padding(start = NeoSpace.gutter, end = NeoSpace.xs).heightIn(min = 64.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    BrandMark(36.dp)
+                    Spacer(Modifier.weight(1f))
+                    NeoIconButton(Ds.drawable.ic_settings, "Ajustes", actions::settings)
+                }
+                CardCarousel(
+                    pager,
+                    Modifier.onPlaced { cardCenter = it.positionInParent().y + it.size.height / 2f },
+                    key = { if (it < state.cards.size) state.cards[it].card.id else "add" },
+                ) { page ->
+                    val wallet = state.cards.getOrNull(page)
+                    if (wallet != null) BankCard(wallet.card, onClick = { actions.openCard(wallet.card.id) })
+                    else AddCardSlot("Añadir tarjeta", actions::addCard)
+                }
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { PagerDots(pages, pager.currentPage) }
+                AnimatedContent(
+                    current,
+                    transitionSpec = { fadeIn(tween(NeoMotion.medium)) togetherWith fadeOut(tween(NeoMotion.short)) },
+                    contentKey = { it?.card?.id },
+                    label = "balance",
+                ) { wallet ->
+                    // A fixed block: swiping between a card with balance and one without moves nothing below.
+                    Box(Modifier.fillMaxWidth().padding(top = NeoSpace.l).height(96.dp), contentAlignment = Alignment.Center) {
+                        if (wallet != null) Balance(wallet, labels::ago) { actions.refreshBalance(wallet.card.id) }
+                    }
                 }
             }
         }
         item(key = "actions") {
-            Row(Modifier.fillMaxWidth().padding(horizontal = NeoSpace.m, vertical = NeoSpace.s)) {
-                QuickAction(Ds.drawable.ic_arrow_outward, "Transferir", actions::transfer, Modifier.weight(1f), primary = true)
-                QuickAction(Ds.drawable.ic_qr_code_scanner, "Pagar", actions::pay, Modifier.weight(1f))
-                QuickAction(Ds.drawable.ic_south_west, "Cobrar", actions::receive, Modifier.weight(1f))
-                QuickAction(Ds.drawable.ic_smartphone, "Recargar", actions::recharge, Modifier.weight(1f))
-            }
+            QuickActionGrid(
+                listOf(
+                    QuickActionItem(Ds.drawable.ic_arrow_outward, "Transferir", actions::transfer, primary = true),
+                    QuickActionItem(Ds.drawable.ic_qr_code_scanner, "Pagar", actions::pay),
+                    QuickActionItem(Ds.drawable.ic_south_west, "Cobrar", actions::receive),
+                    QuickActionItem(Ds.drawable.ic_smartphone, "Recargar", actions::recharge),
+                ),
+                Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.xxxl),
+            )
         }
         if (state.inProgress.isNotEmpty()) item(key = "progress") {
-            Column(Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.l)) {
-                SectionHeader("En curso")
+            Column(Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.xxxl)) {
+                SectionHeader("Pendientes")
                 NeoGroup {
                     state.inProgress.forEachIndexed { index, operation ->
                         if (index > 0) GroupDivider()
@@ -159,21 +195,19 @@ fun HomeScreen(state: HomeUi, actions: HomeActions, modifier: Modifier = Modifie
                 }
             }
         }
-        item(key = "recent") {
-            Column(Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.l)) {
-                SectionHeader("Actividad reciente", action = "Ver todo", onAction = actions::allActivity)
+        // Nothing yet: the section stays out until there is something to show; Actividad has the way to ask.
+        val recent = state.recent
+        if (recent == null || recent.isNotEmpty()) item(key = "recent") {
+            Column(Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.xxxl)) {
+                SectionHeader("Actividad reciente", action = if (recent != null) "Ver todo" else null, onAction = actions::allActivity)
                 NeoGroup {
-                    val recent = state.recent
-                    when {
-                        recent == null -> repeat(3) { index ->
+                    if (recent == null) {
+                        repeat(3) { index ->
                             if (index > 0) GroupDivider()
                             SkeletonRow()
                         }
-                        recent.isEmpty() -> NeoRow(
-                            "Sin movimientos",
-                            leading = { IconAvatar(Ds.drawable.ic_receipt_long, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                        )
-                        else -> recent.take(RecentLimit).forEachIndexed { index, operation ->
+                    } else {
+                        recent.take(RecentLimit).forEachIndexed { index, operation ->
                             if (index > 0) GroupDivider()
                             OperationRow(operation, labels.moment(operation.at), { actions.openOperation(operation.id) })
                         }
@@ -194,33 +228,37 @@ private fun Balance(wallet: WalletCardUi, ago: (java.time.Instant) -> String, re
                 MoneyText(balance.money.amount, balance.money.currency, style = MaterialTheme.typography.displayMedium, hero = true)
                 RefreshPill(if (wallet.refreshing) "Consultando saldo" else "Actualizado ${ago(balance.updatedAt)}", wallet.refreshing, refresh)
             }
-            BalanceUi.Unknown -> NeoButton(
-                if (wallet.refreshing) "Consultando saldo" else "Consultar saldo", refresh, style = NeoButtonStyle.Tonal, icon = Ds.drawable.ic_refresh,
-                loading = wallet.refreshing, fill = false,
-            )
+            BalanceUi.Unknown -> RefreshPill(if (wallet.refreshing) "Consultando saldo" else "Consultar saldo", wallet.refreshing, refresh, prominent = true)
         }
     }
 }
 
-/** Freshness of the balance; tapping asks the bank again. */
+/**
+ * Freshness of the balance; tapping asks the bank again. [prominent] while no balance is known: then asking is the
+ * point of the block. While the bank answers, the same glyph turns.
+ */
 @Composable
-private fun RefreshPill(text: String, busy: Boolean, onClick: () -> Unit) {
+private fun RefreshPill(text: String, busy: Boolean, onClick: () -> Unit, prominent: Boolean = false) {
+    val content = if (prominent) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
     Row(
         Modifier
             .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .background(if (prominent) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainer)
             .clickable(enabled = !busy, role = Role.Button, onClickLabel = "Consultar saldo", onClick = onClick)
-            .heightIn(min = 36.dp)
-            .padding(horizontal = NeoSpace.m),
+            .heightIn(min = if (prominent) 52.dp else 36.dp)
+            .padding(horizontal = if (prominent) NeoSpace.xxl else NeoSpace.m),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(NeoSpace.s),
+        horizontalArrangement = Arrangement.spacedBy(if (prominent) NeoSpace.s + NeoSpace.xxs else NeoSpace.s),
     ) {
-        if (busy) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.75.dp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        else Icon(painterResource(Ds.drawable.ic_refresh), null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(text, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(painterResource(Ds.drawable.ic_refresh), null, Modifier.size(if (prominent) 20.dp else 16.dp).spinning(busy), tint = content)
+        Text(text, style = if (prominent) MaterialTheme.typography.labelLarge else MaterialTheme.typography.labelMedium, color = content)
     }
 }
 
+/**
+ * An operation on its way, or money that did not go and waits for one tap: then the row says how much and why on a
+ * single line and ends with the retry button.
+ */
 @Composable
 private fun InProgressRow(operation: OperationUi, ago: (java.time.Instant) -> String, open: () -> Unit, retry: () -> Unit) {
     val notExecuted = operation.status == OperationStatus.NotExecuted
@@ -229,7 +267,7 @@ private fun InProgressRow(operation: OperationUi, ago: (java.time.Instant) -> St
         leading = { OperationAvatar(operation) },
         supportingContent = {
             val text = if (notExecuted) {
-                listOfNotNull(operation.amount?.let { "${formatAmount(it.amount)} ${it.currency}" }, operation.reason ?: operation.status.label).joinToString(" · ")
+                listOfNotNull(operation.amount?.let { formatMoney(it.amount, it.currency).unbroken() }, operation.reason ?: operation.status.label).joinToString(" · ")
             } else {
                 "${operation.status.label} ${ago(operation.at)}"
             }
@@ -237,11 +275,23 @@ private fun InProgressRow(operation: OperationUi, ago: (java.time.Instant) -> St
                 text,
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (notExecuted) Neo.colors.warning else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         },
-        trailing = { if (notExecuted) NeoTextButton("Reintentar", retry) else OperationAmount(operation) },
+        trailing = {
+            if (notExecuted) {
+                FilledTonalIconButton(
+                    retry,
+                    Modifier.size(40.dp),
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = Neo.colors.accentContainer, contentColor = Neo.colors.onAccentContainer),
+                ) { Icon(painterResource(Ds.drawable.ic_replay), "Reintentar", Modifier.size(20.dp)) }
+            } else {
+                OperationAmount(operation)
+            }
+        },
         onClick = open,
-        trailingBelowWhenLarge = true,
+        trailingBelowWhenLarge = !notExecuted,
     )
 }
 
@@ -261,18 +311,27 @@ private fun SkeletonRow() {
     }
 }
 
-/** Saved numbers and Nauta accounts, one tap from Home. */
+/** Saved numbers and Nauta accounts, one tap from Home; then a new one of each kind, under its own glyph. */
 @Composable
 private fun RechargeSheet(targets: List<RechargeTargetUi>, actions: HomeActions) {
     NeoBottomSheet(onDismissRequest = actions::closeRecharge, title = "Recargar") {
-        Column(Modifier.padding(horizontal = NeoSpace.s)) {
+        Column(Modifier.padding(horizontal = NeoSpace.xs)) {
             targets.forEach { target ->
                 val kind = if (target.kind == ServiceKind.MobileTopUp) "Móvil" else target.kind.label
                 NeoRow(target.name, supporting = "$kind · ${target.value}", leading = { IconAvatar(target.kind.icon) }, onClick = { actions.rechargeTo(target.id) })
             }
             val saved = targets.isNotEmpty()
-            NeoRow(if (saved) "Otro móvil" else "Móvil", leading = { IconAvatar(Ds.drawable.ic_add) }, onClick = { actions.rechargeNew(ServiceKind.MobileTopUp) })
-            NeoRow(if (saved) "Otra cuenta Nauta" else "Cuenta Nauta", leading = { IconAvatar(Ds.drawable.ic_add) }, onClick = { actions.rechargeNew(ServiceKind.NautaWifi) })
+            val added = AvatarBadge(Ds.drawable.ic_add, Neo.colors.accent, Neo.colors.onAccent)
+            NeoRow(
+                if (saved) "Otro móvil" else "Móvil",
+                leading = { IconAvatar(ServiceKind.MobileTopUp.icon, badge = added) },
+                onClick = { actions.rechargeNew(ServiceKind.MobileTopUp) },
+            )
+            NeoRow(
+                if (saved) "Otra cuenta Nauta" else "Cuenta Nauta",
+                leading = { IconAvatar(ServiceKind.NautaWifi.icon, badge = added) },
+                onClick = { actions.rechargeNew(ServiceKind.NautaWifi) },
+            )
         }
     }
 }

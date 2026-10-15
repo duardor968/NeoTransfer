@@ -24,6 +24,13 @@ fun PreviewHost(appearance: Appearance, content: @Composable () -> Unit) {
     }
 }
 
-/** Actions that do nothing: previews are static. */
+/** Actions that do nothing: previews are static. Identity answers like any object, so recomposition can compare it. */
 inline fun <reified T : Any> noop(): T =
-    Proxy.newProxyInstance(T::class.java.classLoader, arrayOf(T::class.java)) { _, _, _ -> null } as T
+    Proxy.newProxyInstance(T::class.java.classLoader, arrayOf(T::class.java)) { proxy, method, args ->
+        when (method.name) {
+            "equals" -> proxy === args?.firstOrNull()
+            "hashCode" -> System.identityHashCode(proxy)
+            "toString" -> "noop"
+            else -> null
+        }
+    } as T

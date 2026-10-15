@@ -40,7 +40,7 @@ import dev.duardo.neotransfer.ui.services.CubacelActions
 import dev.duardo.neotransfer.ui.services.CubacelScreen
 import dev.duardo.neotransfer.ui.services.ServiceFormActions
 import dev.duardo.neotransfer.ui.services.ServiceFormScreen
-import dev.duardo.neotransfer.ui.transfer.DuplicateDialog
+import dev.duardo.neotransfer.ui.transfer.DuplicateSheet
 import java.math.BigDecimal
 import java.time.LocalDate
 
@@ -117,7 +117,7 @@ class ServiceDestination(
             ),
             this,
         )
-        duplicate?.let { DuplicateDialog(it, ::confirmDuplicate) { duplicate = null } }
+        duplicate?.let { DuplicateSheet(it, ::confirmDuplicate) { duplicate = null } }
     }
 
     private fun fieldUi(id: String, label: String): FieldUi {

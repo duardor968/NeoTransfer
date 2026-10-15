@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
@@ -32,8 +31,7 @@ import dev.duardo.neotransfer.designsystem.component.GroupDivider
 import dev.duardo.neotransfer.designsystem.component.IconAvatar
 import dev.duardo.neotransfer.designsystem.component.NameAvatar
 import dev.duardo.neotransfer.designsystem.component.NeoButton
-import dev.duardo.neotransfer.designsystem.component.NeoButtonStyle
-import dev.duardo.neotransfer.designsystem.component.NeoConfirmDialog
+import dev.duardo.neotransfer.designsystem.component.NeoConfirmSheet
 import dev.duardo.neotransfer.designsystem.component.NeoGroup
 import dev.duardo.neotransfer.designsystem.component.NeoIconButton
 import dev.duardo.neotransfer.designsystem.component.NeoRow
@@ -42,17 +40,19 @@ import dev.duardo.neotransfer.designsystem.component.NeoTextButton
 import dev.duardo.neotransfer.designsystem.component.NeoTextField
 import dev.duardo.neotransfer.designsystem.component.NeoTopBar
 import dev.duardo.neotransfer.designsystem.component.SectionHeader
+import dev.duardo.neotransfer.designsystem.component.TabHeader
+import dev.duardo.neotransfer.designsystem.component.flushEnd
 import dev.duardo.neotransfer.designsystem.component.groupItem
 import dev.duardo.neotransfer.designsystem.format.formatCardNumber
 import dev.duardo.neotransfer.designsystem.format.formatPhone
 import dev.duardo.neotransfer.designsystem.theme.Neo
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
+import dev.duardo.neotransfer.ui.common.CardNumberTransformation
+import dev.duardo.neotransfer.ui.common.PhoneTransformation
 import dev.duardo.neotransfer.ui.model.ContactEditUi
 import dev.duardo.neotransfer.ui.model.ContactUi
 import dev.duardo.neotransfer.ui.model.ContactsContent
 import dev.duardo.neotransfer.ui.model.ContactsUi
-import dev.duardo.neotransfer.ui.common.CardNumberTransformation
-import dev.duardo.neotransfer.ui.common.PhoneTransformation
 
 // ---- List ---------------------------------------------------------------------------------------------------
 
@@ -66,13 +66,7 @@ interface ContactsActions {
 @Composable
 fun ContactsScreen(state: ContactsUi, actions: ContactsActions, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxSize()) {
-        Row(
-            Modifier.fillMaxWidth().statusBarsPadding().padding(start = NeoSpace.gutter, end = NeoSpace.xs, top = NeoSpace.m, bottom = NeoSpace.s),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("Contactos", Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium)
-            NeoIconButton(Ds.drawable.ic_person_add, "Nuevo contacto", actions::create)
-        }
+        TabHeader("Contactos") { NeoIconButton(Ds.drawable.ic_person_add, "Nuevo contacto", actions::create) }
         when (val content = state.content) {
             ContactsContent.Empty -> {
                 EmptyState(
@@ -95,7 +89,7 @@ private fun ContactList(contacts: List<ContactUi>, importing: Boolean, actions: 
     val count = contacts.size + 1
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = NeoSpace.gutter, end = NeoSpace.gutter, top = NeoSpace.l, bottom = NeoSpace.xxl)) {
         item(key = "import") {
-            Column(Modifier.groupItem(0, count, Neo.colors.group)) {
+            Column(Modifier.groupItem(0, count)) {
                 NeoRow(
                     "Importar del teléfono",
                     leading = { IconAvatar(Ds.drawable.ic_contacts) },
@@ -105,7 +99,7 @@ private fun ContactList(contacts: List<ContactUi>, importing: Boolean, actions: 
             }
         }
         itemsIndexed(contacts, key = { _, it -> it.id }) { index, contact ->
-            Column(Modifier.groupItem(index + 1, count, Neo.colors.group)) {
+            Column(Modifier.groupItem(index + 1, count)) {
                 GroupDivider()
                 NeoRow(
                     contact.name,
@@ -164,7 +158,7 @@ fun ContactDetailScreen(contact: ContactUi, actions: ContactActions, modifier: M
                             formatCardNumber(card.number),
                             supporting = listOfNotNull(card.bankName, card.label).joinToString(" · ").ifEmpty { null },
                             leading = { IconAvatar(Ds.drawable.ic_credit_card) },
-                            trailing = { NeoIconButton(Ds.drawable.ic_content_copy, "Copiar número", { actions.copy(card.number) }) },
+                            trailing = { NeoIconButton(Ds.drawable.ic_content_copy, "Copiar número", { actions.copy(card.number) }, Modifier.flushEnd()) },
                             onClick = { actions.transfer(card.id) },
                         )
                     }
@@ -178,7 +172,7 @@ fun ContactDetailScreen(contact: ContactUi, actions: ContactActions, modifier: M
                         NeoRow(
                             formatPhone(phone),
                             leading = { IconAvatar(Ds.drawable.ic_call) },
-                            trailing = { NeoIconButton(Ds.drawable.ic_content_copy, "Copiar teléfono", { actions.copy(phone) }) },
+                            trailing = { NeoIconButton(Ds.drawable.ic_content_copy, "Copiar teléfono", { actions.copy(phone) }, Modifier.flushEnd()) },
                         )
                     }
                 }
@@ -195,7 +189,7 @@ fun ContactDetailScreen(contact: ContactUi, actions: ContactActions, modifier: M
             }
         }
     }
-    if (confirmingDelete) NeoConfirmDialog(
+    if (confirmingDelete) NeoConfirmSheet(
         title = "¿Eliminar a ${contact.name}?",
         text = "Se borran sus tarjetas y teléfonos guardados. Tu actividad no cambia.",
         confirm = "Eliminar",
@@ -251,13 +245,13 @@ fun ContactEditScreen(state: ContactEditUi, actions: ContactEditActions, modifie
                     keyboardType = KeyboardType.Number, error = card.error,
                     visualTransformation = CardNumberTransformation,
                     supporting = card.bankName,
-                    trailing = { NeoIconButton(Ds.drawable.ic_close, "Quitar tarjeta", { actions.removeCard(card.id) }) },
+                    trailing = { NeoIconButton(Ds.drawable.ic_delete, "Quitar tarjeta", { actions.removeCard(card.id) }, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                 )
                 NeoTextField(card.label, { actions.cardLabel(card.id, it) }, "Nombre de la tarjeta (opcional)")
             }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(NeoSpace.s), verticalArrangement = Arrangement.spacedBy(NeoSpace.s)) {
-                NeoButton("Añadir tarjeta", actions::addCard, style = NeoButtonStyle.Tonal, icon = Ds.drawable.ic_add, fill = false)
-                NeoButton("Escanear", actions::scanCard, style = NeoButtonStyle.Tonal, icon = Ds.drawable.ic_photo_camera, fill = false)
+            FlowRow {
+                NeoTextButton("Añadir tarjeta", actions::addCard, icon = Ds.drawable.ic_add)
+                NeoTextButton("Escanear", actions::scanCard, icon = Ds.drawable.ic_photo_camera)
             }
             SectionHeader("Teléfonos", Modifier.padding(top = NeoSpace.m))
             state.phones.forEach { phone ->
@@ -265,12 +259,10 @@ fun ContactEditScreen(state: ContactEditUi, actions: ContactEditActions, modifie
                     phone.number, { actions.phone(phone.id, it) }, "Teléfono",
                     keyboardType = KeyboardType.Phone, error = phone.error,
                     visualTransformation = PhoneTransformation,
-                    trailing = { NeoIconButton(Ds.drawable.ic_close, "Quitar teléfono", { actions.removePhone(phone.id) }) },
+                    trailing = { NeoIconButton(Ds.drawable.ic_delete, "Quitar teléfono", { actions.removePhone(phone.id) }, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                 )
             }
-            Row {
-                NeoButton("Añadir teléfono", actions::addPhone, style = NeoButtonStyle.Tonal, icon = Ds.drawable.ic_add, fill = false)
-            }
+            NeoTextButton("Añadir teléfono", actions::addPhone, icon = Ds.drawable.ic_add)
         }
     }
 }

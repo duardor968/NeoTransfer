@@ -111,22 +111,15 @@ data class ContactEditUi(
 
 // ---- Services -----------------------------------------------------------------------------------------------
 
-enum class Utility(val label: String) {
-    Electricity("Electricidad"),
-    Water("Agua"),
-    Landline("Teléfono fijo"),
-    Internet("Internet"),
-    Mobile("Móvil"),
-}
-
-enum class ServiceKind(val utility: Utility, val label: String, val referenceLabel: String) {
-    Electricity(Utility.Electricity, "Electricidad", "Código de cliente"),
-    Water(Utility.Water, "Agua", "Cuenta"),
-    Landline(Utility.Landline, "Teléfono fijo", "ID de factura"),
-    NautaHome(Utility.Internet, "Nauta Hogar", "Usuario"),
-    NautaWifi(Utility.Internet, "Nauta Wi‑Fi", "Usuario"),
-    MobileTopUp(Utility.Mobile, "Recarga desde el banco", "Móvil"),
-    Cubacel(Utility.Mobile, "Saldo Cubacel", "Móvil"),
+/** Services by the utility they pay, in this order: electricity, water, landline, internet, mobile. */
+enum class ServiceKind(val label: String, val referenceLabel: String) {
+    Electricity("Electricidad", "Código de cliente"),
+    Water("Agua", "Cuenta"),
+    Landline("Teléfono fijo", "ID de factura"),
+    NautaHome("Nauta Hogar", "Usuario"),
+    NautaWifi("Nauta Wi‑Fi", "Usuario"),
+    MobileTopUp("Recarga desde el banco", "Móvil"),
+    Cubacel("Saldo Cubacel", "Móvil"),
 }
 
 @Immutable
@@ -150,7 +143,8 @@ data class FieldUi(
 )
 
 /**
- * Payment of a service. [amount] null when the bank charges the bill as issued; [due] is the bill when known.
+ * Payment of a service. [amount] null when the bank charges the whole bill as issued: there is no prior query, the
+ * receipt brings what was paid.
  * [saveReference] null when paying a saved reference. [choices] splits one service in its variants (water by
  * region, Nauta Hogar recharge or debt).
  */
@@ -163,7 +157,6 @@ data class ServiceFormUi(
     val fields: List<FieldUi>,
     val amount: String?,
     val currency: String,
-    val due: Money? = null,
     val cards: List<WalletCardUi> = emptyList(),
     val source: Int = 0,
     val saveReference: Boolean? = null,
@@ -188,18 +181,12 @@ data class CubacelUi(
     val balanceLoading: Boolean = false,
 )
 
-@Immutable
-data class PlanUi(val id: String, val name: String, val detail: String, val price: Money)
-
-@Immutable
-data class PlanGroupUi(val name: String, val plans: List<PlanUi>)
-
-@Immutable
-data class CubacelPlansUi(val balance: Money?, val groups: List<PlanGroupUi>, val selected: String?)
-
 // ---- Transfer, pay, receive ---------------------------------------------------------------------------------
 
-/** [typed] is a valid card number typed or scanned that matches no contact. */
+/**
+ * [typed] is a valid card number typed or scanned that matches no contact. [canImport] while no contact has a card:
+ * the list offers the phone's contacts instead.
+ */
 @Immutable
 data class RecipientPickUi(
     val query: String,
@@ -208,6 +195,8 @@ data class RecipientPickUi(
     val recent: List<RecipientUi>,
     val contacts: List<ContactUi>,
     val chooseCardOf: ContactUi? = null,
+    val canImport: Boolean = false,
+    val importing: Boolean = false,
 )
 
 @Immutable

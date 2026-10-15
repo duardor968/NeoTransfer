@@ -41,15 +41,15 @@ import dev.duardo.neotransfer.designsystem.theme.NeoSpace
 import kotlin.math.absoluteValue
 
 /**
- * Horizontal wallet of cards. Neighbours peek from the edges and the card in focus sits flat while the others
- * tilt away, so the stack reads as physical objects without decoration.
+ * Horizontal wallet of cards. Neighbours peek about 12 dp from the edges and the card in focus sits flat while the
+ * others tilt away, so the stack reads as physical objects without decoration.
  */
 @Composable
 fun CardCarousel(
     state: PagerState,
     modifier: Modifier = Modifier,
     horizontalPadding: Dp = 28.dp,
-    pageSpacing: Dp = 12.dp,
+    pageSpacing: Dp = 8.dp,
     key: ((Int) -> Any)? = null,
     page: @Composable (index: Int) -> Unit,
 ) {
@@ -63,7 +63,7 @@ fun CardCarousel(
         Box(
             Modifier.graphicsLayer {
                 val offset = (state.currentPage - index + state.currentPageOffsetFraction).coerceIn(-1f, 1f)
-                val scale = 1f - 0.06f * offset.absoluteValue
+                val scale = 1f - 0.04f * offset.absoluteValue
                 scaleX = scale
                 scaleY = scale
                 rotationY = offset * 9f

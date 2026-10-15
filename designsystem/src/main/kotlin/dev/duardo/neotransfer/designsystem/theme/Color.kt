@@ -31,6 +31,11 @@ data class NeoColors(
     val accentInk: Color,
     /** Grouped containers (lists, summaries) sitting on the background. */
     val group: Color,
+    /**
+     * Rim of raised surfaces (groups, sheets, fields, tiles): in the dark, light catching the top edge, which is what
+     * tells layers apart; in the light, a hairline all round, since white on the pale background barely separates.
+     */
+    val edge: Color,
     val divider: Color,
     val positive: Color,
     val positiveContainer: Color,
@@ -81,6 +86,7 @@ internal fun neoColors(accent: NeoAccent, dark: Boolean): NeoColors = if (dark) 
         onAccentContainer = a,
         accentInk = a,
         group = Graphite.dGroup,
+        edge = Color.White.copy(alpha = 0.09f),
         divider = Graphite.dHairline,
         positive = a,
         positiveContainer = lerp(a, Graphite.d0, 0.80f),
@@ -103,6 +109,7 @@ internal fun neoColors(accent: NeoAccent, dark: Boolean): NeoColors = if (dark) 
         onAccentContainer = lerp(a, Ink, 0.62f),
         accentInk = lerp(a, Ink, 0.40f),
         group = Graphite.lGroup,
+        edge = Graphite.lHairline,
         divider = Graphite.lHairline,
         positive = lerp(a, Ink, 0.40f),
         positiveContainer = lerp(a, Color.White, 0.84f),

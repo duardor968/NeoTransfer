@@ -22,7 +22,7 @@ import dev.duardo.neotransfer.ui.model.PayQrUi
 import dev.duardo.neotransfer.ui.model.PayReviewUi
 import dev.duardo.neotransfer.ui.pay.PayQrActions
 import dev.duardo.neotransfer.ui.pay.PayQrScreen
-import dev.duardo.neotransfer.ui.transfer.DuplicateDialog
+import dev.duardo.neotransfer.ui.transfer.DuplicateSheet
 import java.math.BigDecimal
 import java.time.LocalDate
 
@@ -49,7 +49,7 @@ class PayDestination(
         PayQrScreen(state(book), this, cameraContent = {
             if (camera) ScannerView(ScanMode.QR, ::classify, ::scanned, Modifier.fillMaxSize())
         })
-        duplicate?.let { DuplicateDialog(it, ::confirmDuplicate) { duplicate = null } }
+        duplicate?.let { DuplicateSheet(it, ::confirmDuplicate) { duplicate = null } }
     }
 
     private fun state(book: Book): PayQrUi {

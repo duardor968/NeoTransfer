@@ -19,8 +19,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -28,14 +28,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.designsystem.R as Ds
 import dev.duardo.neotransfer.designsystem.component.IconAvatar
 import dev.duardo.neotransfer.designsystem.component.MoneyText
+import dev.duardo.neotransfer.designsystem.component.NeoAmountField
 import dev.duardo.neotransfer.designsystem.component.NeoButton
 import dev.duardo.neotransfer.designsystem.component.NeoButtonStyle
+import dev.duardo.neotransfer.designsystem.component.NeoTextButton
 import dev.duardo.neotransfer.designsystem.component.NeoTextField
 import dev.duardo.neotransfer.designsystem.format.formatMoney
 import dev.duardo.neotransfer.designsystem.theme.Neo
@@ -121,28 +121,32 @@ private fun ReviewPanel(content: @Composable () -> Unit) {
     }
 }
 
+/** Who is paid (with the code's own id or description under the name), how much, from which card. */
 @Composable
 private fun Review(review: PayReviewUi, actions: PayQrActions) {
     Column(
         Modifier.verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(NeoSpace.m),
+        verticalArrangement = Arrangement.spacedBy(NeoSpace.l),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(NeoSpace.m)) {
+        Row(Modifier.padding(top = NeoSpace.xs), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(NeoSpace.m)) {
             IconAvatar(Ds.drawable.ic_qr_code)
-            Text(review.merchant, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+            Column(Modifier.weight(1f)) {
+                Text(review.merchant, style = MaterialTheme.typography.titleLarge)
+                if (!review.referenceEditable && review.reference.isNotEmpty()) Text(
+                    "${review.referenceLabel} ${review.reference}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         if (review.amountEditable) {
-            NeoTextField(review.amountInput, actions::amount, "Importe", keyboardType = KeyboardType.Decimal, suffix = review.currency)
+            NeoAmountField(review.amountInput, actions::amount, review.currency)
         } else {
             val amount = review.amountInput.toBigDecimalOrNull() ?: BigDecimal.ZERO
-            MoneyText(amount, review.currency, Modifier.padding(vertical = NeoSpace.xs), style = MaterialTheme.typography.displaySmall, hero = true)
+            MoneyText(amount, review.currency, style = MaterialTheme.typography.displayMedium, hero = true)
         }
         if (review.referenceEditable) NeoTextField(review.reference, actions::reference, review.referenceLabel)
-        else Row(Modifier.fillMaxWidth().padding(vertical = NeoSpace.xs), horizontalArrangement = Arrangement.spacedBy(NeoSpace.m)) {
-            Text(review.referenceLabel, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(review.reference, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
-        }
-        SourceCardPicker(review.sources, review.source, actions::source)
+        SourceCardPicker(review.sources, review.source, actions::source, label = "Desde")
         val amount = review.amountInput.toBigDecimalOrNull()
         NeoButton(
             if (amount != null && amount.signum() > 0) "Pagar ${formatMoney(amount, review.currency)}" else "Pagar",
@@ -163,9 +167,13 @@ private fun Unsupported(state: PayQrUi.Unsupported, actions: PayQrActions) {
             }
             Text(state.message, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
         }
-        Column(verticalArrangement = Arrangement.spacedBy(NeoSpace.s)) {
-            if (state.addCard) NeoButton("Añadir tarjeta", actions::addCard, icon = Ds.drawable.ic_add_card)
-            NeoButton("Escanear otro", actions::rescan, style = NeoButtonStyle.Tonal)
+        Column(verticalArrangement = Arrangement.spacedBy(NeoSpace.xs)) {
+            if (state.addCard) {
+                NeoButton("Añadir tarjeta", actions::addCard, icon = Ds.drawable.ic_add_card)
+                NeoTextButton("Escanear otro", actions::rescan, Modifier.fillMaxWidth())
+            } else {
+                NeoButton("Escanear otro", actions::rescan, style = NeoButtonStyle.Tonal)
+            }
         }
     }
 }

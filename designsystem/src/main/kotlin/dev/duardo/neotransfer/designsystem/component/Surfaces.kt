@@ -7,26 +7,32 @@ import android.view.WindowManager
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
@@ -36,21 +42,26 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.PathOperation
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -59,20 +70,40 @@ import dev.duardo.neotransfer.designsystem.theme.Neo
 import dev.duardo.neotransfer.designsystem.theme.NeoRadius
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
 
-/** Round shortcut with its label. One [primary] per row carries the accent. */
+/** Round shortcut with its label. One [primary] per row carries the accent. In rows, prefer [QuickActionGrid]. */
 @Composable
-fun QuickAction(@DrawableRes icon: Int, label: String, onClick: () -> Unit, modifier: Modifier = Modifier, primary: Boolean = false) {
+fun QuickAction(
+    @DrawableRes icon: Int,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    primary: Boolean = false,
+    labelStyle: TextStyle = MaterialTheme.typography.labelMedium,
+) {
     val container = if (primary) Neo.colors.accent else Neo.colors.group
     val content = if (primary) Neo.colors.onAccent else MaterialTheme.colorScheme.onSurface
+    val interaction = remember { MutableInteractionSource() }
     Column(
-        modifier.clip(RoundedCornerShape(NeoRadius.field)).clickable(onClick = onClick).padding(vertical = NeoSpace.s),
+        modifier
+            .clip(RoundedCornerShape(NeoRadius.field))
+            .clickable(interaction, indication = null, role = Role.Button, onClick = onClick)
+            .padding(vertical = NeoSpace.s),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(NeoSpace.s),
     ) {
-        Box(Modifier.size(56.dp).background(container, CircleShape), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier
+                .pressScale(interaction, 0.92f)
+                .size(56.dp)
+                .clip(CircleShape)
+                .background(container)
+                .then(if (primary) Modifier else Modifier.rim(CircleShape))
+                .indication(interaction, ripple()),
+            contentAlignment = Alignment.Center,
+        ) {
             Icon(painterResource(icon), null, tint = content)
         }
-        FittedLabel(label)
+        Text(label, style = labelStyle, textAlign = TextAlign.Center, maxLines = 1, softWrap = false)
     }
 }
 
@@ -99,11 +130,6 @@ fun FittedText(
     )
 }
 
-@Composable
-fun FittedLabel(text: String, modifier: Modifier = Modifier, color: Color = LocalContentColor.current) {
-    FittedText(text, MaterialTheme.typography.labelMedium, modifier, color, TextAlign.Center)
-}
-
 /** Modal sheet with the system's surface and handle. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -113,12 +139,13 @@ fun NeoBottomSheet(
     title: String? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val shape = RoundedCornerShape(topStart = NeoRadius.sheet, topEnd = NeoRadius.sheet)
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
-        modifier = modifier,
+        modifier = modifier.litEdge(shape, if (Neo.colors.isDark) Neo.colors.edge else Color.Transparent),
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = Neo.colors.group,
-        shape = RoundedCornerShape(topStart = NeoRadius.sheet, topEnd = NeoRadius.sheet),
+        shape = shape,
     ) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = NeoSpace.l)) {
             if (title != null) Text(
@@ -174,6 +201,8 @@ fun SummaryLines(lines: List<SummaryLine>, modifier: Modifier = Modifier) {
 fun ReceiptTicket(modifier: Modifier = Modifier, header: @Composable () -> Unit, body: @Composable () -> Unit) {
     val tear = remember { mutableFloatStateOf(-1f) }
     val color = Neo.colors.group
+    val edge = Neo.colors.edge
+    val fade = Neo.colors.isDark
     val dash = Neo.colors.divider
     Layout(
         contents = listOf(header, body),
@@ -185,7 +214,13 @@ fun ReceiptTicket(modifier: Modifier = Modifier, header: @Composable () -> Unit,
                 addOval(Rect(Offset(0f, y), notch))
                 addOval(Rect(Offset(size.width, y), notch))
             }
-            drawPath(Path.combine(PathOperation.Difference, outline, cuts), color)
+            val ticket = Path.combine(PathOperation.Difference, outline, cuts)
+            drawPath(ticket, color)
+            if (edge.alpha > 0f) drawPath(
+                ticket,
+                if (fade) Brush.verticalGradient(0f to edge, (28.dp.toPx() / size.height).coerceIn(0.01f, 1f) to Color.Transparent) else SolidColor(edge),
+                style = Stroke(1.dp.toPx()),
+            )
             val inset = notch + NeoSpace.s.toPx()
             drawLine(
                 dash, Offset(inset, y), Offset(size.width - inset, y), strokeWidth = 1.5.dp.toPx(),
@@ -225,4 +260,36 @@ private tailrec fun Context.activity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.activity()
     else -> null
+}
+
+@Immutable
+data class QuickActionItem(@param:DrawableRes val icon: Int, val label: String, val onClick: () -> Unit, val primary: Boolean = false)
+
+/**
+ * Shortcuts in rows of [columns]: the first and last columns sit on the edges and the rest spread evenly, so every
+ * row lines up with the screen's margins. One label size for all: the longest label sets it, scaled down only when
+ * it would not fit its column, so a row never mixes sizes at large font scales.
+ */
+@Composable
+fun QuickActionGrid(items: List<QuickActionItem>, modifier: Modifier = Modifier, columns: Int = 4) {
+    val measurer = rememberTextMeasurer()
+    val base = MaterialTheme.typography.labelMedium
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val density = LocalDensity.current
+        val pitch = maxWidth / columns
+        val widest = with(density) { items.maxOf { measurer.measure(it.label, base, maxLines = 1).size.width }.toDp() }
+        val scale = ((pitch - NeoSpace.m) / widest).coerceAtMost(1f)
+        val cell = (widest * scale).coerceIn(64.dp, pitch)
+        val step = if (columns > 1) (maxWidth - cell) / (columns - 1) else 0.dp
+        val label = base.copy(fontSize = base.fontSize * scale)
+        Column(verticalArrangement = Arrangement.spacedBy(NeoSpace.s)) {
+            items.chunked(columns).forEach { row ->
+                Box(Modifier.fillMaxWidth()) {
+                    row.forEachIndexed { index, item ->
+                        QuickAction(item.icon, item.label, item.onClick, Modifier.offset(x = step * index).width(cell), item.primary, label)
+                    }
+                }
+            }
+        }
+    }
 }

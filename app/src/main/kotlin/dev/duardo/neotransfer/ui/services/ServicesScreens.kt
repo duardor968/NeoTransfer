@@ -5,13 +5,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -19,15 +19,12 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -41,23 +38,28 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.designsystem.R as Ds
-import dev.duardo.neotransfer.designsystem.component.FittedText
 import dev.duardo.neotransfer.designsystem.component.GroupDivider
-import dev.duardo.neotransfer.designsystem.component.dashedOutline
 import dev.duardo.neotransfer.designsystem.component.IconAvatar
 import dev.duardo.neotransfer.designsystem.component.MoneyText
+import dev.duardo.neotransfer.designsystem.component.NeoAmountField
 import dev.duardo.neotransfer.designsystem.component.NeoButton
+import dev.duardo.neotransfer.designsystem.component.NeoChip
 import dev.duardo.neotransfer.designsystem.component.NeoGroup
 import dev.duardo.neotransfer.designsystem.component.NeoIconButton
 import dev.duardo.neotransfer.designsystem.component.NeoRow
 import dev.duardo.neotransfer.designsystem.component.NeoTextField
 import dev.duardo.neotransfer.designsystem.component.NeoTopBar
-import dev.duardo.neotransfer.designsystem.component.SecureWindow
+import dev.duardo.neotransfer.designsystem.component.QuickActionGrid
+import dev.duardo.neotransfer.designsystem.component.QuickActionItem
 import dev.duardo.neotransfer.designsystem.component.SectionHeader
-import dev.duardo.neotransfer.designsystem.format.formatAmount
+import dev.duardo.neotransfer.designsystem.component.SecureWindow
+import dev.duardo.neotransfer.designsystem.component.TabHeader
+import dev.duardo.neotransfer.designsystem.component.rim
 import dev.duardo.neotransfer.designsystem.format.formatMoney
+import dev.duardo.neotransfer.designsystem.format.unbroken
 import dev.duardo.neotransfer.designsystem.theme.Neo
 import dev.duardo.neotransfer.designsystem.theme.NeoRadius
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
@@ -65,7 +67,6 @@ import dev.duardo.neotransfer.ui.common.PhoneTransformation
 import dev.duardo.neotransfer.ui.common.SourceCardPicker
 import dev.duardo.neotransfer.ui.common.SwitchRow
 import dev.duardo.neotransfer.ui.common.icon
-import dev.duardo.neotransfer.ui.model.CubacelPlansUi
 import dev.duardo.neotransfer.ui.model.CubacelQuery
 import dev.duardo.neotransfer.ui.model.CubacelUi
 import dev.duardo.neotransfer.ui.model.FieldInput
@@ -73,7 +74,6 @@ import dev.duardo.neotransfer.ui.model.SavedReferenceUi
 import dev.duardo.neotransfer.ui.model.ServiceFormUi
 import dev.duardo.neotransfer.ui.model.ServiceKind
 import dev.duardo.neotransfer.ui.model.ServicesUi
-import dev.duardo.neotransfer.ui.model.Utility
 import dev.duardo.neotransfer.ui.onboarding.BottomAction
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -86,94 +86,71 @@ interface ServicesActions {
 }
 
 /**
- * Services grouped by what they pay for. Each utility is a row of tiles: saved references first (one tap to pay
- * the usual bill), then the tiles that start a new payment.
+ * What can be paid, by utility. Saved references come first, one tap from paying the usual bill; under them every
+ * service as a shortcut, in utility order: electricity, water, landline, internet, mobile.
  */
 @Composable
 fun ServicesScreen(state: ServicesUi, actions: ServicesActions, modifier: Modifier = Modifier) {
+    val saved = state.references.sortedBy { it.kind.ordinal }
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = NeoSpace.xxl)) {
-        item(key = "title") {
-            Text(
-                "Servicios",
-                Modifier.statusBarsPadding().padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.xl, bottom = NeoSpace.s),
-                style = MaterialTheme.typography.headlineMedium,
-            )
-        }
-        Utility.entries.forEach { utility ->
-            val kinds = ServiceKind.entries.filter { it.utility == utility }
-            val references = state.references.filter { it.kind.utility == utility }
-            item(key = utility.name) {
-                Column(Modifier.padding(top = NeoSpace.m)) {
-                    SectionHeader(utility.label, Modifier.padding(horizontal = NeoSpace.gutter))
-                    // Saved references first, then one dashed tile per way to start a new payment.
-                    val tiles: List<Any> = references + kinds
-                    Column(Modifier.padding(horizontal = NeoSpace.gutter), verticalArrangement = Arrangement.spacedBy(NeoSpace.s)) {
-                        tiles.chunked(2).forEach { pair ->
-                            Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(NeoSpace.s)) {
-                                pair.forEach { tile ->
-                                    val m = Modifier.weight(1f).fillMaxHeight()
-                                    when (tile) {
-                                        is SavedReferenceUi -> ServiceTile(tile, m) { actions.pay(tile.id) }
-                                        is ServiceKind -> NewPaymentTile(tile.startLabel(single = kinds.size == 1), tile.icon, m) { actions.open(tile) }
-                                    }
-                                }
-                                if (pair.size == 1) Spacer(Modifier.weight(1f))
-                            }
+        item(key = "title") { TabHeader("Servicios") }
+        if (saved.isNotEmpty()) item(key = "saved") {
+            Column(Modifier.padding(horizontal = NeoSpace.gutter)) {
+                SectionHeader("Guardados")
+                Column(verticalArrangement = Arrangement.spacedBy(NeoSpace.s)) {
+                    saved.chunked(2).forEach { pair ->
+                        Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(NeoSpace.s)) {
+                            pair.forEach { reference -> SavedTile(reference, Modifier.weight(1f).fillMaxHeight()) { actions.pay(reference.id) } }
+                            if (pair.size == 1) Spacer(Modifier.weight(1f))
                         }
                     }
                 }
             }
         }
+        item(key = "services") {
+            Column(Modifier.padding(horizontal = NeoSpace.gutter).padding(top = if (saved.isEmpty()) NeoSpace.s else NeoSpace.xxl)) {
+                if (saved.isNotEmpty()) SectionHeader("Pagar un servicio")
+                QuickActionGrid(ServiceKind.entries.map { kind -> QuickActionItem(kind.icon, kind.shortcut, { actions.open(kind) }) })
+            }
+        }
     }
 }
 
-/** Label of the tile that starts a payment; within a one-service utility the header already names it. */
-private fun ServiceKind.startLabel(single: Boolean): String = when {
-    this == ServiceKind.MobileTopUp -> "Recargar móvil"
-    single -> "Pagar"
-    else -> label
-}
+/** Name of a service as a shortcut: the action when the utility's name would not say it. */
+private val ServiceKind.shortcut: String
+    get() = if (this == ServiceKind.MobileTopUp) "Recargar móvil" else label
 
-/** Starts a payment: dashed like the wallet's add slot, the system's mark for "new". */
+/** A saved reference as the bill it pays: what, whose, and what went last time. */
 @Composable
-private fun NewPaymentTile(title: String, icon: Int, modifier: Modifier, onClick: () -> Unit) {
+private fun SavedTile(reference: SavedReferenceUi, modifier: Modifier, onClick: () -> Unit) {
     val shape = RoundedCornerShape(NeoRadius.group)
     Column(
         modifier
-            .heightIn(min = 96.dp)
+            .heightIn(min = 112.dp)
             .clip(shape)
-            .dashedOutline(MaterialTheme.colorScheme.outline.copy(alpha = 0.6f), NeoRadius.group)
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(NeoSpace.l),
-        verticalArrangement = Arrangement.spacedBy(NeoSpace.s),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(NeoSpace.xs)) {
-            Icon(painterResource(Ds.drawable.ic_add), null, Modifier.size(20.dp), tint = Neo.colors.accentInk)
-            Icon(painterResource(icon), null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Spacer(Modifier.weight(1f))
-        Text(title, style = MaterialTheme.typography.titleSmall)
-    }
-}
-
-@Composable
-private fun ServiceTile(reference: SavedReferenceUi, modifier: Modifier, onClick: () -> Unit) {
-    Column(
-        modifier
-            .heightIn(min = 96.dp)
-            .clip(RoundedCornerShape(NeoRadius.group))
             .background(Neo.colors.group)
+            .rim(shape)
             .clickable(role = Role.Button, onClick = onClick)
             .padding(NeoSpace.l),
-        verticalArrangement = Arrangement.spacedBy(NeoSpace.xxs),
     ) {
-        Icon(painterResource(reference.kind.icon), null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(NeoSpace.s))
-        Text(reference.name, style = MaterialTheme.typography.titleSmall)
-        // References are identifiers: one line, never split mid-number.
-        FittedText(reference.value, MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, minScale = 0.5f)
+        Box(Modifier.size(36.dp).background(Neo.colors.accentContainer, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(painterResource(reference.kind.icon), null, Modifier.size(20.dp), tint = Neo.colors.onAccentContainer)
+        }
+        Spacer(Modifier.height(NeoSpace.m).weight(1f, fill = false))
+        Text(reference.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        // A Nauta account under a Nauta tile needs no domain; references are identifiers and never wrap.
+        reference.value.takeIf { it.isNotEmpty() }?.let {
+            Text(
+                it.removeSuffix("@nauta.com.cu"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        // The amount never splits; when the line is short it goes under its label.
         reference.lastPaid?.let {
-            Text(formatMoney(it.amount, it.currency), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                "Último pago ${formatMoney(it.amount, it.currency).unbroken()}", Modifier.padding(top = NeoSpace.xxs),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2,
+            )
         }
     }
 }
@@ -192,7 +169,7 @@ interface ServiceFormActions {
     fun submit()
 }
 
-/** One form for every service: saved references on top, the fields the bank asks for, the card and the total. */
+/** One form for every service: saved references on top, the fields the bank asks for, the amount and the card. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ServiceFormScreen(state: ServiceFormUi, actions: ServiceFormActions, modifier: Modifier = Modifier) {
@@ -204,56 +181,42 @@ fun ServiceFormScreen(state: ServiceFormUi, actions: ServiceFormActions, modifie
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             Column(
-                Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(bottom = NeoSpace.l),
-                verticalArrangement = Arrangement.spacedBy(NeoSpace.m),
+                Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.s, bottom = NeoSpace.l),
+                verticalArrangement = Arrangement.spacedBy(NeoSpace.l),
             ) {
                 if (state.references.isNotEmpty()) {
-                    FlowRow(
-                        Modifier.padding(horizontal = NeoSpace.gutter),
-                        horizontalArrangement = Arrangement.spacedBy(NeoSpace.s),
-                    ) {
-                        ReferenceChip("Nueva", state.selectedReference == null) { actions.reference(null) }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(NeoSpace.s)) {
+                        NeoChip("Nueva", state.selectedReference == null, { actions.reference(null) })
                         state.references.forEach { reference ->
-                            ReferenceChip(reference.name, state.selectedReference == reference.id) { actions.reference(reference.id) }
+                            NeoChip(reference.name, state.selectedReference == reference.id, { actions.reference(reference.id) })
                         }
                     }
                 }
-                Column(Modifier.padding(horizontal = NeoSpace.gutter), verticalArrangement = Arrangement.spacedBy(NeoSpace.m)) {
-                    if (state.choices.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(NeoSpace.s)) {
-                        state.choices.forEachIndexed { index, choice -> ReferenceChip(choice, index == state.choice) { actions.choice(index) } }
-                    }
-                    state.fields.forEach { field ->
-                        NeoTextField(
-                            field.value, { actions.field(field.id, it) }, field.label,
-                            keyboardType = when (field.input) {
-                                FieldInput.Number -> KeyboardType.Number
-                                FieldInput.Phone -> KeyboardType.Phone
-                                FieldInput.Secret -> KeyboardType.NumberPassword
-                                FieldInput.Text -> KeyboardType.Text
-                            },
-                            visualTransformation = when (field.input) {
-                                FieldInput.Secret -> PasswordVisualTransformation()
-                                FieldInput.Phone -> PhoneTransformation
-                                else -> VisualTransformation.None
-                            },
-                            error = field.error,
-                            suffix = field.suffix,
-                            trailing = if (field.scannable) ({ NeoIconButton(Ds.drawable.ic_photo_camera, "Escanear móvil", { actions.scan(field.id) }) }) else null,
-                        )
-                    }
-                    state.due?.let { due ->
-                        Column(Modifier.fillMaxWidth().padding(vertical = NeoSpace.m), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("Factura", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            MoneyText(due.amount, due.currency, style = MaterialTheme.typography.displaySmall, hero = true)
-                        }
-                    }
-                    if (state.amount != null) NeoTextField(
-                        state.amount, actions::amount, "Importe",
-                        keyboardType = KeyboardType.Decimal, suffix = state.currency,
+                if (state.choices.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(NeoSpace.s)) {
+                    state.choices.forEachIndexed { index, choice -> NeoChip(choice, index == state.choice, { actions.choice(index) }) }
+                }
+                state.fields.forEach { field ->
+                    NeoTextField(
+                        field.value, { actions.field(field.id, it) }, field.label,
+                        keyboardType = when (field.input) {
+                            FieldInput.Number -> KeyboardType.Number
+                            FieldInput.Phone -> KeyboardType.Phone
+                            FieldInput.Secret -> KeyboardType.NumberPassword
+                            FieldInput.Text -> KeyboardType.Text
+                        },
+                        visualTransformation = when (field.input) {
+                            FieldInput.Secret -> PasswordVisualTransformation()
+                            FieldInput.Phone -> PhoneTransformation
+                            else -> VisualTransformation.None
+                        },
+                        error = field.error,
+                        suffix = field.suffix,
+                        trailing = if (field.scannable) ({ NeoIconButton(Ds.drawable.ic_photo_camera, "Escanear móvil", { actions.scan(field.id) }) }) else null,
                     )
-                    if (state.cards.isNotEmpty()) SourceCardPicker(state.cards, state.source, actions::source)
-                    state.saveReference?.let { save -> SwitchRow("Guardar referencia", save, actions::saveReference) }
                 }
+                if (state.amount != null) NeoAmountField(state.amount, actions::amount, state.currency) else WholeBill()
+                if (state.cards.isNotEmpty()) SourceCardPicker(state.cards, state.source, actions::source, label = "Desde")
+                state.saveReference?.let { save -> SwitchRow("Guardar referencia", save, actions::saveReference) }
             }
             BottomAction {
                 NeoButton(state.action, actions::submit, enabled = state.canContinue, icon = if (state.cards.isNotEmpty()) Ds.drawable.ic_fingerprint else null)
@@ -262,20 +225,16 @@ fun ServiceFormScreen(state: ServiceFormUi, actions: ServiceFormActions, modifie
     }
 }
 
+/**
+ * Where the amount would be typed, for bills the bank charges whole: there is nothing to ask before paying, and the
+ * receipt says how much went. Label and value read like a field's, without a box that suggests typing.
+ */
 @Composable
-private fun ReferenceChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    FilterChip(
-        selected = selected,
-        onClick = onClick,
-        label = { Text(label, maxLines = 1) },
-        shape = CircleShape,
-        border = null,
-        colors = FilterChipDefaults.filterChipColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            selectedContainerColor = Neo.colors.accentContainer,
-            selectedLabelColor = Neo.colors.onAccentContainer,
-        ),
-    )
+private fun WholeBill() {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Importe", Modifier.padding(start = NeoSpace.xxs), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Factura completa", Modifier.padding(start = NeoSpace.xxs), style = MaterialTheme.typography.titleMedium)
+    }
 }
 
 // ---- Cubacel ------------------------------------------------------------------------------------------------
@@ -352,75 +311,3 @@ private val CubacelQuery.icon: Int
         CubacelQuery.Sms -> Ds.drawable.ic_sms
         CubacelQuery.Bonus -> Ds.drawable.ic_redeem
     }
-
-interface CubacelPlansActions {
-    fun back()
-    fun select(id: String)
-    fun buy()
-}
-
-/** Packages bought with phone balance, grouped as ETECSA sells them. */
-@Composable
-fun CubacelPlansScreen(state: CubacelPlansUi, actions: CubacelPlansActions, modifier: Modifier = Modifier) {
-    val selected = state.groups.flatMap { it.plans }.firstOrNull { it.id == state.selected }
-    Scaffold(
-        modifier,
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = { NeoTopBar("Paquetes", onBack = actions::back) },
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(start = NeoSpace.gutter, end = NeoSpace.gutter, bottom = NeoSpace.l)) {
-                state.balance?.let { balance ->
-                    item(key = "balance") {
-                        Text(
-                            "Saldo: ${formatMoney(balance.amount, balance.currency)}",
-                            Modifier.padding(bottom = NeoSpace.s),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                state.groups.forEach { group ->
-                    item(key = group.name) {
-                        Column(Modifier.padding(top = NeoSpace.m)) {
-                            SectionHeader(group.name)
-                            Column(verticalArrangement = Arrangement.spacedBy(NeoSpace.s)) {
-                                group.plans.forEach { plan ->
-                                    PlanTile(plan.name, plan.detail, formatAmount(plan.price.amount) + " " + plan.price.currency, plan.id == state.selected) { actions.select(plan.id) }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            BottomAction {
-                NeoButton(selected?.let { "Comprar por ${formatMoney(it.price.amount, it.price.currency)}" } ?: "Comprar", actions::buy, enabled = selected != null)
-            }
-        }
-    }
-}
-
-@Composable
-private fun PlanTile(name: String, detail: String, price: String, selected: Boolean, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(NeoRadius.group)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(if (selected) Neo.colors.accentContainer else Neo.colors.group)
-            .clickable(role = Role.RadioButton, onClick = onClick)
-            .heightIn(min = 72.dp)
-            .padding(horizontal = NeoSpace.l, vertical = NeoSpace.m),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(NeoSpace.m),
-    ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(name, style = MaterialTheme.typography.titleMedium, color = if (selected) Neo.colors.onAccentContainer else MaterialTheme.colorScheme.onSurface)
-            Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Text(price, style = MaterialTheme.typography.titleMedium, color = if (selected) Neo.colors.onAccentContainer else MaterialTheme.colorScheme.onSurface)
-        Box(Modifier.size(22.dp).clip(CircleShape).background(if (selected) Neo.colors.accent else MaterialTheme.colorScheme.surfaceContainerHigh), contentAlignment = Alignment.Center) {
-            if (selected) Icon(painterResource(Ds.drawable.ic_check), null, Modifier.size(16.dp), tint = Neo.colors.onAccent)
-        }
-    }
-}

@@ -1,7 +1,6 @@
 package dev.duardo.neotransfer.app
 
 import android.Manifest
-import android.net.Uri
 import androidx.compose.animation.Crossfade
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -108,15 +107,9 @@ class Main(private val app: AppModel) : Destination(), HomeActions, ContactsActi
     override fun create() = app.navigator.push(ContactEditDestination(app, null))
     override fun importFromPhone() {
         app.launch {
-            val host = app.host ?: return@launch
-            if (!app.granted(Manifest.permission.READ_CONTACTS) && !host.requestPermission(Manifest.permission.READ_CONTACTS)) return@launch
-            val uri: Uri = host.pickContact() ?: return@launch
             importing = true
             try {
-                val contact = app.controller.importPhoneContact(uri.toString())
-                app.navigator.push(ContactDestination(app, contact.id))
-            } catch (e: Exception) {
-                app.message(e.message ?: "No se pudo importar el contacto")
+                app.importPhoneContact()?.let { app.navigator.push(ContactDestination(app, it.id)) }
             } finally {
                 importing = false
             }

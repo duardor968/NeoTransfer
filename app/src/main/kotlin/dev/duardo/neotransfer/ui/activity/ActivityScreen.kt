@@ -13,15 +13,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -33,14 +30,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.designsystem.R as Ds
 import dev.duardo.neotransfer.designsystem.component.EmptyState
 import dev.duardo.neotransfer.designsystem.component.GroupDivider
+import dev.duardo.neotransfer.designsystem.component.NeoChip
 import dev.duardo.neotransfer.designsystem.component.NeoSearchField
+import dev.duardo.neotransfer.designsystem.component.TabHeader
 import dev.duardo.neotransfer.designsystem.component.groupItem
+import dev.duardo.neotransfer.designsystem.component.rim
 import dev.duardo.neotransfer.designsystem.component.skeleton
 import dev.duardo.neotransfer.designsystem.format.formatCardNumber
 import dev.duardo.neotransfer.designsystem.theme.Neo
@@ -68,13 +68,10 @@ fun ActivityScreen(state: ActivityUi, actions: ActivityActions, modifier: Modifi
     // Search and filters only where there is something to narrow down.
     val searchable = state.content != ActivityContent.Empty && state.content != ActivityContent.NoAccess
     Column(modifier.fillMaxSize()) {
-        Column(Modifier.statusBarsPadding().padding(horizontal = NeoSpace.gutter)) {
-            Row(Modifier.fillMaxWidth().padding(top = NeoSpace.m, bottom = NeoSpace.s), verticalAlignment = Alignment.CenterVertically) {
-                Text("Actividad", Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium)
-                if (searchable && state.cards.size > 1) CardFilter(state, actions)
-            }
-            if (searchable) NeoSearchField(state.query, actions::query, "Buscar nombre, tarjeta o importe")
+        TabHeader("Actividad") {
+            if (searchable && state.cards.size > 1) CardFilter(state, actions, Modifier.padding(end = NeoSpace.l))
         }
+        if (searchable) NeoSearchField(state.query, actions::query, "Buscar nombre, tarjeta o importe", Modifier.padding(horizontal = NeoSpace.gutter))
         if (searchable) Filters(state, actions)
         when (val content = state.content) {
             ActivityContent.Loading -> LoadingList()
@@ -104,7 +101,7 @@ fun ActivityScreen(state: ActivityUi, actions: ActivityActions, modifier: Modifi
                             )
                         }
                         itemsIndexed(operations, key = { _, it -> it.id }) { index, operation ->
-                            Column(Modifier.groupItem(index, operations.size, Neo.colors.group)) {
+                            Column(Modifier.groupItem(index, operations.size)) {
                                 if (index > 0) GroupDivider()
                                 OperationRow(operation, labels.clockTime(operation.at), { actions.open(operation.id) })
                             }
@@ -116,24 +113,33 @@ fun ActivityScreen(state: ActivityUi, actions: ActivityActions, modifier: Modifi
     }
 }
 
-/** Which card's movements: art of the chosen card, or a generic card for all of them. */
+/**
+ * Which card's movements, said on the control itself: the chosen card's art with the last group of its number, or
+ * "Todas".
+ */
 @Composable
-private fun CardFilter(state: ActivityUi, actions: ActivityActions) {
+private fun CardFilter(state: ActivityUi, actions: ActivityActions, modifier: Modifier = Modifier) {
     var open by remember { mutableStateOf(false) }
     val selected = state.cards.firstOrNull { it.id == state.cardFilter }
-    Box {
+    Box(modifier) {
         Row(
             Modifier
                 .clip(CircleShape)
-                .background(if (selected != null) Neo.colors.accentContainer else MaterialTheme.colorScheme.surfaceContainer)
+                .background(if (selected != null) Neo.colors.accentContainer else Neo.colors.group)
+                .then(if (selected != null) Modifier else Modifier.rim(CircleShape))
                 .clickable(role = Role.Button, onClickLabel = "Filtrar por tarjeta") { open = true }
                 .heightIn(min = 40.dp)
                 .padding(start = NeoSpace.m, end = NeoSpace.s),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(NeoSpace.s),
         ) {
-            if (selected != null) BankCardThumb(selected.bank, width = 34.dp)
+            if (selected != null) BankCardThumb(selected.bank, width = 28.dp)
             else Icon(painterResource(Ds.drawable.ic_credit_card), null, Modifier.size(20.dp))
+            Text(
+                selected?.number?.takeLast(4) ?: "Todas",
+                style = MaterialTheme.typography.labelLarge,
+                color = if (selected != null) Neo.colors.onAccentContainer else MaterialTheme.colorScheme.onSurface,
+            )
             Icon(painterResource(Ds.drawable.ic_expand_more), null, Modifier.size(20.dp))
         }
         DropdownMenu(open, { open = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
@@ -159,34 +165,15 @@ private fun Filters(state: ActivityUi, actions: ActivityActions) {
         Modifier.fillMaxWidth().padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.m),
         horizontalArrangement = Arrangement.spacedBy(NeoSpace.s),
     ) {
-        ActivityFilter.entries.forEach { filter ->
-            FilterChip(
-                selected = state.filter == filter,
-                onClick = { actions.filter(filter) },
-                label = { Text(filter.label) },
-                shape = CircleShape,
-                colors = chipColors(),
-                border = null,
-            )
-        }
+        ActivityFilter.entries.forEach { filter -> NeoChip(filter.label, state.filter == filter, { actions.filter(filter) }) }
     }
 }
-
-@Composable
-private fun chipColors() = FilterChipDefaults.filterChipColors(
-    containerColor = MaterialTheme.colorScheme.surfaceContainer,
-    labelColor = MaterialTheme.colorScheme.onSurface,
-    iconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-    selectedContainerColor = Neo.colors.accentContainer,
-    selectedLabelColor = Neo.colors.onAccentContainer,
-    selectedTrailingIconColor = Neo.colors.onAccentContainer,
-)
 
 @Composable
 private fun LoadingList() {
     Column(Modifier.padding(horizontal = NeoSpace.gutter)) {
         Box(Modifier.padding(top = NeoSpace.xxl, bottom = NeoSpace.m).width(64.dp).height(14.dp).skeleton())
-        Column(Modifier.groupItem(0, 1, Neo.colors.group)) {
+        Column(Modifier.groupItem(0, 1)) {
             repeat(6) { index ->
                 if (index > 0) GroupDivider()
                 Row(

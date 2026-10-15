@@ -1,10 +1,13 @@
 package dev.duardo.neotransfer.designsystem.component
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,10 +24,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -63,30 +68,45 @@ fun NeoKeypad(onKey: (KeypadKey) -> Unit, modifier: Modifier = Modifier, decimal
             if (decimal) Key(Modifier.weight(1f), DecimalSeparator.toString(), "Separador decimal") { onKey(KeypadKey.Decimal) }
             else Box(Modifier.weight(1f))
             Key(Modifier.weight(1f), "0") { onKey(KeypadKey.Digit(0)) }
-            Box(
-                Modifier
-                    .weight(1f)
-                    .heightIn(min = 60.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .clickable(role = Role.Button, onClick = { onKey(KeypadKey.Backspace) })
-                    .semantics { contentDescription = "Borrar" },
-                contentAlignment = Alignment.Center,
-            ) { Icon(painterResource(R.drawable.ic_backspace), null, tint = MaterialTheme.colorScheme.onSurface) }
+            KeyFrame(Modifier.weight(1f), "Borrar", { onKey(KeypadKey.Backspace) }) {
+                Icon(painterResource(R.drawable.ic_backspace), null, tint = MaterialTheme.colorScheme.onSurface)
+            }
         }
     }
 }
 
 @Composable
 private fun Key(modifier: Modifier, label: String, description: String? = null, onClick: () -> Unit) {
+    KeyFrame(modifier, description, onClick) {
+        Text(label, style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Medium))
+    }
+}
+
+/** A key answers the touch with a round halo that blooms under the finger and fades on release. */
+@Composable
+private fun KeyFrame(modifier: Modifier, description: String?, onClick: () -> Unit, content: @Composable () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val halo by animateFloatAsState(if (pressed) 1f else 0f, tween(if (pressed) NeoMotion.short / 2 else NeoMotion.medium), label = "halo")
+    val color = MaterialTheme.colorScheme.surfaceContainerHigh
     Box(
         modifier
             .heightIn(min = 60.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .clickable(role = Role.Button, onClick = onClick)
+            .clickable(interaction, indication = null, role = Role.Button, onClick = onClick)
             .then(if (description != null) Modifier.semantics { contentDescription = description } else Modifier),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Medium))
+        Box(
+            Modifier
+                .size(60.dp)
+                .graphicsLayer {
+                    alpha = halo
+                    scaleX = 0.7f + 0.3f * halo
+                    scaleY = scaleX
+                }
+                .background(color, CircleShape),
+        )
+        content()
     }
 }
 

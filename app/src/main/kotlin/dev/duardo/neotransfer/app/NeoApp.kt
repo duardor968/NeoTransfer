@@ -77,7 +77,7 @@ fun NeoApp(model: AppModel) {
             val tabbed = model.navigator.top is Main
             SnackbarHost(
                 model.messages,
-                Modifier.align(Alignment.BottomCenter).imePadding().navigationBarsPadding().padding(bottom = if (tabbed) 80.dp else NeoSpace.l),
+                Modifier.align(Alignment.BottomCenter).imePadding().navigationBarsPadding().padding(bottom = if (tabbed) 72.dp else NeoSpace.l),
             ) { Snackbar(it, containerColor = MaterialTheme.colorScheme.inverseSurface) }
         }
     }

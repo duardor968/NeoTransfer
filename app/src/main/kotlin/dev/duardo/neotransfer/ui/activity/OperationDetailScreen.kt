@@ -24,6 +24,7 @@ import dev.duardo.neotransfer.designsystem.component.MoneyText
 import dev.duardo.neotransfer.designsystem.component.NameAvatar
 import dev.duardo.neotransfer.designsystem.component.NeoButton
 import dev.duardo.neotransfer.designsystem.component.NeoButtonStyle
+import dev.duardo.neotransfer.designsystem.component.NeoTextButton
 import dev.duardo.neotransfer.designsystem.component.NeoTopBar
 import dev.duardo.neotransfer.designsystem.component.ReceiptTicket
 import dev.duardo.neotransfer.designsystem.component.SummaryLine
@@ -57,8 +58,8 @@ interface OperationActions {
 }
 
 /**
- * Receipt of one operation. The textured check appears only once the bank confirmed it; otherwise the state chip
- * and, when it failed, the bank's reason in plain words.
+ * Receipt of one operation. The textured check appears only once the bank confirmed it and stands for the state;
+ * otherwise who it was, the state chip and, when it failed, the bank's reason in plain words.
  */
 @Composable
 fun OperationDetailScreen(operation: OperationUi, actions: OperationActions, modifier: Modifier = Modifier, canSaveContact: Boolean = false) {
@@ -105,7 +106,8 @@ private fun TicketHeader(operation: OperationUi) {
                 hero = true,
             )
         }
-        OperationStatusChip(operation.status)
+        // The textured check already says it was confirmed; every other state names itself.
+        if (operation.status != OperationStatus.Confirmed) OperationStatusChip(operation.status)
         operation.reason?.let {
             Text(it, style = MaterialTheme.typography.bodyLarge, color = operation.status.tone.content(), textAlign = TextAlign.Center)
         }
@@ -121,7 +123,7 @@ private fun detailLines(operation: OperationUi): List<SummaryLine> {
         is CounterpartUi.Phone -> SummaryLine("Teléfono", formatPhone(c.number))
         is CounterpartUi.Reference -> SummaryLine(referenceLabel(operation.kind), c.value)
         null -> null
-    }?.takeIf { it.value != operation.title.replace(' ', ' ') } // titles keep numbers whole with no-break spaces
+    }?.takeIf { it.value != operation.title }
     return listOfNotNull(
         counterpart,
         operation.card?.let { SummaryLine(if (operation.kind.incoming) "A tu tarjeta" else "Desde", formatCardNumber(it.number), it.bank.shortName) },
@@ -150,8 +152,8 @@ private fun DetailActions(operation: OperationUi, actions: OperationActions, can
             NeoButton("Consultar últimas operaciones", actions::checkRecent, style = NeoButtonStyle.Tonal)
         }
         OperationStatus.Confirmed -> {
-            if (canSaveContact) NeoButton("Guardar contacto", actions::saveContact, style = NeoButtonStyle.Tonal, icon = Ds.drawable.ic_person_add)
             NeoButton("Compartir comprobante", actions::share, icon = Ds.drawable.ic_share)
+            if (canSaveContact) NeoTextButton("Guardar contacto", actions::saveContact, Modifier.fillMaxWidth(), icon = Ds.drawable.ic_person_add)
         }
         OperationStatus.Rejected -> if (operation.kind == OperationKind.Transfer) NeoButton("Repetir transferencia", actions::repeat, style = NeoButtonStyle.Tonal)
         OperationStatus.Sent -> Unit

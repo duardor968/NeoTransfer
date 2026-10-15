@@ -16,8 +16,10 @@ import dev.duardo.neotransfer.scanner.QrVerdict
 import dev.duardo.neotransfer.scanner.ScanMode
 import dev.duardo.neotransfer.scanner.ScanResult
 import dev.duardo.neotransfer.ui.model.BalanceUi
+import dev.duardo.neotransfer.ui.model.CounterpartUi
 import dev.duardo.neotransfer.ui.model.DuplicateUi
 import dev.duardo.neotransfer.ui.model.Money
+import dev.duardo.neotransfer.ui.model.OperationKind
 import dev.duardo.neotransfer.ui.model.RecipientPickUi
 import dev.duardo.neotransfer.ui.model.RecipientUi
 import dev.duardo.neotransfer.ui.model.TransferAmountUi
@@ -67,6 +69,7 @@ class RecipientDestination(private val flow: TransferFlow) : Destination(), Reci
     private val app = flow.app
     private var query by mutableStateOf("")
     private var chooseCardOf by mutableStateOf<String?>(null)
+    private var importing by mutableStateOf(false)
 
     @Composable
     override fun Content(app: AppModel, book: Book) {
@@ -80,11 +83,17 @@ class RecipientDestination(private val flow: TransferFlow) : Destination(), Reci
             digits.length == 16 && !luhn(digits) -> "Revisa el número"
             else -> null
         }
-        val recent = if (query.isNotBlank()) emptyList() else book.domain.operations.mapNotNull { it.operation.request as? Transfer }
-            .map { it.destination }.distinct().take(8).map { number -> recipientFor(book, number) }
+        // Everyone money went to, newest first, whether sent from here or from another app.
+        val recent = if (query.isNotBlank()) emptyList() else book.activity.asSequence()
+            .filter { it.kind == OperationKind.Transfer }
+            .mapNotNull { (it.counterpart as? CounterpartUi.Card)?.number?.takeIf(Cards::isNumber) }
+            .distinct().take(8).map { number -> recipientFor(book, number) }.toList()
         val contacts = book.contacts.filter { it.cards.isNotEmpty() && it.matchesRecipient(query, digits) }
         RecipientScreen(
-            RecipientPickUi(query, typed, error, recent, contacts, chooseCardOf?.let(book::contact)),
+            RecipientPickUi(
+                query, typed, error, recent, contacts, chooseCardOf?.let(book::contact),
+                canImport = query.isBlank() && book.contacts.none { it.cards.isNotEmpty() }, importing = importing,
+            ),
             this,
         )
     }
@@ -125,6 +134,18 @@ class RecipientDestination(private val flow: TransferFlow) : Destination(), Reci
     }
 
     override fun closeCards() { chooseCardOf = null }
+
+    /** A phone contact brings name and phones; its card is added right after, then it is listed here. */
+    override fun importContacts() {
+        app.launch {
+            importing = true
+            try {
+                app.importPhoneContact()?.let { app.navigator.push(ContactEditDestination(app, it.id)) }
+            } finally {
+                importing = false
+            }
+        }
+    }
 
     private fun choose(recipient: RecipientUi) {
         flow.recipient = recipient

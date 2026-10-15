@@ -21,13 +21,19 @@ fun formatAmount(amount: BigDecimal): String =
 /** `12480.5`, `CUP` → `12,480.50 CUP`. */
 fun formatMoney(amount: BigDecimal, currency: String): String = "${formatAmount(amount)} $currency"
 
-/** Groups a PAN as printed on the card: `9204 1234 5678 9012`. Partial input is grouped as typed. */
-fun formatCardNumber(digits: String): String = digits.filter(Char::isDigit).chunked(4).joinToString(" ")
+/** No-break space: what joins the groups of a number so a line never splits it. */
+const val NoBreak = ' '
 
-/** Cuban 8-digit numbers: `5312 3456`. */
+/** The same text with its spaces made unbreakable, for values that must stay on one line ("12,480.50 CUP"). */
+fun String.unbroken(): String = replace(' ', NoBreak)
+
+/** Groups a PAN as printed on the card, never split across lines: `9204 1234 5678 9012`. Partial input is grouped as typed. */
+fun formatCardNumber(digits: String): String = digits.filter(Char::isDigit).chunked(4).joinToString(NoBreak.toString())
+
+/** Cuban 8-digit numbers, never split across lines: `5312 3456`. */
 fun formatPhone(digits: String): String {
     val d = digits.filter(Char::isDigit)
-    return if (d.length == 8) "${d.substring(0, 4)} ${d.substring(4)}" else d
+    return if (d.length == 8) "${d.substring(0, 4)}$NoBreak${d.substring(4)}" else d
 }
 
 /** Up to two initials from a display name. */

@@ -1,6 +1,7 @@
 package dev.duardo.neotransfer.designsystem.component
 
 import androidx.annotation.DrawableRes
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,6 +18,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
@@ -44,10 +46,12 @@ fun NeoButton(
         NeoButtonStyle.Tonal -> scheme.surfaceContainerHigh to scheme.onSurface
         NeoButtonStyle.Danger -> colors.dangerContainer to colors.danger
     }
+    val interaction = remember { MutableInteractionSource() }
     Button(
         onClick = { if (!loading) onClick() },
-        modifier = modifier.heightIn(min = 56.dp).then(if (fill) Modifier.fillMaxWidth() else Modifier),
+        modifier = modifier.pressScale(interaction, 0.97f).heightIn(min = 56.dp).then(if (fill) Modifier.fillMaxWidth() else Modifier),
         enabled = enabled,
+        interactionSource = interaction,
         shape = CircleShape,
         colors = ButtonDefaults.buttonColors(
             containerColor = container,
@@ -66,10 +70,21 @@ fun NeoButton(
     }
 }
 
-/** Inline action in accent ink: "Ver todo", "Reintentar". */
+/** Inline action in accent ink: "Ver todo", "Añadir teléfono"; [icon] goes before the words. */
 @Composable
-fun NeoTextButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, color: Color = Neo.colors.accentInk, enabled: Boolean = true) {
-    TextButton(onClick = onClick, modifier = modifier, enabled = enabled, colors = ButtonDefaults.textButtonColors(contentColor = color)) {
+fun NeoTextButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    color: Color = Neo.colors.accentInk,
+    enabled: Boolean = true,
+    @DrawableRes icon: Int? = null,
+) {
+    TextButton(onClick = onClick, modifier = modifier.heightIn(min = 48.dp), enabled = enabled, colors = ButtonDefaults.textButtonColors(contentColor = color)) {
+        if (icon != null) {
+            Icon(painterResource(icon), null, Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+        }
         FittedText(text, MaterialTheme.typography.labelLarge)
     }
 }

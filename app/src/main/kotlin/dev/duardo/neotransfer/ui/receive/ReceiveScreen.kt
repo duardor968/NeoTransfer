@@ -93,7 +93,7 @@ fun ReceiveScreen(state: ReceiveUi, actions: ReceiveActions, modifier: Modifier 
                 Spacer(Modifier.height(NeoSpace.xl))
                 CardPicker(
                     state.cards, state.selected, actions::card, "Cobrar en",
-                    { listOfNotNull(state.cards[it].bank.shortName, state.cards[it].currency, state.cards[it].holder).joinToString(" · ") },
+                    { "${state.cards[it].bank.shortName} · ${state.cards[it].currency}" },
                     Modifier.padding(horizontal = NeoSpace.gutter),
                 )
             }

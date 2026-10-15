@@ -41,7 +41,9 @@ import dev.duardo.neotransfer.designsystem.component.PinDots
 import dev.duardo.neotransfer.designsystem.component.SecureWindow
 import dev.duardo.neotransfer.designsystem.component.StatusChip
 import dev.duardo.neotransfer.designsystem.component.StatusTone
+import dev.duardo.neotransfer.designsystem.component.flushEnd
 import dev.duardo.neotransfer.designsystem.format.formatCardNumber
+import dev.duardo.neotransfer.designsystem.format.unbroken
 import dev.duardo.neotransfer.designsystem.theme.Neo
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
 import dev.duardo.neotransfer.ui.common.BankCard
@@ -267,9 +269,9 @@ fun CardSetupScreen(state: CardSetupUi, actions: CardSetupActions, modifier: Mod
                         state.cards.forEach { card ->
                             NeoRow(
                                 formatCardNumber(card.number),
-                                supporting = listOfNotNull(card.currency, card.holder, card.expiry?.let { "Vence $it" }).joinToString(" · "),
+                                supporting = listOfNotNull(card.currency, card.holder, card.expiry?.let { "Vence $it".unbroken() }).joinToString(" · "),
                                 leading = { BankCardThumb(card.bank) },
-                                trailing = { NeoIconButton(Ds.drawable.ic_delete, "Quitar tarjeta", { actions.remove(card.id) }) },
+                                trailing = { NeoIconButton(Ds.drawable.ic_delete, "Quitar tarjeta", { actions.remove(card.id) }, Modifier.flushEnd()) },
                             )
                             GroupDivider()
                         }

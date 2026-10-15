@@ -24,14 +24,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.designsystem.R as Ds
 import dev.duardo.neotransfer.designsystem.component.NeoButton
+import dev.duardo.neotransfer.designsystem.component.glow
 import dev.duardo.neotransfer.designsystem.theme.Neo
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
 import dev.duardo.neotransfer.ui.common.BrandMark
@@ -59,7 +56,7 @@ fun LockScreen(state: LockUi, actions: LockActions, modifier: Modifier = Modifie
             enter = fadeIn() + slideInVertically { it / 3 },
             exit = fadeOut(),
         ) {
-            Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = NeoSpace.xxl).padding(bottom = NeoSpace.xxl)) {
+            Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = NeoSpace.gutter, vertical = NeoSpace.l)) {
                 when (state) {
                     is LockUi.LockedOut -> NeoButton("Desbloquear en ${state.seconds} s", actions::unlock, icon = Ds.drawable.ic_fingerprint, enabled = false)
                     else -> NeoButton("Desbloquear", actions::unlock, icon = Ds.drawable.ic_fingerprint)
@@ -69,16 +66,20 @@ fun LockScreen(state: LockUi, actions: LockActions, modifier: Modifier = Modifie
     }
 }
 
+/**
+ * Mark and name, with the lock under them when [locked]. The lock's place is kept when it is absent, so going from
+ * the permission request to the lock (or back) never moves the mark.
+ */
 @Composable
 internal fun BrandBlock(locked: Boolean) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(NeoSpace.l)) {
         BrandMark(112.dp)
         Text("NeoTransfer", style = MaterialTheme.typography.headlineSmall)
-        if (locked) Box(
-            Modifier.size(36.dp).background(Neo.colors.neutralContainer, CircleShape),
+        Box(
+            Modifier.size(36.dp).then(if (locked) Modifier.background(Neo.colors.neutralContainer, CircleShape) else Modifier),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(painterResource(Ds.drawable.ic_lock), "Bloqueada", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (locked) Icon(painterResource(Ds.drawable.ic_lock), "Bloqueada", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -92,15 +93,7 @@ internal fun BrandBackdrop(modifier: Modifier = Modifier, content: @Composable C
         modifier
             .fillMaxSize()
             .background(background)
-            .drawBehind {
-                drawRect(
-                    Brush.radialGradient(
-                        listOf(glow, Color.Transparent),
-                        center = Offset(size.width / 2, size.height * 0.36f),
-                        radius = size.width * 0.75f,
-                    ),
-                )
-            }
+            .glow(glow, y = 0.36f)
             .safeDrawingPadding()
             .heightIn(min = 400.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
