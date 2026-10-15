@@ -53,8 +53,7 @@ val OperationStatus.icon: Int
 /** Glyph inside the state mark: the operation's own while it travels, then the state's. */
 @DrawableRes
 fun OperationStatus.markIcon(kind: OperationKind): Int = when (this) {
-    OperationStatus.Sent -> kind.icon
-    OperationStatus.Confirmed -> Ds.drawable.ic_check
+    OperationStatus.Sent, OperationStatus.Confirmed -> kind.icon
     OperationStatus.Rejected -> Ds.drawable.ic_close
     OperationStatus.NoResponse -> Ds.drawable.ic_hourglass_empty
     OperationStatus.NotExecuted -> Ds.drawable.ic_sync_problem

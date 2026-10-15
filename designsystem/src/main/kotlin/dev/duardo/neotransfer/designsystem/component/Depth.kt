@@ -92,15 +92,17 @@ internal fun Modifier.itemRim(index: Int, count: Int, radius: Dp = NeoRadius.gro
 /**
  * Soft light of [color] behind the content, strongest at ([x], [y]) as fractions of the size: an ellipse [reach]
  * times the width across that fades out before the nearest top or bottom edge, so it never shows a cut. The halo
- * behind a hero object (the brand while locked, the card in hand).
+ * behind a hero object (the brand while locked, the card in hand). [color] and [y] are read while drawing, so a
+ * colour that follows a gesture never recomposes.
  */
-fun Modifier.glow(color: Color, x: Float = 0.5f, y: Float = 0.5f, reach: Float = 0.75f): Modifier = drawBehind {
-    val center = Offset(size.width * x, size.height * y)
+fun Modifier.glow(color: () -> Color, x: Float = 0.5f, y: () -> Float = { 0.5f }, reach: Float = 0.75f): Modifier = drawBehind {
+    val tint = color()
+    val center = Offset(size.width * x, size.height * y())
     val across = size.width * reach
     val down = minOf(center.y, size.height - center.y)
-    if (color.alpha == 0f || down <= 0f) return@drawBehind
+    if (tint.alpha == 0f || down <= 0f) return@drawBehind
     scale(scaleX = 1f, scaleY = down / across, pivot = center) {
-        drawCircle(Brush.radialGradient(listOf(color, Color.Transparent), center, across), across, center)
+        drawCircle(Brush.radialGradient(listOf(tint, Color.Transparent), center, across), across, center)
     }
 }
 

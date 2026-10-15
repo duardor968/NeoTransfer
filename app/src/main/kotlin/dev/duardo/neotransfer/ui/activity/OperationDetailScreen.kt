@@ -18,6 +18,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.designsystem.R as Ds
+import dev.duardo.neotransfer.designsystem.component.FittedText
 import dev.duardo.neotransfer.designsystem.component.IconAvatar
 import dev.duardo.neotransfer.designsystem.component.MoneySign
 import dev.duardo.neotransfer.designsystem.component.MoneyText
@@ -97,7 +98,7 @@ private fun TicketHeader(operation: OperationUi) {
             operation.contactId != null -> NameAvatar(operation.title, size = 64.dp)
             else -> IconAvatar(operation.kind.icon, size = 64.dp)
         }
-        Text(operation.title, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
+        FittedText(operation.title, MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center, minScale = 0.75f)
         operation.amount?.let { money ->
             MoneyText(
                 money.amount, money.currency,

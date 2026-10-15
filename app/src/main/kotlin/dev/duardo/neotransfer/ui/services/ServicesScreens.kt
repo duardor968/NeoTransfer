@@ -133,9 +133,7 @@ private fun SavedTile(reference: SavedReferenceUi, modifier: Modifier, onClick: 
             .clickable(role = Role.Button, onClick = onClick)
             .padding(NeoSpace.l),
     ) {
-        Box(Modifier.size(36.dp).background(Neo.colors.accentContainer, CircleShape), contentAlignment = Alignment.Center) {
-            Icon(painterResource(reference.kind.icon), null, Modifier.size(20.dp), tint = Neo.colors.onAccentContainer)
-        }
+        IconAvatar(reference.kind.icon, size = 40.dp)
         Spacer(Modifier.height(NeoSpace.m).weight(1f, fill = false))
         Text(reference.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         // A Nauta account under a Nauta tile needs no domain; references are identifiers and never wrap.

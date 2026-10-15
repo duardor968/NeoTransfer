@@ -93,7 +93,7 @@ internal fun BrandBackdrop(modifier: Modifier = Modifier, content: @Composable C
         modifier
             .fillMaxSize()
             .background(background)
-            .glow(glow, y = 0.36f)
+            .glow({ glow }, y = { 0.36f })
             .safeDrawingPadding()
             .heightIn(min = 400.dp),
         horizontalAlignment = Alignment.CenterHorizontally,

@@ -48,7 +48,7 @@ import kotlin.math.absoluteValue
 fun CardCarousel(
     state: PagerState,
     modifier: Modifier = Modifier,
-    horizontalPadding: Dp = 28.dp,
+    horizontalPadding: Dp = 24.dp,
     pageSpacing: Dp = 8.dp,
     key: ((Int) -> Any)? = null,
     page: @Composable (index: Int) -> Unit,

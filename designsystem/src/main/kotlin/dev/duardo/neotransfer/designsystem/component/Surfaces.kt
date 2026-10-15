@@ -103,7 +103,7 @@ fun QuickAction(
         ) {
             Icon(painterResource(icon), null, tint = content)
         }
-        Text(label, style = labelStyle, textAlign = TextAlign.Center, maxLines = 1, softWrap = false)
+        Text(label, style = labelStyle, textAlign = TextAlign.Center, maxLines = 2)
     }
 }
 
@@ -150,7 +150,7 @@ fun NeoBottomSheet(
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = NeoSpace.l)) {
             if (title != null) Text(
                 title,
-                Modifier.padding(horizontal = NeoSpace.xxl).padding(bottom = NeoSpace.s),
+                Modifier.padding(horizontal = NeoSpace.gutter).padding(bottom = NeoSpace.s),
                 style = MaterialTheme.typography.titleLarge,
             )
             content()
@@ -266,9 +266,10 @@ private tailrec fun Context.activity(): Activity? = when (this) {
 data class QuickActionItem(@param:DrawableRes val icon: Int, val label: String, val onClick: () -> Unit, val primary: Boolean = false)
 
 /**
- * Shortcuts in rows of [columns]: the first and last columns sit on the edges and the rest spread evenly, so every
- * row lines up with the screen's margins. One label size for all: the longest label sets it, scaled down only when
- * it would not fit its column, so a row never mixes sizes at large font scales.
+ * Shortcuts in rows of up to [columns]: the first and last columns sit on the edges and the rest spread evenly,
+ * so every row lines up with the screen's margins. Labels keep the user's font size and wrap to two lines at word
+ * breaks; when a single word would not fit, the grid drops to three columns first and only then steps the size
+ * down, the same for every label, so a grid never mixes sizes.
  */
 @Composable
 fun QuickActionGrid(items: List<QuickActionItem>, modifier: Modifier = Modifier, columns: Int = 4) {
@@ -276,14 +277,17 @@ fun QuickActionGrid(items: List<QuickActionItem>, modifier: Modifier = Modifier,
     val base = MaterialTheme.typography.labelMedium
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val density = LocalDensity.current
-        val pitch = maxWidth / columns
-        val widest = with(density) { items.maxOf { measurer.measure(it.label, base, maxLines = 1).size.width }.toDp() }
-        val scale = ((pitch - NeoSpace.m) / widest).coerceAtMost(1f)
-        val cell = (widest * scale).coerceIn(64.dp, pitch)
-        val step = if (columns > 1) (maxWidth - cell) / (columns - 1) else 0.dp
+        fun widthOf(text: String) = with(density) { measurer.measure(text, base, maxLines = 1).size.width.toDp() }
+        val longestWord = items.flatMap { it.label.split(' ') }.maxOf(::widthOf)
+        val longestLabel = items.maxOf { widthOf(it.label) }
+        val count = if (columns > 3 && (maxWidth / columns - NeoSpace.s) < longestWord) 3 else columns
+        val room = maxWidth / count - NeoSpace.s
+        val scale = (room / longestWord).coerceAtMost(1f)
+        val cell = (longestLabel * scale).coerceIn(64.dp, room)
+        val step = if (count > 1) (maxWidth - cell) / (count - 1) else 0.dp
         val label = base.copy(fontSize = base.fontSize * scale)
         Column(verticalArrangement = Arrangement.spacedBy(NeoSpace.s)) {
-            items.chunked(columns).forEach { row ->
+            items.chunked(count).forEach { row ->
                 Box(Modifier.fillMaxWidth()) {
                     row.forEachIndexed { index, item ->
                         QuickAction(item.icon, item.label, item.onClick, Modifier.offset(x = step * index).width(cell), item.primary, label)

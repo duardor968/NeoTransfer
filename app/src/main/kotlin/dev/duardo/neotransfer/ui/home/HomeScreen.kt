@@ -41,6 +41,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onSizeChanged
@@ -67,8 +68,6 @@ import dev.duardo.neotransfer.designsystem.component.SectionHeader
 import dev.duardo.neotransfer.designsystem.component.glow
 import dev.duardo.neotransfer.designsystem.component.skeleton
 import dev.duardo.neotransfer.designsystem.component.spinning
-import dev.duardo.neotransfer.designsystem.format.formatMoney
-import dev.duardo.neotransfer.designsystem.format.unbroken
 import dev.duardo.neotransfer.designsystem.theme.Neo
 import dev.duardo.neotransfer.designsystem.theme.NeoMotion
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
@@ -131,16 +130,18 @@ fun HomeScreen(state: HomeUi, actions: HomeActions, modifier: Modifier = Modifie
             val strength = if (Neo.colors.isDark) 0.22f else 0.12f
             val accent = Neo.colors.accent
             fun tint(page: Int) = (state.cards.getOrNull(page)?.card?.bank?.artColor ?: accent).copy(alpha = strength)
-            val fraction = pager.currentPageOffsetFraction
-            val next = (pager.currentPage + if (fraction > 0) 1 else -1).coerceIn(0, pages - 1)
-            val halo = lerp(tint(pager.currentPage), tint(next), kotlin.math.abs(fraction))
+            fun halo(): Color {
+                val fraction = pager.currentPageOffsetFraction
+                val next = (pager.currentPage + if (fraction > 0) 1 else -1).coerceIn(0, pages - 1)
+                return lerp(tint(pager.currentPage), tint(next), kotlin.math.abs(fraction))
+            }
             var height by remember { mutableIntStateOf(0) }
             var cardCenter by remember { mutableFloatStateOf(0f) }
             Column(
                 Modifier
                     .fillMaxWidth()
                     .onSizeChanged { height = it.height }
-                    .glow(halo, y = if (height > 0) cardCenter / height else 0.4f, reach = 0.62f),
+                    .glow(::halo, y = { if (height > 0) cardCenter / height else 0.4f }, reach = 0.62f),
             ) {
                 Row(
                     Modifier.fillMaxWidth().statusBarsPadding().padding(start = NeoSpace.gutter, end = NeoSpace.xs).heightIn(min = 64.dp),
@@ -181,11 +182,11 @@ fun HomeScreen(state: HomeUi, actions: HomeActions, modifier: Modifier = Modifie
                     QuickActionItem(Ds.drawable.ic_south_west, "Cobrar", actions::receive),
                     QuickActionItem(Ds.drawable.ic_smartphone, "Recargar", actions::recharge),
                 ),
-                Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.xxxl),
+                Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.xxl),
             )
         }
         if (state.inProgress.isNotEmpty()) item(key = "progress") {
-            Column(Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.xxxl)) {
+            Column(Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.l)) {
                 SectionHeader("Pendientes")
                 NeoGroup {
                     state.inProgress.forEachIndexed { index, operation ->
@@ -195,12 +196,16 @@ fun HomeScreen(state: HomeUi, actions: HomeActions, modifier: Modifier = Modifie
                 }
             }
         }
-        // Nothing yet: the section stays out until there is something to show; Actividad has the way to ask.
-        val recent = state.recent
-        if (recent == null || recent.isNotEmpty()) item(key = "recent") {
-            Column(Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.xxxl)) {
-                SectionHeader("Actividad reciente", action = if (recent != null) "Ver todo" else null, onAction = actions::allActivity)
-                NeoGroup {
+        item(key = "recent") {
+            val recent = state.recent
+            Column(Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.l)) {
+                SectionHeader("Actividad reciente", action = if (!recent.isNullOrEmpty()) "Ver todo" else null, onAction = actions::allActivity)
+                // Nothing yet: one quiet line where the list will be, no box around it.
+                if (recent != null && recent.isEmpty()) Text(
+                    "Sin movimientos",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                ) else NeoGroup {
                     if (recent == null) {
                         repeat(3) { index ->
                             if (index > 0) GroupDivider()
@@ -266,13 +271,8 @@ private fun InProgressRow(operation: OperationUi, ago: (java.time.Instant) -> St
         operation.title,
         leading = { OperationAvatar(operation) },
         supportingContent = {
-            val text = if (notExecuted) {
-                listOfNotNull(operation.amount?.let { formatMoney(it.amount, it.currency).unbroken() }, operation.reason ?: operation.status.label).joinToString(" · ")
-            } else {
-                "${operation.status.label} ${ago(operation.at)}"
-            }
             Text(
-                text,
+                if (notExecuted) operation.status.label else "${operation.status.label} ${ago(operation.at)}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (notExecuted) Neo.colors.warning else MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -280,18 +280,17 @@ private fun InProgressRow(operation: OperationUi, ago: (java.time.Instant) -> St
             )
         },
         trailing = {
-            if (notExecuted) {
-                FilledTonalIconButton(
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(NeoSpace.m)) {
+                OperationAmount(operation)
+                if (notExecuted) FilledTonalIconButton(
                     retry,
                     Modifier.size(40.dp),
                     colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = Neo.colors.accentContainer, contentColor = Neo.colors.onAccentContainer),
                 ) { Icon(painterResource(Ds.drawable.ic_replay), "Reintentar", Modifier.size(20.dp)) }
-            } else {
-                OperationAmount(operation)
             }
         },
         onClick = open,
-        trailingBelowWhenLarge = !notExecuted,
+        trailingBelowWhenLarge = true,
     )
 }
 

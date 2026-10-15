@@ -148,7 +148,7 @@ fun StatusMark(
         }
         AnimatedVisibility(
             artShown,
-            enter = fadeIn(tween(NeoMotion.short)) + scaleIn(spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMediumLow), initialScale = 0.8f),
+            enter = fadeIn(tween(NeoMotion.short)) + scaleIn(spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMediumLow), initialScale = 0.85f),
             exit = fadeOut(tween(NeoMotion.short)),
         ) { positive?.invoke() }
     }

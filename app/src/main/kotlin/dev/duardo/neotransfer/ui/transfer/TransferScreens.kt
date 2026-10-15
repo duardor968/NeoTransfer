@@ -1,10 +1,11 @@
 package dev.duardo.neotransfer.ui.transfer
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.designsystem.R as Ds
 import dev.duardo.neotransfer.designsystem.component.AmountDisplay
 import dev.duardo.neotransfer.designsystem.component.EmptyState
+import dev.duardo.neotransfer.designsystem.component.FittedText
 import dev.duardo.neotransfer.designsystem.component.GroupDivider
 import dev.duardo.neotransfer.designsystem.component.IconAvatar
 import dev.duardo.neotransfer.designsystem.component.KeypadKey
@@ -185,7 +187,7 @@ private fun RecentChip(recipient: RecipientUi, onClick: () -> Unit) {
         val name = recipient.name
         if (name != null) NameAvatar(name, size = 52.dp) else IconAvatar(Ds.drawable.ic_credit_card, size = 52.dp)
         Text(
-            name?.substringBefore(' ') ?: formatCardNumber(recipient.card.number),
+            name?.substringBefore(' ') ?: recipient.card.number.chunked(8).joinToString("\n", transform = ::formatCardNumber),
             style = MaterialTheme.typography.labelMedium,
             textAlign = TextAlign.Center,
         )
@@ -249,11 +251,12 @@ private fun RecipientHeader(recipient: RecipientUi, avatar: Dp) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         val name = recipient.name
         if (name != null) NameAvatar(name, size = avatar) else IconAvatar(Ds.drawable.ic_credit_card, size = avatar)
-        Text(
+        FittedText(
             name ?: formatCardNumber(recipient.card.number),
+            MaterialTheme.typography.titleLarge,
             Modifier.padding(top = NeoSpace.m),
-            style = MaterialTheme.typography.titleLarge,
             textAlign = TextAlign.Center,
+            minScale = 0.75f,
         )
         val detail = if (name != null) {
             listOfNotNull(formatCardNumber(recipient.card.number), recipient.card.bankName).joinToString(" · ")
@@ -346,9 +349,13 @@ fun TransferResultScreen(state: TransferResultUi, actions: ResultActions, modifi
                     Spacer(Modifier.height(top))
                     StatusMark(operation.status.tone, operation.status.markIcon(operation.kind), positive = { ConfirmedMark(112.dp) })
                     Spacer(Modifier.height(NeoSpace.xxl))
-                    Crossfade(operation.status.label, animationSpec = tween(NeoMotion.medium), label = "title") {
-                        Text(it, style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
-                    }
+                    AnimatedContent(
+                        operation.status.label,
+                        Modifier.fillMaxWidth(),
+                        transitionSpec = { fadeIn(tween(NeoMotion.short, delayMillis = 90)) togetherWith fadeOut(tween(90)) },
+                        contentAlignment = Alignment.Center,
+                        label = "title",
+                    ) { Text(it, style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center) }
                     operation.amount?.let { money ->
                         Text(
                             "${formatMoney(money.amount, money.currency).unbroken()} a ${operation.title}",
