@@ -1,6 +1,7 @@
 package dev.duardo.neotransfer.engine
 
 import dev.duardo.neotransfer.core.ledger.Movement
+import dev.duardo.neotransfer.core.ledger.NotExecutedReason
 import dev.duardo.neotransfer.core.ledger.OperationState
 import dev.duardo.neotransfer.core.ledger.OperationStatus
 import dev.duardo.neotransfer.core.model.Contact
@@ -8,6 +9,7 @@ import dev.duardo.neotransfer.core.model.Money
 import dev.duardo.neotransfer.core.model.Phones
 import dev.duardo.neotransfer.core.model.identify
 import dev.duardo.neotransfer.core.protocol.BalanceQuery
+import dev.duardo.neotransfer.core.protocol.CubacelTransfer
 import dev.duardo.neotransfer.core.protocol.ElectricityBill
 import dev.duardo.neotransfer.core.protocol.HistoryQuery
 import dev.duardo.neotransfer.core.protocol.MobileRecharge
@@ -32,15 +34,25 @@ internal object Notices {
             "Transferencia recibida", Routes.movement(movement.id))
     }
 
-    /** Title: what the operation was; text: "Confirmada" or "Rechazada: <motivo>". */
+    /** Title: what the operation was; text: "Confirmada", "Rechazada: <motivo>" or "No se ejecutó: <motivo>". */
     fun result(status: OperationStatus, contacts: List<Contact>): Notice {
         val (text, public) = when (val state = status.state) {
             is OperationState.Confirmed -> "Confirmada" to "Operación confirmada"
             is OperationState.Rejected -> "Rechazada: ${state.reason}" to "Operación rechazada"
+            is OperationState.NotExecuted -> "No se ejecutó: ${notExecuted(state)}" to "Operación no ejecutada"
             else -> error("Solo se notifican resultados")
         }
         val id = status.operation.id
         return Notice(id, NoticeKind.RESULT, describe(status.operation.request, contacts), text, public, Routes.operation(id))
+    }
+
+    /** Why an operation never reached the bank, in plain words. */
+    fun notExecuted(state: OperationState.NotExecuted): String = when (state.reason) {
+        NotExecutedReason.BUSY -> "el banco estaba ocupado"
+        NotExecutedReason.SEND_FAILED -> state.detail?.replaceFirstChar(Char::lowercase) ?: "no se pudo enviar"
+        NotExecutedReason.REFUSED -> "la red no aceptó la solicitud"
+        NotExecutedReason.AUTHENTICATION -> "no se pudo autenticar con el banco"
+        NotExecutedReason.WRONG_PIN -> "clave incorrecta"
     }
 
     fun describe(request: UssdRequest, contacts: List<Contact>): String = when (request) {
@@ -55,6 +67,7 @@ internal object Notices {
             NautaService.HOME_DEBT -> "Pago de Nauta Hogar"
         } + " de ${amount(request.amount)}"
         is MobileRecharge -> "Recarga de ${amount(request.amount)} a ${contacts.identify(phone = request.phone)?.name ?: request.phone}"
+        is CubacelTransfer -> "Saldo de ${request.amount} CUP a ${contacts.identify(phone = request.phone)?.name ?: request.phone}"
         is BalanceQuery -> "Consulta de saldo"
         is HistoryQuery -> "Últimas operaciones"
         else -> "Operación"

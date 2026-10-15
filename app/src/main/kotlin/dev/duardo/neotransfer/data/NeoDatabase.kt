@@ -1,6 +1,8 @@
 package dev.duardo.neotransfer.data
 
 import android.content.Context
+import androidx.room.AutoMigration
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
@@ -29,9 +31,15 @@ data class CardEntity(
     val position: Int,
 )
 
-/** Phones and cards are digits only, one per line. */
+/** Phones and cards are digits only, one per line; [labels] is one `<card>\t<name>` per line. */
 @Entity(tableName = "contact")
-data class ContactEntity(@PrimaryKey val id: String, val name: String, val phones: String, val cards: String)
+data class ContactEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val phones: String,
+    val cards: String,
+    @ColumnInfo(defaultValue = "") val labels: String,
+)
 
 @Entity(tableName = "service", primaryKeys = ["kind", "value"])
 data class ServiceEntity(val kind: String, val value: String, val label: String?)
@@ -66,7 +74,8 @@ interface NeoDao {
 
 @Database(
     entities = [OperationEntity::class, SmsEntity::class, CardEntity::class, ContactEntity::class, ServiceEntity::class, SettingEntity::class],
-    version = 1,
+    version = 2,
+    autoMigrations = [AutoMigration(from = 1, to = 2)],
 )
 abstract class NeoDatabase : RoomDatabase() {
     abstract fun dao(): NeoDao

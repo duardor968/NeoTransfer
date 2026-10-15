@@ -337,9 +337,10 @@ class AppControllerTest {
 
     @Test fun `contacts, backup round trip and wrong password`() = runTest {
         val rig = rig()
-        rig.controller.saveCard(bpa.copy(holder = "Duardo"))
-        val juan = rig.controller.saveContact(Contact("", " Juan ", listOf("+53 5000 0009", "50000009"), listOf("9204-9900-0000-0007")))
-        assertEquals(Contact(juan.id, "Juan", listOf("50000009"), listOf(friend)), juan)
+        rig.controller.saveCard(bpa.copy(holder = "Duardo", expiry = "03/29"))
+        val juan = rig.controller.saveContact(Contact("", " Juan ", listOf("+53 5000 0009", "50000009"), listOf("9204-9900-0000-0007"),
+            mapOf("9204-9900-0000-0007" to " Salario  BANDEC ", "9204990000000099" to "Sin tarjeta")))
+        assertEquals(Contact(juan.id, "Juan", listOf("50000009"), listOf(friend), mapOf(friend to "Salario BANDEC")), juan)
         rig.controller.saveService(ServiceReference(ServiceKind.ELECTRICITY, "12345678901", "Casa"))
         rig.phoneContacts["content://contacts/1"] = PhoneContact("lookup-1", "Ana", listOf("52222222"))
         val ana = rig.controller.importPhoneContact("content://contacts/1")
@@ -348,12 +349,14 @@ class AppControllerTest {
         assertEquals(2, rig.controller.contacts.value.size)
 
         rig.controller.exportBackup("content://backup", "clave segura".toCharArray())
+        assertEquals(now(), rig.controller.lastBackup.value)
         val restored = rig()
         restored.documents.files["content://backup"] = rig.documents.files.getValue("content://backup")
         assertFailsWith<BackupFailure.AuthenticationFailed> { restored.controller.importBackup("content://backup", "otra".toCharArray()) }
         assertEquals(ImportSummary(1, 2, 1), restored.controller.importBackup("content://backup", "clave segura".toCharArray()))
-        assertEquals(listOf(bpa), restored.controller.cards.value.map { it.card }) // the format keeps no holder
+        assertEquals(listOf(bpa.copy(holder = "Duardo", expiry = "03/29")), restored.controller.cards.value.map { it.card })
         assertEquals(setOf(juan.id, ana.id), restored.controller.contacts.value.map { it.id }.toSet())
+        assertEquals(mapOf(friend to "Salario BANDEC"), restored.controller.contacts.value.first { it.id == juan.id }.labels)
         assertEquals(ImportSummary(0, 0, 0), restored.controller.importBackup("content://backup", "clave segura".toCharArray()))
         rig.controller.deleteContact(juan.id)
         assertEquals(listOf("Ana"), rig.controller.contacts.value.map { it.name })

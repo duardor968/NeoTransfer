@@ -23,6 +23,17 @@ class NoticesTest {
         assertEquals("50000009 te envió 300 CUP", Notices.credit(credit("5350000009"), emptyList()).title)
     }
 
+    @Test fun `money that never reached the bank is announced with its reason`() {
+        val request = dev.duardo.neotransfer.core.protocol.Transfer(Bank.BPA, dev.duardo.neotransfer.core.protocol.Source.Default(), "9204990000000007", Money.cup("50"))
+        val status = dev.duardo.neotransfer.core.ledger.OperationStatus(
+            dev.duardo.neotransfer.core.ledger.Operation("op", request, Instant.EPOCH),
+            dev.duardo.neotransfer.core.ledger.OperationState.NotExecuted(dev.duardo.neotransfer.core.ledger.NotExecutedReason.BUSY),
+        )
+        val notice = Notices.result(status, listOf(Contact("1", "Juan", cards = listOf("9204990000000007"))))
+        assertEquals("Transferencia de 50 CUP a Juan" to "No se ejecutó: el banco estaba ocupado", notice.title to notice.text)
+        assertEquals("Operación no ejecutada", notice.publicTitle)
+    }
+
     @Test fun amounts() {
         assertEquals("300 CUP", Notices.amount(Money.cup("300.00")))
         assertEquals("10,000 CUP", Notices.amount(Money.cup("10000"))) // es-CU follows es-419: comma groups, point decimals

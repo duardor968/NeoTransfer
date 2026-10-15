@@ -1,5 +1,6 @@
 package dev.duardo.neotransfer.engine
 
+import dev.duardo.neotransfer.core.backup.BackupCard
 import dev.duardo.neotransfer.core.backup.BackupContent
 import dev.duardo.neotransfer.core.backup.BackupFile
 import dev.duardo.neotransfer.core.backup.TrmImporter
@@ -92,7 +93,7 @@ class AppController(
     private val io: CoroutineDispatcher,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + state)
-    private val loaded = CompletableDeferred<Unit>()
+    private val startup = CompletableDeferred<Unit>()
 
     private val operationsById = linkedMapOf<String, Operation>()
     private val sms = mutableMapOf<Long, StoredSms>()
@@ -120,6 +121,8 @@ class AppController(
     private val _savedKeys = MutableStateFlow(emptySet<Bank>())
     private val _settings = MutableStateFlow(Settings())
     private val _locked = MutableStateFlow(true)
+    private val _loaded = MutableStateFlow(false)
+    private val _lastBackup = MutableStateFlow<Instant?>(null)
 
     /** Own cards in wallet order, each with its balance. */
     val cards: StateFlow<List<CardView>> = _cards
@@ -138,6 +141,10 @@ class AppController(
     val settings: StateFlow<Settings> = _settings
     /** True until the fingerprint unlocks the app, and again after 1 min in the background. */
     val locked: StateFlow<Boolean> = _locked
+    /** False until the stored state is in memory: before that every other flow is still empty. */
+    val loaded: StateFlow<Boolean> = _loaded
+    /** When the last encrypted backup was written. */
+    val lastBackup: StateFlow<Instant?> = _lastBackup
 
     init {
         scope.launch {
@@ -148,8 +155,9 @@ class AppController(
             _contacts.value = snapshot.contacts.sortedBy { it.name.lowercase() }
             _services.value = snapshot.services
             preferences = snapshot.preferences
-            loaded.complete(Unit)
+            startup.complete(Unit)
             publish()
+            _loaded.value = true
             ingest()
         }
     }
@@ -161,7 +169,7 @@ class AppController(
         scope.launch {
             foreground = true
             lockTimer?.cancel()
-            loaded.await()
+            startup.await()
             ingest()
         }
     }
@@ -180,7 +188,7 @@ class AppController(
 
     /** Permissions changed (READ_SMS may have just been granted): import what is missing. */
     fun onPermissionsChanged() {
-        scope.launch { loaded.await(); ingest() }
+        scope.launch { startup.await(); ingest() }
     }
 
     /**
@@ -188,7 +196,7 @@ class AppController(
      * later, so the inbox is read from the last `_id` a few times until it shows up.
      */
     fun onBankSms(): Job = scope.launch {
-        loaded.await()
+        startup.await()
         repeat(INBOX_POLLS) {
             if (ingest() > 0) return@launch
             delay(INBOX_POLL_INTERVAL.toMillis())
@@ -199,7 +207,7 @@ class AppController(
     fun onInboxChanged() {
         scope.launch {
             if (inboxCheck?.isActive == true) return@launch
-            inboxCheck = scope.launch { loaded.await(); ingest() }
+            inboxCheck = scope.launch { startup.await(); ingest() }
         }
     }
 
@@ -336,10 +344,16 @@ class AppController(
             contact.phones.map { requireNotNull(Phones.normalize(it)) { "El móvil $it no es válido" } }.distinct(),
             contact.cards.map { requireNotNull(Cards.normalize(it)) { "La tarjeta $it no tiene 16 dígitos" } }.distinct(),
         )
+        val labels = contact.labels.mapNotNull { (card, label) ->
+            val number = Cards.normalize(card)?.takeIf { it in clean.cards }
+            val name = label.split(Regex("\\s+")).filter(String::isNotEmpty).joinToString(" ")
+            if (number != null && name.isNotEmpty()) number to name else null
+        }.toMap()
         require(clean.name.isNotEmpty()) { "Escribe un nombre" }
-        store.saveContacts(listOf(clean))
-        _contacts.value = (_contacts.value.filterNot { it.id == clean.id } + clean).sortedBy { it.name.lowercase() }
-        clean
+        val saved = clean.copy(labels = labels)
+        store.saveContacts(listOf(saved))
+        _contacts.value = (_contacts.value.filterNot { it.id == saved.id } + saved).sortedBy { it.name.lowercase() }
+        saved
     }
 
     suspend fun deleteContact(id: String) = onState {
@@ -352,7 +366,7 @@ class AppController(
         val picked = withContext(io) { phoneContacts.read(uri) }
         val id = "phone:${picked.key}"
         val existing = _contacts.value.firstOrNull { it.id == id }
-        saveContact(Contact(id, existing?.name ?: picked.name, existing?.phones.orEmpty() + picked.phones, existing?.cards.orEmpty()))
+        saveContact(Contact(id, existing?.name ?: picked.name, existing?.phones.orEmpty() + picked.phones, existing?.cards.orEmpty(), existing?.labels.orEmpty()))
     }
 
     suspend fun saveService(service: ServiceReference) = onState {
@@ -372,9 +386,12 @@ class AppController(
     /** Writes the encrypted backup (format 4: cards, contacts, services; never keys) to [uri]. */
     suspend fun exportBackup(uri: String, password: CharArray) = onState {
         try {
-            val content = BackupContent(wallet.map { it.card }, _contacts.value, _services.value)
+            val content = BackupContent(wallet.map { BackupCard(it.card, it.holder, it.expiry) }, _contacts.value, _services.value)
             val file = withContext(io) { BackupFile.export(content, password) }
             withContext(io) { documents.write(uri, file) }
+            preferences = preferences.copy(lastBackup = clock())
+            store.savePreferences(preferences)
+            publish()
         } finally {
             password.fill('\u0000')
         }
@@ -401,7 +418,7 @@ class AppController(
 
     // ---- Engine ----
 
-    private suspend fun <T> onState(block: suspend () -> T): T = scope.async { loaded.await(); block() }.await()
+    private suspend fun <T> onState(block: suspend () -> T): T = scope.async { startup.await(); block() }.await()
 
     private fun ownCard(number: String): OwnCard =
         requireNotNull(_cards.value.firstOrNull { it.card.card.number == number }) { "Esa tarjeta no está en la cartera" }.card.card
@@ -418,6 +435,7 @@ class AppController(
         _blockedBanks.value = current.blockedBanks
         _savedKeys.value = preferences.keySavedAt.keys
         _settings.value = preferences.settings
+        _lastBackup.value = preferences.lastBackup
         if (previous != null) announce(previous, current, fresh)
         scheduleWake(listOfNotNull(current.wakeAt, current.session?.until).minOrNull())
         val next = current.next
@@ -501,7 +519,8 @@ class AppController(
 
     /**
      * Notifications come from comparing two evaluations: a credit SMS ingested now that adds a new
-     * incoming movement, and (with the app not in front) an operation that just got its result.
+     * incoming movement, and (with the app not in front) an operation that just got its result,
+     * money that did not go through included.
      */
     private fun announce(previous: LedgerView, current: LedgerView, fresh: List<SmsRecord>) {
         val settings = preferences.settings
@@ -514,7 +533,9 @@ class AppController(
         if (settings.resultNotifications && !foreground) {
             val before = previous.operations.associate { it.operation.id to it.state }
             current.operations.filter { (operation, state) ->
-                (state is OperationState.Confirmed || state is OperationState.Rejected) && before[operation.id]?.javaClass != state.javaClass
+                val result = state is OperationState.Confirmed || state is OperationState.Rejected ||
+                    (state is OperationState.NotExecuted && operation.request.duplicateKey != null)
+                result && before[operation.id]?.javaClass != state.javaClass
             }.forEach { notifier.post(Notices.result(it, _contacts.value)) }
         }
     }
@@ -567,11 +588,15 @@ class AppController(
     /** Adds what is missing; a contact already present (same id) gains the new phones and cards. */
     private suspend fun merge(content: BackupContent): ImportSummary {
         val numbers = wallet.mapTo(mutableSetOf()) { it.card.number }
-        val cards = content.cards.filter { numbers.add(it.number) }.map { WalletCard(it) }
+        val cards = content.cards.filter { numbers.add(it.card.number) }.map { WalletCard(it.card, it.holder, it.expiry) }
         val existing = _contacts.value.associateBy { it.id }
         val contacts = content.contacts.mapNotNull { incoming ->
             val current = existing[incoming.id] ?: return@mapNotNull incoming
-            current.copy(phones = (current.phones + incoming.phones).distinct(), cards = (current.cards + incoming.cards).distinct()).takeIf { it != current }
+            current.copy(
+                phones = (current.phones + incoming.phones).distinct(),
+                cards = (current.cards + incoming.cards).distinct(),
+                labels = incoming.labels + current.labels,
+            ).takeIf { it != current }
         }
         val services = content.services.distinctBy { it.kind to it.value }
             .filter { service -> _services.value.none { it.kind == service.kind && it.value == service.value } }

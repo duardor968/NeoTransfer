@@ -23,11 +23,12 @@ enum class Theme { SYSTEM, LIGHT, DARK }
 
 data class Settings(val theme: Theme = Theme.SYSTEM, val creditNotifications: Boolean = true, val resultNotifications: Boolean = true)
 
-/** User settings plus the engine's own facts: when each bank key was saved and whether the inbox was imported. */
+/** User settings plus the engine's own facts: when each bank key was saved, whether the inbox was imported, the last backup. */
 data class Preferences(
     val settings: Settings = Settings(),
     val keySavedAt: Map<Bank, Instant> = emptyMap(),
     val inboxImported: Boolean = false,
+    val lastBackup: Instant? = null,
 )
 
 data class Snapshot(
@@ -91,8 +92,10 @@ internal fun WalletCard.toEntity(position: Int) =
 internal fun CardEntity.toWalletCard() =
     WalletCard(OwnCard(number, Bank.valueOf(bank), Currency.valueOf(currency), alias), holder, expiry)
 
-internal fun Contact.toEntity() = ContactEntity(id, name, phones.joinToString("\n"), cards.joinToString("\n"))
-internal fun ContactEntity.toContact() = Contact(id, name, lines(phones), lines(cards))
+internal fun Contact.toEntity() =
+    ContactEntity(id, name, phones.joinToString("\n"), cards.joinToString("\n"), labels.entries.joinToString("\n") { "${it.key}\t${it.value}" })
+internal fun ContactEntity.toContact() =
+    Contact(id, name, lines(phones), lines(cards), lines(labels).associate { it.substringBefore('\t') to it.substringAfter('\t') })
 private fun lines(value: String) = value.split('\n').filter(String::isNotEmpty)
 
 internal fun ServiceReference.toEntity() = ServiceEntity(kind.name, value, label)
@@ -103,13 +106,15 @@ private const val CREDIT_NOTIFICATIONS = "notify.credits"
 private const val RESULT_NOTIFICATIONS = "notify.results"
 private const val KEY_SAVED = "key.saved."
 private const val INBOX_IMPORTED = "inbox.imported"
+private const val LAST_BACKUP = "backup.last"
 
 internal fun Preferences.toRows(): List<SettingEntity> = listOf(
     SettingEntity(THEME, settings.theme.name),
     SettingEntity(CREDIT_NOTIFICATIONS, settings.creditNotifications.toString()),
     SettingEntity(RESULT_NOTIFICATIONS, settings.resultNotifications.toString()),
     SettingEntity(INBOX_IMPORTED, inboxImported.toString()),
-) + keySavedAt.map { (bank, at) -> SettingEntity(KEY_SAVED + bank.name, at.toEpochMilli().toString()) }
+) + listOfNotNull(lastBackup?.let { SettingEntity(LAST_BACKUP, it.toEpochMilli().toString()) }) +
+    keySavedAt.map { (bank, at) -> SettingEntity(KEY_SAVED + bank.name, at.toEpochMilli().toString()) }
 
 internal fun List<SettingEntity>.toPreferences(): Preferences {
     val values = associate { it.key to it.value }
@@ -121,5 +126,6 @@ internal fun List<SettingEntity>.toPreferences(): Preferences {
         ),
         Bank.entries.mapNotNull { bank -> values[KEY_SAVED + bank.name]?.let { bank to Instant.ofEpochMilli(it.toLong()) } }.toMap(),
         values[INBOX_IMPORTED]?.toBooleanStrict() ?: false,
+        values[LAST_BACKUP]?.let { Instant.ofEpochMilli(it.toLong()) },
     )
 }

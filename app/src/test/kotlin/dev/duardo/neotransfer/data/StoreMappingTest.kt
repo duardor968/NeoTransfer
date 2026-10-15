@@ -32,7 +32,7 @@ class StoreMappingTest {
         val card = WalletCard(OwnCard("9225000000000001", Bank.BPA, Currency.USD, "Dólares"), "DUARDO R", "12/29")
         assertEquals(card, card.toEntity(3).toWalletCard())
         assertEquals(3, card.toEntity(3).position)
-        val contact = Contact("c1", "Juan", listOf("50000009", "52222222"), listOf("9204990000000007"))
+        val contact = Contact("c1", "Juan", listOf("50000009", "52222222"), listOf("9204990000000007", "9205990000000001"), mapOf("9204990000000007" to "Salario"))
         assertEquals(contact, contact.toEntity().toContact())
         assertEquals(Contact("c2", "Ana"), Contact("c2", "Ana").toEntity().toContact())
         val service = ServiceReference(ServiceKind.NAUTA, "usuario@nauta.com.cu", null)
@@ -41,8 +41,9 @@ class StoreMappingTest {
 
     @Test fun preferences() {
         val preferences = Preferences(Settings(Theme.DARK, creditNotifications = false, resultNotifications = true),
-            mapOf(Bank.BANDEC to at), inboxImported = true)
-        assertEquals(preferences.copy(keySavedAt = mapOf(Bank.BANDEC to Instant.ofEpochMilli(at.toEpochMilli()))), preferences.toRows().toPreferences())
+            mapOf(Bank.BANDEC to at), inboxImported = true, lastBackup = at)
+        val millis = Instant.ofEpochMilli(at.toEpochMilli())
+        assertEquals(preferences.copy(keySavedAt = mapOf(Bank.BANDEC to millis), lastBackup = millis), preferences.toRows().toPreferences())
         assertEquals(Preferences(), emptyList<SettingEntity>().toPreferences())
     }
 }
