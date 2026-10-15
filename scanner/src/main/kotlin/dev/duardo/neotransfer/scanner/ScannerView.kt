@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.SystemClock
 import android.provider.Settings
 import android.view.ViewGroup
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -144,7 +145,7 @@ fun ScannerView(
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 }
             }
-        }
+        }.apply { setMode(mode) }
     }
 
     var permitted by remember { mutableStateOf(context.cameraPermitted()) }
@@ -166,11 +167,12 @@ fun ScannerView(
         onDispose { if (permitted) session.unbind() }
     }
     LaunchedEffect(mode) {
-        session.setMode(mode)
-        flow.reset()
-        tracker.clear()
-        qr = flow.state
-        tracked = emptyList()
+        if (session.setMode(mode)) {
+            flow.reset()
+            tracker.clear()
+            qr = flow.state
+            tracked = emptyList()
+        }
     }
     SideEffect { session.analyzer.paused = photo != null || editing != null }
 
@@ -219,6 +221,7 @@ fun ScannerView(
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) openPhoto(uri)
     }
+    BackHandler(enabled = photo != null) { closePhoto() }
 
     val currentPhoto = photo
     val shown = currentPhoto?.numbers?.map { Shown(it.kind, it.digits, it.box) }

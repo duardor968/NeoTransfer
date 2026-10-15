@@ -113,11 +113,12 @@ internal fun ScanOverlay(
     var placed by remember { mutableStateOf(false) }
     LaunchedEffect(target) {
         val center = target.bounds().center
+        val first = !placed
         target.corners.forEachIndexed { index, point ->
             launch {
                 val to = Offset(point.x, point.y)
                 // First appearance: the frame shrinks in from a little larger.
-                if (!placed) corners[index].snapTo(to + (to - Offset(center.x, center.y)) * 0.25f)
+                if (first) corners[index].snapTo(to + (to - Offset(center.x, center.y)) * 0.25f)
                 corners[index].animateTo(to, spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMediumLow))
             }
         }

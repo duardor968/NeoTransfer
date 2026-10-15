@@ -51,8 +51,12 @@ internal class CameraSession(context: Context, onFrame: (Frame) -> Unit) {
         private set
     private var chosenZoomAt = 0L
     private var owner: LifecycleOwner? = null
+    private var mode: ScanMode? = null
 
-    fun setMode(mode: ScanMode) {
+    /** Changing the analysis size restarts the camera, so only a real change applies it; returns whether it changed. */
+    fun setMode(mode: ScanMode): Boolean {
+        if (mode == this.mode) return false
+        this.mode = mode
         analyzer.mode = mode
         // Text needs more pixels per character than QR codes.
         val target = if (mode == ScanMode.QR) Size(1280, 720) else Size(1920, 1080)
@@ -60,6 +64,7 @@ internal class CameraSession(context: Context, onFrame: (Frame) -> Unit) {
             .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
             .setResolutionStrategy(ResolutionStrategy(target, ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
             .build()
+        return true
     }
 
     fun bind(lifecycleOwner: LifecycleOwner) {
