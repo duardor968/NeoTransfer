@@ -17,9 +17,9 @@ android {
 }
 
 dependencies {
-    implementation(platform("androidx.compose:compose-bom:2026.04.01"))
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.foundation:foundation")
-    implementation("androidx.compose.material3:material3")
+    api(platform("androidx.compose:compose-bom:2026.04.01"))
+    api("androidx.compose.ui:ui")
+    api("androidx.compose.foundation:foundation")
+    api("androidx.compose.material3:material3")
     testImplementation(kotlin("test-junit"))
 }

@@ -56,9 +56,17 @@ android {
     // Fakes of the modem, inbox, vault and store shared by JVM and device tests.
     sourceSets["test"].kotlin.srcDir("src/sharedTest/kotlin")
     sourceSets["androidTest"].kotlin.srcDir("src/sharedTest/kotlin")
-    testOptions.unitTests.all { test ->
-        // Local-only import of a private Transfermóvil backup; absent on other machines.
-        System.getenv("NEOTRANSFER_TRM")?.let { test.environment("NEOTRANSFER_TRM", it) }
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            all {
+                it.systemProperty("roborazzi.test.record", "true")
+                it.systemProperty("screens", providers.gradleProperty("screens").getOrElse(""))
+                it.maxHeapSize = "3g"
+                // Local-only import of a private Transfermóvil backup; absent on other machines.
+                System.getenv("NEOTRANSFER_TRM")?.let { v -> it.environment("NEOTRANSFER_TRM", v) }
+            }
+        }
     }
 }
 
@@ -102,8 +110,15 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.lifecycle:lifecycle-process:2.10.0")
+    implementation("com.google.zxing:core:3.5.3")
+    "previewImplementation"("androidx.compose.ui:ui-test-manifest")
     testImplementation(kotlin("test-junit"))
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+    testImplementation(platform("androidx.compose:compose-bom:2026.04.01"))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.76.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.76.0")
     androidTestImplementation(kotlin("test-junit"))
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
