@@ -224,7 +224,8 @@ fun TransferAmountScreen(state: TransferAmountUi, actions: AmountActions, modifi
                 val name = state.recipient.name
                 NeoRow(
                     name ?: formatCardNumber(state.recipient.card.number),
-                    supporting = listOfNotNull(if (name != null) formatCardNumber(state.recipient.card.number) else null, state.recipient.card.bankName).joinToString(" · "),
+                    supporting = listOfNotNull(if (name != null) formatCardNumber(state.recipient.card.number) else null, state.recipient.card.bankName)
+                        .joinToString(" · ").ifEmpty { null },
                     leading = { if (name != null) NameAvatar(name) else IconAvatar(Ds.drawable.ic_credit_card) },
                 )
                 Spacer(Modifier.height(NeoSpace.xl))
@@ -303,7 +304,7 @@ fun DuplicateDialog(duplicate: DuplicateUi, onConfirm: () -> Unit, onDismiss: ()
     val first = duplicate.recipient.substringBefore(' ')
     NeoConfirmDialog(
         title = "¿Enviar otros $amount?",
-        text = "Ya enviaste $amount a $first ${timeLabels.ago(duplicate.sentAt)} y aún no llegó la respuesta.",
+        text = "Ya enviaste $amount a $first ${timeLabels.ago(duplicate.sentAt).let { if (it == "ahora") "hace un momento" else it }} y aún no llegó la respuesta.",
         confirm = "Enviar otros $amount",
         dismiss = "Cancelar",
         onConfirm = onConfirm,

@@ -51,6 +51,7 @@ import dev.duardo.neotransfer.designsystem.component.MoneyText
 import dev.duardo.neotransfer.designsystem.component.NeoButton
 import dev.duardo.neotransfer.designsystem.component.NeoGroup
 import dev.duardo.neotransfer.designsystem.component.NeoRow
+import dev.duardo.neotransfer.designsystem.component.NeoSegmented
 import dev.duardo.neotransfer.designsystem.component.NeoTextField
 import dev.duardo.neotransfer.designsystem.component.NeoTopBar
 import dev.duardo.neotransfer.designsystem.component.SecureWindow
@@ -181,6 +182,7 @@ private fun ServiceTile(reference: SavedReferenceUi, modifier: Modifier, onClick
 
 interface ServiceFormActions {
     fun back()
+    fun choice(index: Int)
     fun reference(id: String?)
     fun field(id: String, value: String)
     fun amount(value: String)
@@ -216,6 +218,7 @@ fun ServiceFormScreen(state: ServiceFormUi, actions: ServiceFormActions, modifie
                     }
                 }
                 Column(Modifier.padding(horizontal = NeoSpace.gutter), verticalArrangement = Arrangement.spacedBy(NeoSpace.m)) {
+                    if (state.choices.isNotEmpty()) NeoSegmented(state.choices.indices.toList(), state.choice, state.choices::get, actions::choice)
                     state.fields.forEach { field ->
                         NeoTextField(
                             field.value, { actions.field(field.id, it) }, field.label,

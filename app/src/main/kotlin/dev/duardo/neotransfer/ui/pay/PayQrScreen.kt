@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
@@ -24,19 +23,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import android.app.Activity
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.ui.platform.LocalView
-import androidx.core.view.WindowCompat
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -46,10 +36,13 @@ import dev.duardo.neotransfer.designsystem.component.MoneyText
 import dev.duardo.neotransfer.designsystem.component.NeoButton
 import dev.duardo.neotransfer.designsystem.component.NeoButtonStyle
 import dev.duardo.neotransfer.designsystem.component.NeoTextField
+import dev.duardo.neotransfer.designsystem.component.SummaryLine
+import dev.duardo.neotransfer.designsystem.component.SummaryLines
 import dev.duardo.neotransfer.designsystem.format.formatMoney
 import dev.duardo.neotransfer.designsystem.theme.Neo
 import dev.duardo.neotransfer.designsystem.theme.NeoRadius
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
+import dev.duardo.neotransfer.ui.common.LightSystemBars
 import dev.duardo.neotransfer.ui.common.SourceCardPicker
 import dev.duardo.neotransfer.ui.model.PayQrUi
 import dev.duardo.neotransfer.ui.model.PayReviewUi
@@ -57,8 +50,6 @@ import java.math.BigDecimal
 
 interface PayQrActions {
     fun close()
-    fun torch()
-    fun gallery()
     fun amount(value: String)
     fun reference(value: String)
     fun source(index: Int)
@@ -67,16 +58,15 @@ interface PayQrActions {
 }
 
 /**
- * Pay a merchant QR. The camera fills the screen ([cameraContent] comes from the scanner module); once a code is
- * read, the review rises from the bottom with only what can still change.
+ * Pay a merchant QR. The camera fills the screen ([cameraContent] is the scanner module's view, with its own frame,
+ * gallery and torch); once a code is read, the review rises from the bottom with only what can still change.
  */
 @Composable
 fun PayQrScreen(state: PayQrUi, actions: PayQrActions, cameraContent: @Composable () -> Unit, modifier: Modifier = Modifier) {
-    LightSystemIcons()
+    LightSystemBars()
     Box(modifier.fillMaxSize().background(Color.Black)) {
         cameraContent()
-        if (state is PayQrUi.Scanning) Viewfinder(Modifier.align(Alignment.Center))
-        CameraBar(state, actions, Modifier.align(Alignment.TopCenter))
+        CameraBar(actions, Modifier.align(Alignment.TopCenter))
         AnimatedVisibility(
             visible = state !is PayQrUi.Scanning,
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -94,32 +84,14 @@ fun PayQrScreen(state: PayQrUi, actions: PayQrActions, cameraContent: @Composabl
     }
 }
 
-/** Over the camera the status bar icons are always light, whatever the theme. */
 @Composable
-private fun LightSystemIcons() {
-    val view = LocalView.current
-    DisposableEffect(view) {
-        val window = (view.context as? Activity)?.window
-        val controller = window?.let { WindowCompat.getInsetsController(it, view) }
-        val previous = controller?.isAppearanceLightStatusBars
-        controller?.isAppearanceLightStatusBars = false
-        onDispose { if (previous != null) controller.isAppearanceLightStatusBars = previous }
-    }
-}
-
-@Composable
-private fun CameraBar(state: PayQrUi, actions: PayQrActions, modifier: Modifier) {
+private fun CameraBar(actions: PayQrActions, modifier: Modifier) {
     Row(
         modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = NeoSpace.s, vertical = NeoSpace.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CameraButton(Ds.drawable.ic_close, "Cerrar", actions::close)
         Text("Pagar", Modifier.weight(1f).padding(start = NeoSpace.m), style = MaterialTheme.typography.titleLarge, color = Color.White)
-        if (state is PayQrUi.Scanning) {
-            CameraButton(Ds.drawable.ic_photo_library, "Elegir imagen", actions::gallery)
-            Spacer(Modifier.size(NeoSpace.s))
-            CameraButton(if (state.torch) Ds.drawable.ic_flashlight_on else Ds.drawable.ic_flashlight_off, if (state.torch) "Apagar linterna" else "Encender linterna", actions::torch)
-        }
     }
 }
 
@@ -128,35 +100,6 @@ private fun CameraButton(icon: Int, description: String, onClick: () -> Unit) {
     IconButton(onClick, Modifier.size(48.dp).background(Color.Black.copy(alpha = 0.38f), CircleShape)) {
         Icon(painterResource(icon), description, tint = Color.White)
     }
-}
-
-/** Four corner brackets; the scanner module animates detection inside the same square. */
-@Composable
-private fun Viewfinder(modifier: Modifier) {
-    Box(
-        modifier.size(248.dp).drawBehind {
-            val stroke = 4.dp.toPx()
-            val arm = 36.dp.toPx()
-            val r = 20.dp.toPx()
-            val w = size.width
-            val h = size.height
-            val corners = listOf(
-                Triple(Offset(0f, 0f), 1f, 1f),
-                Triple(Offset(w, 0f), -1f, 1f),
-                Triple(Offset(0f, h), 1f, -1f),
-                Triple(Offset(w, h), -1f, -1f),
-            )
-            corners.forEach { (o, dx, dy) ->
-                val path = Path().apply {
-                    moveTo(o.x, o.y + dy * arm)
-                    lineTo(o.x, o.y + dy * r)
-                    quadraticTo(o.x, o.y, o.x + dx * r, o.y)
-                    lineTo(o.x + dx * arm, o.y)
-                }
-                drawPath(path, Color.White, style = Stroke(stroke, cap = StrokeCap.Round))
-            }
-        },
-    )
 }
 
 @Composable
@@ -194,7 +137,8 @@ private fun Review(review: PayReviewUi, actions: PayQrActions) {
             val amount = review.amountInput.toBigDecimalOrNull() ?: BigDecimal.ZERO
             MoneyText(amount, review.currency, Modifier.padding(vertical = NeoSpace.xs), style = MaterialTheme.typography.displaySmall, hero = true)
         }
-        NeoTextField(review.reference, actions::reference, review.referenceLabel)
+        if (review.referenceEditable) NeoTextField(review.reference, actions::reference, review.referenceLabel)
+        else SummaryLines(listOf(SummaryLine(review.referenceLabel, review.reference)))
         SourceCardPicker(review.sources, review.source, actions::source)
         val amount = review.amountInput.toBigDecimalOrNull()
         NeoButton(

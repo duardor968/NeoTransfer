@@ -1,5 +1,6 @@
 package dev.duardo.neotransfer.preview
 
+import android.app.Application
 import androidx.compose.ui.test.junit4.createComposeRule
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.captureScreenRoboImage
@@ -18,7 +19,8 @@ import org.robolectric.annotation.GraphicsMode
  */
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(sdk = [35], qualifiers = "w412dp-h915dp-xhdpi")
+// A plain Application: screens need no engine, and Robolectric has no AndroidKeyStore for the real one.
+@Config(sdk = [35], qualifiers = "w412dp-h915dp-xhdpi", application = Application::class)
 class ScreenshotTest(private val screen: String, private val mode: String) {
 
     @get:Rule

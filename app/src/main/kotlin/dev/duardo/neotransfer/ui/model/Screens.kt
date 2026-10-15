@@ -149,7 +149,8 @@ data class FieldUi(
 
 /**
  * Payment of a service. [amount] null when the bank charges the bill as issued; [due] is the bill when known.
- * [saveReference] null when paying a saved reference.
+ * [saveReference] null when paying a saved reference. [choices] splits one service in its variants (water by
+ * region, Nauta Hogar recharge or debt).
  */
 @Immutable
 data class ServiceFormUi(
@@ -166,6 +167,8 @@ data class ServiceFormUi(
     val saveReference: Boolean? = null,
     val canContinue: Boolean = false,
     val action: String,
+    val choices: List<String> = emptyList(),
+    val choice: Int = 0,
 )
 
 enum class CubacelQuery(val label: String) { Balance("Saldo"), Data("Datos"), Voice("Minutos"), Sms("SMS"), Bonus("Bonos") }
@@ -234,6 +237,8 @@ data class PayReviewUi(
     val amountEditable: Boolean,
     val reference: String,
     val referenceLabel: String,
+    /** A description the payer may write; otherwise the code's own id or description, read-only. */
+    val referenceEditable: Boolean,
     val currency: String,
     val sources: List<WalletCardUi>,
     val source: Int,
@@ -243,7 +248,7 @@ data class PayReviewUi(
 
 @Immutable
 sealed interface PayQrUi {
-    data class Scanning(val torch: Boolean) : PayQrUi
+    data object Scanning : PayQrUi
     data class Review(val review: PayReviewUi) : PayQrUi
     data class Unsupported(val message: String) : PayQrUi
 }

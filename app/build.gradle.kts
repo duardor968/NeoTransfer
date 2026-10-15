@@ -23,6 +23,8 @@ android {
         versionCode = 100
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Android 15+ phones are 64-bit ARM; the ML Kit and CameraX natives ship for that ABI only.
+        ndk { abiFilters += "arm64-v8a" }
     }
 
     buildFeatures { compose = true }
@@ -40,6 +42,9 @@ android {
         }
         getByName("release") {
             isDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("localRelease")
         }
         create("preview") {

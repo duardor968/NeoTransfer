@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Window and system splash in the app's own background, so opening it never flashes another color.
+         The app's Sistema/Claro/Oscuro setting reaches these through UiModeManager.setApplicationNightMode. -->
+    <style name="Theme.NeoTransfer" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window</item>
+        <item name="android:windowSplashScreenBackground">@color/window</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_neotransfer_foreground</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

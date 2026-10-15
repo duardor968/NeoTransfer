@@ -1,10 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- The preview build runs on a simulated bank: no real USSD or SMS ever leaves or enters it. -->
+    <application
+        android:name=".preview.PreviewApplication"
+        tools:replace="android:name">
         <activity
             android:name=".preview.PreviewActivity"
             android:exported="true"
             android:label="NeoTransfer preview"
             android:windowSoftInputMode="adjustResize" />
+        <receiver
+            android:name=".preview.FakeSms"
+            android:exported="true"
+            tools:ignore="ExportedReceiver" />
     </application>
 </manifest>

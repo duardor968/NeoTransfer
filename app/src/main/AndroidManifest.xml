@@ -9,6 +9,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-feature android:name="android.hardware.telephony" android:required="true" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+
     <application
         android:name=".engine.NeoTransferApplication"
         android:allowBackup="false"
@@ -17,11 +18,33 @@
         android:roundIcon="@mipmap/ic_neotransfer_round"
         android:label="NeoTransfer"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.Material.NoActionBar">
-        <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
+        android:theme="@style/Theme.NeoTransfer">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density|fontScale"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Online payment links, as Transfermóvil publishes them: they open the payment review.
+                 The domain is not ours, so the system asks which app opens them (no App Link verification). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="transfermovil" android:host="tm_compra_en_linea" android:path="/action" />
+            </intent-filter>
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:scheme="http" />
+                <data android:host="transfermovil.app" />
+                <data android:path="/action" />
             </intent-filter>
             <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>

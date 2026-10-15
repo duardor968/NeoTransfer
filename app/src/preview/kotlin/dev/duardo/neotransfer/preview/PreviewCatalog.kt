@@ -312,16 +312,16 @@ object PreviewCatalog {
         },
 
         // Pay and receive -------------------------------------------------------------------------------------
-        "pay-scanning" to { PayQrScreen(PayQrUi.Scanning(torch = false), noop(), { FakeCamera() }) },
+        "pay-scanning" to { PayQrScreen(PayQrUi.Scanning, noop(), { FakeCamera() }) },
         "pay-review" to {
             PayQrScreen(
-                PayQrUi.Review(PayReviewUi("Cafetería La Esquina", "480.00", false, "CLE-00417", "ID de pago", "CUP", wallet, 0, canPay = true)),
+                PayQrUi.Review(PayReviewUi("Cafetería La Esquina", "480.00", false, "CLE-00417", "ID de pago", false, "CUP", wallet, 0, canPay = true)),
                 noop(), { FakeCamera() },
             )
         },
         "pay-review-open-amount" to {
             PayQrScreen(
-                PayQrUi.Review(PayReviewUi("Mercado La Plaza", "", true, "", "Número de confirmación", "CUP", wallet, 1, canPay = false)),
+                PayQrUi.Review(PayReviewUi("Mercado La Plaza", "", true, "", "Descripción", true, "CUP", wallet, 1, canPay = false)),
                 noop(), { FakeCamera() },
             )
         },
