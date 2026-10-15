@@ -182,11 +182,11 @@ fun HomeScreen(state: HomeUi, actions: HomeActions, modifier: Modifier = Modifie
                     QuickActionItem(Ds.drawable.ic_south_west, "Cobrar", actions::receive),
                     QuickActionItem(Ds.drawable.ic_smartphone, "Recargar", actions::recharge),
                 ),
-                Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.xxl),
+                Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.xl),
             )
         }
         if (state.inProgress.isNotEmpty()) item(key = "progress") {
-            Column(Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.l)) {
+            Column(Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.m)) {
                 SectionHeader("Pendientes")
                 NeoGroup {
                     state.inProgress.forEachIndexed { index, operation ->
@@ -198,7 +198,7 @@ fun HomeScreen(state: HomeUi, actions: HomeActions, modifier: Modifier = Modifie
         }
         item(key = "recent") {
             val recent = state.recent
-            Column(Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.l)) {
+            Column(Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.m)) {
                 SectionHeader("Actividad reciente", action = if (!recent.isNullOrEmpty()) "Ver todo" else null, onAction = actions::allActivity)
                 // Nothing yet: one quiet line where the list will be, no box around it.
                 if (recent != null && recent.isEmpty()) Text(

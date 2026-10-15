@@ -268,8 +268,8 @@ data class QuickActionItem(@param:DrawableRes val icon: Int, val label: String, 
 /**
  * Shortcuts in rows of up to [columns]: the first and last columns sit on the edges and the rest spread evenly,
  * so every row lines up with the screen's margins. Labels keep the user's font size and wrap to two lines at word
- * breaks; when a single word would not fit, the grid drops to three columns first and only then steps the size
- * down, the same for every label, so a grid never mixes sizes.
+ * breaks. When a single word would not fit, a grid of several rows drops to three columns first; a single row never
+ * reflows (it would leave one shortcut alone below). Then the size steps down, the same for every label.
  */
 @Composable
 fun QuickActionGrid(items: List<QuickActionItem>, modifier: Modifier = Modifier, columns: Int = 4) {
@@ -280,7 +280,7 @@ fun QuickActionGrid(items: List<QuickActionItem>, modifier: Modifier = Modifier,
         fun widthOf(text: String) = with(density) { measurer.measure(text, base, maxLines = 1).size.width.toDp() }
         val longestWord = items.flatMap { it.label.split(' ') }.maxOf(::widthOf)
         val longestLabel = items.maxOf { widthOf(it.label) }
-        val count = if (columns > 3 && (maxWidth / columns - NeoSpace.s) < longestWord) 3 else columns
+        val count = if (items.size > columns && columns > 3 && (maxWidth / columns - NeoSpace.s) < longestWord) 3 else columns
         val room = maxWidth / count - NeoSpace.s
         val scale = (room / longestWord).coerceAtMost(1f)
         val cell = (longestLabel * scale).coerceIn(64.dp, room)
