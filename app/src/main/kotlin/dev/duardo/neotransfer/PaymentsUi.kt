@@ -24,10 +24,10 @@ internal fun MoneyForm(page: PaymentPage, state: AppUiState, actions: UiActions,
                        change: (PaymentDraft) -> Unit, back: () -> Unit, review: (MoneyAction) -> Unit,
                        configure: (ProviderIdentity) -> Unit, addSource: () -> Unit,
                        scan: (Boolean, (String) -> Unit) -> Unit) {
-    val products = walletProducts(state).filter { it.currency != Currency.CUC && it.identity.bank != null && it.identity.bank != Bank.BFI &&
+    val products = walletProducts(state, includeEnzona = false).filter { it.currency != Currency.CUC && it.identity.bank != null && it.identity.bank != Bank.BFI &&
         (page == PaymentPage.TRANSFER || it.identity.bank in listOf(Bank.BPA, Bank.BANDEC)) &&
         (it.source == SourceSelector.Default || it.source.wireValue.matches(Regex("[0-9]{16}"))) }
-    var productId by rememberSaveable { mutableStateOf(initialCompatibleProduct(state, products)?.id) }
+    var productId by rememberSaveable { mutableStateOf(if (state.enzonaWallet.selectedCardId != null) null else initialCompatibleProduct(state, products)?.id) }
     var currency by rememberSaveable { mutableStateOf<String?>(null) }
     var agenda by remember { mutableStateOf(false) }
     var phoneAgenda by remember { mutableStateOf(false) }
@@ -121,13 +121,13 @@ internal fun MoneyReview(action: MoneyAction, state: AppUiState, actions: UiActi
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun QrPaymentReview(qr: QrPayment, state: AppUiState, actions: UiActions, dismiss: () -> Unit, addSource: () -> Unit, configure: (ProviderIdentity) -> Unit) {
-    val products = walletProducts(state).filter { it.currency != Currency.CUC &&
+    val products = walletProducts(state, includeEnzona = false).filter { it.currency != Currency.CUC &&
         when {
             it.identity.provider == ProviderId.MITRANSFER -> it.identity.profile in setOf(ProfileId.PERSONAL, ProfileId.CLASSIC)
             else -> it.identity.bank != null && (it.currency == null || it.currency == qr.amount.currency)
         }
     }
-    var productId by rememberSaveable { mutableStateOf(initialCompatibleProduct(state, products)?.id) }
+    var productId by rememberSaveable { mutableStateOf(if (state.enzonaWallet.selectedCardId != null) null else initialCompatibleProduct(state, products)?.id) }
     val product = products.firstOrNull { it.id == productId }
     val bank = product?.identity?.bank
     var amount by rememberSaveable(qr.transactionId) { mutableStateOf(if (qr.editableAmount) "" else qr.amount.amount.toPlainString()) }

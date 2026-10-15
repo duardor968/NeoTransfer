@@ -464,6 +464,9 @@ class BankingChecks : Instrumentation() {
                 }
             }
             passed += BankingDataChecks.run(targetContext, ::recordGroupPass)
+            passed += dev.duardo.neotransfer.enzona.data.EnzonaDataChecks.run(targetContext, ::recordGroupPass)
+            passed += dev.duardo.neotransfer.enzona.EnzonaSessionStorageChecks.run(targetContext, ::recordGroupPass)
+            passed += dev.duardo.neotransfer.backup.EnzonaBackupChecks.run(targetContext, ::recordGroupPass)
             progress("Controller timeout checks")
             passed += ControllerTimeoutChecks.run(targetContext, ::recordGroupPass)
             checkNotifications()

@@ -13,23 +13,11 @@ import androidx.compose.runtime.*
 import dev.duardo.neotransfer.core.*
 import dev.duardo.neotransfer.data.*
 import dev.duardo.neotransfer.platform.BankSmsRecord
-import dev.duardo.neotransfer.platform.TelecomSmsController
-import dev.duardo.neotransfer.platform.TelecomSmsStore
-import dev.duardo.neotransfer.platform.TelecomSmsRuntime
-import dev.duardo.neotransfer.platform.TelecomSmsTransport
-import dev.duardo.neotransfer.platform.TelecomSmsRecord
-import dev.duardo.neotransfer.fuel.FuelController
 import java.math.BigDecimal
 import java.time.Instant
 
 /** Isolated visual test APK. No telephony or SMS permissions and no BankController instance. */
 class PreviewActivity : ComponentActivity() {
-    private var previewFuel: FuelController? = null
-
-    override fun onStop() {
-        previewFuel?.clearSensitive()
-        super.onStop()
-    }
     override fun getResources(): Resources {
         val original = super.getResources()
         val scale = intent?.getFloatExtra("fontScale", original.configuration.fontScale)?.coerceIn(1f, 2f)
@@ -41,32 +29,14 @@ class PreviewActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        intent.getStringExtra("theme")?.takeIf { value -> ThemePreference.entries.any { it.name == value } }?.let {
+            getSharedPreferences("appearance", MODE_PRIVATE).edit().putString("theme", it).apply()
+        }
         setContent {
             val domainFixtures = remember { previewDomainFixtures() }
-            val telecom = remember {
-                val records = linkedMapOf<String, TelecomSmsRecord>()
-                val changes = getSharedPreferences("telecom_info_sms", MODE_PRIVATE)
-                lateinit var simulator: TelecomSmsController
-                simulator = TelecomSmsController(object : TelecomSmsStore {
-                    override fun get(id: String) = records[id]
-                    override fun records() = records.values.toList().sortedByDescending { it.draft.createdAtMillis }
-                    override fun put(record: TelecomSmsRecord): Boolean {
-                        records[record.draft.id] = record
-                        changes.edit().putLong("preview_revision", System.nanoTime()).apply()
-                        return true
-                    }
-                }, object : TelecomSmsRuntime {
-                    override fun hasSendPermission() = true
-                    override fun isActiveSubscription(subscriptionId: Int) = subscriptionId == 1
-                }, TelecomSmsTransport { draft ->
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                        simulator.onSentCallback(draft.id, draft.callbackToken, true, android.app.Activity.RESULT_OK)
-                    }, 500)
-                })
-                simulator
-            }
             var state by remember { mutableStateOf(fixture(intent.getStringExtra("scenario")).let { initial ->
-                initial.copy(wallet = initial.wallet.copy(fuelCoupons = domainFixtures.fuelCoupons,
+                if (intent.getStringExtra("scenario")?.startsWith("enzona") == true) withEnzonaPreview(initial)
+                else initial.copy(wallet = initial.wallet.copy(fuelCoupons = domainFixtures.fuelCoupons,
                     operations = initial.wallet.operations + domainFixtures.miTurnoRequests))
             }) }
             LaunchedEffect(Unit) {
@@ -76,14 +46,14 @@ class PreviewActivity : ComponentActivity() {
                         Money(BigDecimal("350.00"), Currency.CUP), "LATE-DEMO", null))
                 }
             }
-            val fuel = remember { FuelController(domainFixtures.fuelSecretStore,
-                readEnvelope = { id, revision -> domainFixtures.protectedFuelEnvelopes[id]?.takeIf { it.revision == revision } },
-                currentCoupon = { id -> state.wallet.fuelCoupons.singleOrNull { it.id == id } }) }
-            DisposableEffect(fuel) { previewFuel = fuel; onDispose { previewFuel = null; fuel.close() } }
             fun updateWallet(change: (WalletSnapshot) -> WalletSnapshot) { state = state.copy(wallet = change(state.wallet)) }
             fun selectProduct(id: String) {
+                if (id.startsWith("enzona:")) {
+                    state = state.copy(enzonaWallet = state.enzonaWallet.copy(selectedCardId = id.removePrefix("enzona:")))
+                    return
+                }
                 val product = walletProducts(state).firstOrNull { it.id == id } ?: return
-                state = state.copy(selectedProductId = id, bank = product.identity.bank ?: state.bank,
+                state = state.copy(enzonaWallet = state.enzonaWallet.copy(selectedCardId = null), selectedProductId = id, bank = product.identity.bank ?: state.bank,
                     wallet = state.wallet.copy(settings = state.wallet.settings.copy(selectedRegistrationId = product.registrationId,
                         selectedCardId = product.card?.id, selectedAccountId = product.account?.id)))
             }
@@ -119,7 +89,8 @@ class PreviewActivity : ComponentActivity() {
                 clearContact = { state = state.copy(contact = null) }, lock = { state = state.copy(unlocked = false) },
                 resolveUncertain = { id, _ -> state = state.copy(uncertain = state.uncertain.filterNot { it.id == id }) },
                 resetCredentials = { state = state.copy(unlocked = false, hasCredentials = false) },
-                protectScreen = { if (it) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE) else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) },
+                // This isolated variant has synthetic data and no Internet permission; allow visual QA.
+                protectScreen = { },
                 share = { state = state.copy(notice = "Comprobante de prueba preparado") },
                 selectProduct = ::selectProduct,
                 selectRegistration = { id ->
@@ -163,17 +134,29 @@ class PreviewActivity : ComponentActivity() {
                 runService = ::simulateService, runQrService = { request, _ -> simulateService(request) },
                 validateService = OperationCatalog::validate,
                 clearServiceResult = { state = state.copy(serviceResult = null) },
+                connectEnzona = { state = withEnzonaPreview(state) },
+                disconnectEnzona = { state = state.copy(enzonaSession = dev.duardo.neotransfer.enzona.EnzonaSessionUiState(), enzonaWallet = dev.duardo.neotransfer.enzona.EnzonaWalletState()) },
+                refreshEnzonaCards = { state = state.copy(notice = "Tarjetas de demostración") },
+                refreshEnzonaActivity = { state = state.copy(notice = "Actividad de demostración") },
+                saveEnzonaCard = { id, pan, alias ->
+                    val owner = requireNotNull(state.enzonaWallet.owner)
+                    val link = dev.duardo.neotransfer.enzona.data.EnzonaCardLink(owner, id, pan, alias)
+                    state = state.copy(enzonaWallet = state.enzonaWallet.copy(links =
+                        state.enzonaWallet.links.filterNot { it.ownerSubject == owner && it.cardUuid == id } + link))
+                },
+                payEnzona = { _, password, done -> password.fill('\u0000'); done("Demostración: no se envió ningún pago") },
+                resolveEnzonaQr = { _, done -> done(enzonaQrPreview()) },
+                createEnzonaQr = { amount, currency, description, done -> done(dev.duardo.neotransfer.enzona.EnzonaOwnQr(
+                    "demo@invalid", "05-QR-DE-DEMOSTRACION", amount, currency, description, System.currentTimeMillis())) },
+                queryEnzonaService = { service, reference, done -> done(enzonaInvoicePreview(service, reference)) },
                 exportBackup = { state = state.copy(notice = "El respaldo se comprueba en la aplicación de pruebas instrumentadas") },
                 importBackup = { state = state.copy(notice = "La importación se comprueba en la aplicación de pruebas instrumentadas") },
                 importTransfermovil = { state = state.copy(notice = "La importación se comprueba en la aplicación de pruebas instrumentadas") },
                 importContacts = { updateWallet { it.copy(contacts = it.contacts + ContactRecord("import-demo", "Contacto importado", listOf(ContactPhone("50000009")))) } },
-                renameFuel = { id, label -> updateWallet { wallet -> wallet.copy(fuelCoupons = wallet.fuelCoupons.map { if (it.id == id) it.copy(label = label.trim()) else it }) } },
-                archiveFuel = { id, archived -> updateWallet { wallet -> wallet.copy(fuelCoupons = wallet.fuelCoupons.map { if (it.id == id) it.copy(archived = archived) else it }) } },
-                authorizeFuel = { _, _, result -> result(true) },
             ), initialQr = if (intent.getStringExtra("scenario") == "qr") QrPayment.parse(mapOf(
                 "id_transaccion" to "ESTATICO-123", "importe" to "25.00", "moneda" to "CUP",
                 "numero_proveedor" to "123", "descripcion" to "Compra de prueba")) else null,
-                telecomController = telecom, smsPermission = true, fuelController = fuel)
+                initialEnzonaQr = if (intent.getStringExtra("scenario") == "enzona-qr") enzonaQrPreview() else null)
         }
     }
 

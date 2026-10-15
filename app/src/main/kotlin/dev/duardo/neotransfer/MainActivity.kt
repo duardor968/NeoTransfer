@@ -28,18 +28,26 @@ import dev.duardo.neotransfer.platform.AccessCredentials
 import dev.duardo.neotransfer.platform.BiometricGate
 import dev.duardo.neotransfer.platform.TransferNotifications
 import dev.duardo.neotransfer.platform.ContactImporter
-import dev.duardo.neotransfer.platform.TelecomSmsController
-import dev.duardo.neotransfer.fuel.FuelController
 import dev.duardo.neotransfer.backup.BackupFlow
 import dev.duardo.neotransfer.backup.BackupPreferences
 import dev.duardo.neotransfer.backup.BackupTheme
 import dev.duardo.neotransfer.backup.BackupUi
+import dev.duardo.neotransfer.enzona.clearEnzonaWebSession
+import dev.duardo.neotransfer.enzona.EnzonaPaymentDraft
+import dev.duardo.neotransfer.enzona.data.EnzonaIntentState
 
 class MainActivity : ComponentActivity() {
     private val neoApplication get() = application as NeoTransferApplication
     private val controller get() = neoApplication.controller
     private var biometric: CancellationSignal? = null
     private var biometricActive by mutableStateOf(false)
+    private var enzonaPaymentActive by mutableStateOf(false)
+    private var enzonaQrActive by mutableStateOf(false)
+    private var enzonaServiceActive by mutableStateOf(false)
+    private var enzonaChangingAccess by mutableStateOf(false)
+    private val enzonaPaymentAccess = dev.duardo.neotransfer.enzona.EnzonaPaymentAccess()
+    private var cancelEnzonaReview: (() -> Unit)? = null
+    private var enzonaPaymentUpdates: kotlinx.coroutines.Job? = null
     private var accessRecoveryAvailable by mutableStateOf(false)
     private var biometricCleanup: (() -> Unit)? = null
     private var permissionsVersion by mutableIntStateOf(0)
@@ -47,18 +55,10 @@ class MainActivity : ComponentActivity() {
     private var screenHasSecrets = true
     private var permissionRequestActive = false
     private var initialPermissionCheckPending = true
-    private var resumed = false
+    @Volatile private var resumed = false
     private var incomingPayment by mutableStateOf<String?>(null)
     private var incomingReceiptId by mutableStateOf<String?>(null)
     private val transferNotifications by lazy { TransferNotifications(this) }
-    private val telecomSms by lazy { TelecomSmsController.android(this) }
-    private val fuel by lazy { FuelController(neoApplication.fuelSecrets,
-        readEnvelope = { id, revision ->
-            val coupon = neoApplication.wallet.snapshot.fuelCoupons.singleOrNull { it.id == id && it.secretRevision == revision }
-            if (coupon == null) null else withContext(Dispatchers.IO) {
-                neoApplication.wallet.repository.protectedFuelEnvelopes(listOf(coupon)).singleOrNull()
-            }
-        }, currentCoupon = { id -> neoApplication.wallet.snapshot.fuelCoupons.singleOrNull { it.id == id } }) }
     private lateinit var backupFlow: BackupFlow
     private val requestPermissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         permissionRequestActive = false
@@ -130,20 +130,38 @@ class MainActivity : ComponentActivity() {
         controller.onSystemDial = ::sendSystemDial
         initializeBackupFlow()
         setContent {
-            LaunchedEffect(controller.unlocked) { if (!controller.unlocked) fuel.clearSensitive() }
             permissionsVersion // Recheck after the system permission dialog.
+            val enzonaSession by neoApplication.enzonaSession.uiState.collectAsState()
+            val enzonaWallet by neoApplication.enzonaWallet.state.collectAsState()
+            LaunchedEffect(controller.unlocked) {
+                if (controller.unlocked) neoApplication.enzonaSession.loadSavedSession()
+                else {
+                    neoApplication.enzonaSession.suspendAccess()
+                    neoApplication.enzonaWallet.activate(null)
+                }
+            }
+            LaunchedEffect(controller.unlocked, enzonaSession.ownerSubject) {
+                val owner = enzonaSession.ownerSubject.takeIf { controller.unlocked }
+                neoApplication.enzonaWallet.activate(owner)
+            }
+            LaunchedEffect(controller.unlocked, enzonaSession.pendingCardRefreshOwner, enzonaWallet.owner, enzonaWallet.busy) {
+                val owner = enzonaSession.ownerSubject.takeIf { controller.unlocked }
+                if (owner != null && enzonaWallet.owner == owner && !enzonaWallet.busy &&
+                    neoApplication.enzonaSession.consumeCardRefresh(owner)) neoApplication.enzonaWallet.refreshCards()
+            }
             LaunchedEffect(neoApplication.wallet.ready) { if (neoApplication.wallet.ready) maybeUnlockAutomatically() }
             val allPermissions = BANK_PERMISSIONS.all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
             NeoTransferApp(
                 state = AppUiState(controller.unlocked, controller.vault.hasStoredMaterial(), controller.bank,
-                    controller.subscription, controller.sims, controller.configuredBanks, controller.busy || biometricActive || !neoApplication.wallet.ready,
+                    controller.subscription, controller.sims, controller.configuredBanks, controller.busy || biometricActive || enzonaPaymentActive || enzonaQrActive || enzonaServiceActive || enzonaChangingAccess || !neoApplication.wallet.ready || enzonaWallet.busy || enzonaSession.busy,
                     controller.accounts, controller.balanceAt, controller.history, controller.pending, controller.confirmed,
-                    controller.recipients, controller.notice ?: neoApplication.wallet.notice, allPermissions,
+                    controller.recipients, controller.notice ?: neoApplication.wallet.notice ?: enzonaSession.notice ?: enzonaWallet.notice, allPermissions,
                     checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED, selectedContact, controller.uncertain,
                     wallet = controller.walletSnapshot, selectedProductId = controller.selectedProductId,
                     configuredRegistrationIds = controller.configuredRegistrationIds,
                     notificationsEnabled = transferNotifications.enabled, services = controller.services,
-                    serviceResult = controller.serviceResult, accessRecoveryAvailable = accessRecoveryAvailable && !biometricActive),
+                    serviceResult = controller.serviceResult, accessRecoveryAvailable = accessRecoveryAvailable && !biometricActive,
+                    enzonaWallet = enzonaWallet, enzonaSession = enzonaSession),
                 actions = UiActions(
                     unlock = { if (controller.vault.hasStoredMaterial()) unlock() else initializeLocalAccess() }, enroll = { bank, pin, done -> enroll(bank, pin, done) },
                     permissions = { askPermissions(BANK_PERMISSIONS) },
@@ -151,23 +169,44 @@ class MainActivity : ComponentActivity() {
                     selectBank = controller::selectBank, selectSim = controller::selectSim,
                     balance = controller::queryBalance, refresh = controller::reloadInbox,
                     pay = { authorizePayment(it) }, saveRecipient = controller::saveRecipient,
-                    resolvePending = controller::acknowledgePending, dismissNotice = { controller.notice = null; neoApplication.wallet.notice = null },
+                    resolvePending = controller::acknowledgePending, dismissNotice = {
+                        controller.notice = null; neoApplication.wallet.notice = null
+                        neoApplication.enzonaSession.clearNotice(); neoApplication.enzonaWallet.clearNotice()
+                    },
                     pickContact = {
                         pickContact.launch(Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI))
                     }, clearContact = { selectedContact = null }, lock = ::lockAccess,
                     resolveUncertain = controller::resolveUncertain,
                     resetCredentials = {
+                        invalidateEnzonaApproval()
                         controller.lock()
-                        runCatching { controller.vault.reset() }.onFailure { controller.notice = "No se pudo restablecer el acceso" }
-                        permissionsVersion++
+                        enzonaChangingAccess = true
+                        lifecycleScope.launch {
+                            try {
+                                withContext(kotlinx.coroutines.NonCancellable) {
+                                    if (neoApplication.enzonaSession.disconnectLocal()) {
+                                        runCatching { clearEnzonaWebSession(); controller.vault.reset() }
+                                            .onFailure { controller.notice = "No se pudo restablecer el acceso" }
+                                    } else controller.notice = "No se pudo borrar la sesión de ENZONA"
+                                }
+                            } finally { enzonaChangingAccess = false; permissionsVersion++ }
+                        }
                     },
                     protectScreen = { screenHasSecrets = it; updateScreenProtection() },
                     disconnectBank = controller::disconnectBank,
                     share = { text -> startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
                         type = "text/plain"; putExtra(Intent.EXTRA_TEXT, text)
                     }, "Compartir comprobante")) },
-                    selectProduct = controller::selectProduct, selectRegistration = controller::selectRegistration,
-                    balanceProduct = controller::queryBalance,
+                    selectProduct = { id ->
+                        if (id.startsWith("enzona:")) neoApplication.enzonaWallet.select(id.removePrefix("enzona:"))
+                        else { neoApplication.enzonaWallet.select(null); controller.selectProduct(id) }
+                    }, selectRegistration = { id -> neoApplication.enzonaWallet.select(null); controller.selectRegistration(id) },
+                    balanceProduct = { id ->
+                        if (controller.unlocked) {
+                            if (id.startsWith("enzona:")) neoApplication.enzonaWallet.queryBalance(id.removePrefix("enzona:"))
+                            else controller.queryBalance(id)
+                        }
+                    },
                     saveCard = controller::saveCard, deleteCard = controller::deleteCard,
                     saveAccount = controller::saveAccount, deleteAccount = controller::deleteAccount,
                     saveContact = controller::saveContact, deleteContact = controller::deleteContact,
@@ -185,26 +224,42 @@ class MainActivity : ComponentActivity() {
                     runQrService = { request, qr -> authorizeService(request, qr) },
                     validateService = controller::validateService,
                     clearServiceResult = controller::clearServiceResult,
-                    requestSmsPermission = { askPermissions(arrayOf(Manifest.permission.SEND_SMS)) },
-                    renameFuel = { id, label -> neoApplication.wallet.transact(block = {
-                        val coupon = snapshot().fuelCoupons.singleOrNull { it.id == id } ?: return@transact
-                        updateFuelCouponPresentation(id, label, coupon.archived)
-                    }) },
-                    archiveFuel = { id, archived -> neoApplication.wallet.transact(block = {
-                        val coupon = snapshot().fuelCoupons.singleOrNull { it.id == id } ?: return@transact
-                        updateFuelCouponPresentation(id, coupon.label, archived)
-                    }) },
-                    authorizeFuel = { title, subtitle, result ->
-                        confirmWithoutSavedAccess(title, subtitle, onFailure = { result(false) }) { result(controller.unlocked) }
+                    connectEnzona = { if (controller.unlocked && !enzonaChangingAccess) { invalidateEnzonaApproval(); neoApplication.enzonaSession.beginLogin() } },
+                    cancelEnzonaLogin = { neoApplication.enzonaSession.cancelLogin() },
+                    enzonaCallback = { if (controller.unlocked) neoApplication.enzonaSession.acceptCallback(it) },
+                    disconnectEnzona = {
+                        invalidateEnzonaApproval()
+                        neoApplication.enzonaSession.cancelLogin()
+                        enzonaChangingAccess = true
+                        lifecycleScope.launch {
+                            try {
+                                withContext(kotlinx.coroutines.NonCancellable) {
+                                    neoApplication.enzonaSession.disconnectLocal()
+                                    neoApplication.enzonaWallet.activate(null)
+                                    clearEnzonaWebSession()
+                                }
+                            } finally { enzonaChangingAccess = false }
+                        }
                     },
+                    refreshEnzonaCards = { if (controller.unlocked) neoApplication.enzonaWallet.refreshCards() },
+                    refreshEnzonaActivity = { if (controller.unlocked) neoApplication.enzonaWallet.refreshActivity() },
+                    saveEnzonaCard = { id, pan, alias -> if (controller.unlocked) {
+                        runCatching { neoApplication.enzonaWallet.saveLink(id, pan, alias) }
+                            .onFailure { controller.notice = it.message ?: "No se pudo guardar la tarjeta" }
+                    } },
+                    payEnzona = ::authorizeEnzonaPayment,
+                    resolveEnzonaQr = { code, done -> enzonaQrRequest(done) { tokens, owner ->
+                        neoApplication.enzonaQr.resolve(tokens, owner, code)
+                    } },
+                    createEnzonaQr = { amount, currency, description, done -> enzonaQrRequest(done) { tokens, owner ->
+                        neoApplication.enzonaQr.createOwn(tokens, owner, amount, currency, description)
+                    } },
+                    queryEnzonaService = ::queryEnzonaService,
                 ),
                 incomingPayment = incomingPayment,
                 consumeIncomingPayment = { incomingPayment = null },
                 incomingReceiptId = incomingReceiptId,
                 consumeIncomingReceipt = { incomingReceiptId = null },
-                telecomController = telecomSms,
-                smsPermission = checkSelfPermission(Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED,
-                fuelController = fuel,
             )
             BackupUi(backupFlow)
         }
@@ -264,7 +319,7 @@ class MainActivity : ComponentActivity() {
         window.decorView.post(::maybeUnlockAutomatically)
     }
 
-    override fun onPause() { resumed = false; super.onPause() }
+    override fun onPause() { invalidateEnzonaApproval(); resumed = false; super.onPause() }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
@@ -386,6 +441,12 @@ class MainActivity : ComponentActivity() {
                 val protected = neoApplication.fuelSecrets.protectAfterRestore(snapshot.fuelCoupons, capsules)
                 neoApplication.wallet.repository.importSnapshot(snapshot, protected)
             },
+            exportEnzona = { neoApplication.enzonaRepository.exportAllLocal() },
+            restoreEnzona = { owners, restoreWallet ->
+                neoApplication.enzonaRepository.restoreAllLocal(owners) { imported ->
+                    restoreWallet().let { it.copy(importedEntries = it.importedEntries + imported) }
+                }
+            },
         )
     }
 
@@ -498,11 +559,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun lockAccess() {
+        invalidateEnzonaApproval()
         biometric?.cancel(); biometric = null; biometricActive = false
         biometricCleanup?.invoke(); biometricCleanup = null
         if (::backupFlow.isInitialized) backupFlow.onLock()
-        fuel.clearSensitive()
         controller.lock()
+        neoApplication.enzonaSession.suspendAccess()
+        neoApplication.enzonaWallet.activate(null)
         updateScreenProtection()
     }
 
@@ -543,25 +606,150 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun invalidateEnzonaApproval() {
+        cancelEnzonaReview?.invoke(); cancelEnzonaReview = null
+        enzonaPaymentAccess.invalidate()
+    }
+
+    private fun authorizeEnzonaPayment(draft: EnzonaPaymentDraft, password: CharArray, result: (String?) -> Unit) {
+        val owner = neoApplication.enzonaSession.uiState.value.ownerSubject
+        if (!controller.unlocked || owner == null || enzonaPaymentActive || biometricActive || !resumed) {
+            password.fill('\u0000'); result("No se pudo autorizar"); return
+        }
+        val card = neoApplication.enzonaWallet.state.value.cards.singleOrNull { it.fundingSourceUuid == draft.fundingSourceUuid }
+        if (card == null || card.currency != draft.currency) {
+            password.fill('\u0000'); result("Revisa la tarjeta y la moneda de origen"); return
+        }
+        val ticket = enzonaPaymentAccess.capture(owner)
+        fun contextCurrent() = enzonaPaymentAccess.isCurrent(ticket,
+            neoApplication.enzonaSession.uiState.value.ownerSubject, controller.unlocked, resumed)
+        var delivered = false
+        var approved = false
+        fun complete(message: String?) {
+            if (delivered) return
+            delivered = true
+            if (contextCurrent()) result(message)
+        }
+        // After approval the request may already be on the wire. Close review without claiming cancellation.
+        cancelEnzonaReview = { complete(if (approved) null else "Autorización cancelada") }
+        enzonaPaymentActive = true
+        lifecycleScope.launch {
+            try {
+                // Prepare the immutable journal entry and refresh access before asking for approval.
+                val payments = withContext(Dispatchers.IO) { neoApplication.enzonaPayments }
+                if (enzonaPaymentUpdates == null) enzonaPaymentUpdates = lifecycleScope.launch {
+                    payments.updates.collect { update ->
+                        if (update.late && update.state == EnzonaIntentState.CONFIRMED && controller.unlocked && resumed &&
+                            neoApplication.enzonaSession.uiState.value.ownerSubject == update.ownerSubject) {
+                            controller.notice = "Pago realizado"
+                            val entry = withContext(Dispatchers.IO) { neoApplication.enzonaRepository.intent(update.ownerSubject, update.intentId) }
+                            entry?.intent?.cardUuid?.takeIf { id -> neoApplication.enzonaWallet.state.value.cards.any { it.fundingSourceUuid == id } }
+                                ?.let { neoApplication.enzonaWallet.queryBalance(it) }
+                        }
+                    }
+                }
+                val intent = payments.prepare(owner, draft)
+                neoApplication.enzonaSession.usableTokens()
+                if (!contextCurrent()) {
+                    password.fill('\u0000'); enzonaPaymentActive = false; complete("Autorización cancelada"); return@launch
+                }
+                confirmWithoutSavedAccess("Autorizar pago", "${intent.amount} ${intent.currency} · ${intent.destination.value}",
+                    onFailure = { password.fill('\u0000'); enzonaPaymentActive = false; complete("Autorización cancelada") }) {
+                    approved = true
+                    val approvedAt = android.os.SystemClock.elapsedRealtime()
+                    lifecycleScope.launch {
+                        try {
+                            val update = payments.submit(intent, password, canDispatch = {
+                                contextCurrent() &&
+                                    android.os.SystemClock.elapsedRealtime() - approvedAt < 60_000
+                            })
+                            if (contextCurrent()) {
+                                controller.notice = update.notice ?: when (update.state) {
+                                    EnzonaIntentState.CONFIRMED -> "Pago realizado"
+                                    EnzonaIntentState.REJECTED -> "Pago rechazado"
+                                    else -> "Tiempo de espera agotado"
+                                }
+                                if (update.state == EnzonaIntentState.CONFIRMED) {
+                                    neoApplication.enzonaWallet.queryBalance(draft.fundingSourceUuid)
+                                }
+                            }
+                            // A sent attempt leaves review. A further payment requires a fresh review.
+                            if (update.submissionStarted) complete(null) else complete(update.notice ?: "No se envió el pago")
+                        } catch (_: dev.duardo.neotransfer.enzona.EnzonaPaymentAuthorizationExpiredException) {
+                            complete("La autorización ha caducado")
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) { complete("Autorización cancelada"); throw cancelled }
+                        catch (_: Exception) { complete("No se pudo completar el pago") }
+                        finally { password.fill('\u0000'); enzonaPaymentActive = false }
+                    }
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                password.fill('\u0000'); enzonaPaymentActive = false; throw cancelled
+            } catch (_: Exception) {
+                password.fill('\u0000'); enzonaPaymentActive = false; complete("No se pudo preparar el pago")
+            }
+        }
+    }
+
+    private fun <T> enzonaQrRequest(done: (T?) -> Unit,
+                                  request: suspend (dev.duardo.neotransfer.enzona.EnzonaTokens, String) -> T) {
+        val owner = neoApplication.enzonaSession.uiState.value.ownerSubject
+        if (!controller.unlocked || owner == null || enzonaQrActive) { done(null); return }
+        enzonaQrActive = true
+        lifecycleScope.launch {
+            try {
+                val tokens = neoApplication.enzonaSession.usableTokens()
+                check(tokens.accountSubject() == owner)
+                val result = request(tokens, owner)
+                if (controller.unlocked && neoApplication.enzonaSession.uiState.value.ownerSubject == owner) done(result)
+                else done(null)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                controller.notice = if (failure is java.io.InterruptedIOException) "Tiempo de espera agotado" else "No se pudo consultar el QR"
+                done(null)
+            } finally { enzonaQrActive = false }
+        }
+    }
+
+    private fun queryEnzonaService(service: dev.duardo.neotransfer.enzona.EnzonaInvoiceService, reference: String,
+                                  done: (dev.duardo.neotransfer.enzona.EnzonaInvoiceLookup?) -> Unit) {
+        val owner = neoApplication.enzonaSession.uiState.value.ownerSubject
+        if (!controller.unlocked || owner == null || enzonaServiceActive) { done(null); return }
+        enzonaServiceActive = true
+        lifecycleScope.launch {
+            try {
+                val tokens = neoApplication.enzonaSession.usableTokens()
+                check(tokens.accountSubject() == owner)
+                val api = dev.duardo.neotransfer.enzona.EnzonaServiceApi(neoApplication.enzonaHttp)
+                val result = if (service == dev.duardo.neotransfer.enzona.EnzonaInvoiceService.ELECTRICITY)
+                    dev.duardo.neotransfer.enzona.EnzonaInvoiceLookup(service, bills = api.electricityBills(tokens, reference).value)
+                else dev.duardo.neotransfer.enzona.EnzonaInvoiceLookup(service, etecsa = api.etecsaAccounts(tokens, service, reference).value)
+                if (controller.unlocked && neoApplication.enzonaSession.uiState.value.ownerSubject == owner) done(result) else done(null)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                controller.notice = if (failure is java.io.InterruptedIOException) "Tiempo de espera agotado" else "No se pudo consultar el servicio"
+                done(null)
+            } finally { enzonaServiceActive = false }
+        }
+    }
+
     override fun onStop() {
         super.onStop()
         biometric?.cancel(); biometric = null; biometricActive = false
         biometricCleanup?.invoke(); biometricCleanup = null
         if (::backupFlow.isInitialized) backupFlow.onStop()
-        fuel.clearSensitive()
         neoApplication.leaveForeground()
         updateScreenProtection()
     }
 
     override fun onDestroy() {
+        invalidateEnzonaApproval()
         if (::backupFlow.isInitialized) backupFlow.close()
-        fuel.close()
         super.onDestroy()
     }
 
     private companion object {
         val BANK_PERMISSIONS = arrayOf(Manifest.permission.CALL_PHONE, Manifest.permission.READ_PHONE_STATE,
             Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_SMS)
-        val ALL_PERMISSIONS = BANK_PERMISSIONS + arrayOf(Manifest.permission.CAMERA, Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.READ_CONTACTS, Manifest.permission.SEND_SMS)
+        val ALL_PERMISSIONS = BANK_PERMISSIONS + arrayOf(Manifest.permission.CAMERA, Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.READ_CONTACTS)
     }
 }

@@ -20,8 +20,8 @@ android {
         applicationId = "dev.duardo.neotransfer"
         minSdk = 35
         targetSdk = 36
-        versionCode = 7
-        versionName = "1.0.0-dev.5"
+        versionCode = 8
+        versionName = "1.0.0-dev.6"
         testInstrumentationRunner = "dev.duardo.neotransfer.BankingChecks"
     }
 
@@ -70,6 +70,8 @@ dependencies {
     implementation("androidx.room:room-ktx:2.8.5")
     ksp("androidx.room:room-compiler:2.8.5")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation("com.squareup.okhttp3:okhttp:5.4.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.camera:camera-camera2:1.5.3")
     implementation("androidx.camera:camera-lifecycle:1.5.3")
@@ -78,4 +80,6 @@ dependencies {
     implementation("com.google.mlkit:text-recognition:16.0.1")
     testImplementation(kotlin("test-junit"))
     testImplementation("org.json:json:20260814")
+    testImplementation("com.squareup.okhttp3:mockwebserver3:5.4.0")
+    testImplementation("com.squareup.okhttp3:okhttp-tls:5.4.0")
 }

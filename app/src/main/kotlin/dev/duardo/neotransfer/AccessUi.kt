@@ -1,5 +1,6 @@
 package dev.duardo.neotransfer
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -48,8 +49,33 @@ internal fun BanksScreen(state: AppUiState, actions: UiActions, back: () -> Unit
     val identities = authenticationProviders()
     var removeId by remember { mutableStateOf<String?>(null) }
     var reactivateId by remember { mutableStateOf<String?>(null) }
+    var disconnectEnzona by remember { mutableStateOf(false) }
+    var editEnzonaCardId by rememberSaveable(state.enzonaWallet.owner) { mutableStateOf<String?>(null) }
+    if (editEnzonaCardId != null) {
+        BackHandler { editEnzonaCardId = null }
+        EnzonaCardEditor(state, requireNotNull(editEnzonaCardId), actions) { editEnzonaCardId = null }
+        return
+    }
+    val enzonaBusy = state.enzonaSession.busy || state.enzonaWallet.busy
+    val mappedCardIds = walletProducts(state).mapNotNull { it.enzonaCardId }.toSet()
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(24.dp)) {
         item { PageHeader("Bancos y accesos", back) { IconButton(onClick = { configure(ProviderIdentity.forBank(state.bank)) }) { Icon(painterResource(R.drawable.ic_add), "Añadir acceso") } } }
+        item {
+            SectionTitle("ENZONA")
+            if (state.enzonaSession.connected) {
+                state.enzonaSession.displayName?.takeIf(String::isNotBlank)?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
+                ActionRow("Actualizar tarjetas", R.drawable.ic_refresh, enabled = !enzonaBusy, click = actions.refreshEnzonaCards)
+                ActionRow("Desconectar ENZONA", R.drawable.ic_close, enabled = !enzonaBusy) { disconnectEnzona = true }
+            } else ActionRow("Conectar ENZONA", R.drawable.ic_account_balance, enabled = !enzonaBusy, click = actions.connectEnzona)
+            (state.enzonaSession.notice ?: state.enzonaWallet.notice)?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        }
+        if (state.enzonaWallet.owner != null) items(state.enzonaWallet.cards.filter { it.fundingSourceUuid !in mappedCardIds },
+            key = { "enzona:${it.fundingSourceUuid}" }) { card ->
+            ActionRow(card.bankName?.takeIf(String::isNotBlank) ?: "Tarjeta ENZONA", R.drawable.ic_credit_card,
+                listOfNotNull(card.last4?.takeIf { it.matches(Regex("[0-9]{4}")) }?.let { "Terminación $it" },
+                    "Asociar tarjeta guardada").joinToString(" · ")) { editEnzonaCardId = card.fundingSourceUuid }
+        }
+        item { Spacer(Modifier.height(16.dp)); SectionTitle("BPA y BANDEC") }
         items(identities, key = { it.id }) { identity ->
             val registrations = state.wallet.registrations.filter { it.identity() == identity }
             if (registrations.isEmpty()) {
@@ -75,6 +101,10 @@ internal fun BanksScreen(state: AppUiState, actions: UiActions, back: () -> Unit
         }
     }
     reactivateId?.let { id -> RegistrationLineDialog(state, actions, id) { reactivateId = null } }
+    if (disconnectEnzona) AlertDialog(onDismissRequest = { disconnectEnzona = false },
+        title = { Text("Desconectar ENZONA") }, text = { Text("Se cerrará la sesión de ENZONA en este teléfono.") },
+        confirmButton = { TextButton(onClick = { disconnectEnzona = false; actions.disconnectEnzona() }, enabled = !enzonaBusy) { Text("Desconectar") } },
+        dismissButton = { TextButton(onClick = { disconnectEnzona = false }) { Text("Cancelar") } })
     if (removeId != null) AlertDialog(onDismissRequest = { removeId = null }, title = { Text("Quitar acceso de este teléfono") },
         text = { Text("Se quitarán el acceso y los productos asociados de tu cartera. Su registro bancario no se cancela.") },
         confirmButton = { TextButton(onClick = { actions.removeRegistration(requireNotNull(removeId)); removeId = null }) { Text("Quitar acceso") } },

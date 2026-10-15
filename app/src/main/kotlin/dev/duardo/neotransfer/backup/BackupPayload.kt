@@ -7,6 +7,7 @@ import dev.duardo.neotransfer.data.RegistrationRecord
 import dev.duardo.neotransfer.data.SnapshotCodec
 import dev.duardo.neotransfer.data.WalletSnapshot
 import dev.duardo.neotransfer.platform.AccessCredentials
+import dev.duardo.neotransfer.enzona.data.EnzonaLocalExport
 import java.nio.charset.CodingErrorAction
 import java.nio.ByteBuffer
 import java.nio.CharBuffer
@@ -24,6 +25,7 @@ class DecodedBackup internal constructor(
     val credentials: ByteArray,
     val preferences: BackupPreferences,
     val fuelEnvelopes: List<FuelBackupEnvelope> = emptyList(),
+    val enzona: List<EnzonaLocalExport> = emptyList(),
 ) : AutoCloseable {
     override fun close() { credentials.fill(0); fuelEnvelopes.forEach(FuelBackupEnvelope::close) }
 }
@@ -33,7 +35,7 @@ sealed class BackupPayloadFailure(message: String) : Exception(message) {
     class UnsupportedVersion : BackupPayloadFailure("Esta versión del respaldo no es compatible")
 }
 
-/** V2 adds portable fuel capsules; V1 wallet and bank access backups remain readable. */
+/** V3 adds local ENZONA owners; exports without ENZONA stay V2. V1/V2 remain readable. */
 object BackupPayload {
     private val magic = "NTPAYLD".toByteArray(Charsets.US_ASCII)
     private const val headerSize = 18
@@ -42,12 +44,17 @@ object BackupPayload {
     private const val maxProviderBytes = 8_192
 
     fun encode(snapshot: WalletSnapshot, credentials: ByteArray, preferences: BackupPreferences,
-               fuelEnvelopes: List<FuelBackupEnvelope> = emptyList()): ByteArray {
+               fuelEnvelopes: List<FuelBackupEnvelope> = emptyList(),
+               enzona: List<EnzonaLocalExport> = emptyList()): ByteArray {
         if (credentials.size > maxCredentialBytes) invalid()
         try { validateFuel(snapshot, fuelEnvelopes) } catch (_: IllegalArgumentException) { invalid() }
         val wallet = SnapshotCodec.encode(snapshot)
+        var enzonaBytes: ByteArray? = null
         val fuel = mutableListOf<ByteArray>()
         try {
+            if (enzona.isNotEmpty()) {
+                enzonaBytes = try { EnzonaBackupCodec.encode(enzona) } catch (_: IllegalArgumentException) { invalid() }
+            }
             for (entry in fuelEnvelopes) {
                 fuel += entry.couponId.toByteArray(Charsets.UTF_8)
                 fuel += entry.revision.toByteArray(Charsets.UTF_8)
@@ -58,15 +65,17 @@ object BackupPayload {
                     fuel += ByteArray(encoded.remaining()).also { encoded.get(it); if (encoded.hasArray()) encoded.array().fill(0) }
                 } finally { chars.fill('\u0000') }
             }
-            val size = headerSize + 4L + wallet.size + credentials.size + fuel.sumOf { 4L + it.size }
+            val size = headerSize + 4L + wallet.size + credentials.size + fuel.sumOf { 4L + it.size } +
+                (enzonaBytes?.let { 4L + it.size } ?: 0L)
             if (wallet.isEmpty() || size > BackupEnvelope.maxPlaintextBytes) invalid()
             return ByteBuffer.allocate(size.toInt()).apply {
-                put(magic); put(2.toByte()); putInt(wallet.size); putInt(credentials.size)
+                put(magic); put((if (enzonaBytes == null) 2 else 3).toByte()); putInt(wallet.size); putInt(credentials.size)
                 put(preferences.theme.ordinal.toByte()); put((if (preferences.notificationsEnabled) 1 else 0).toByte())
                 putInt(fuelEnvelopes.size); put(wallet); put(credentials)
                 fuel.forEach { putInt(it.size); put(it) }
+                enzonaBytes?.let { putInt(it.size); put(it) }
             }.array()
-        } finally { wallet.fill(0); fuel.forEach { it.fill(0) } }
+        } finally { wallet.fill(0); fuel.forEach { it.fill(0) }; enzonaBytes?.fill(0) }
     }
 
     fun decode(bytes: ByteArray): DecodedBackup {
@@ -74,7 +83,7 @@ object BackupPayload {
         val reader = ByteBuffer.wrap(bytes)
         if (!ByteArray(magic.size).also { reader.get(it) }.contentEquals(magic)) invalid()
         val version = reader.get().toInt()
-        if (version !in 1..2) throw BackupPayloadFailure.UnsupportedVersion()
+        if (version !in 1..3) throw BackupPayloadFailure.UnsupportedVersion()
         var wallet: ByteArray? = null
         var credentials: ByteArray? = null
         val fuel = mutableListOf<FuelBackupEnvelope>()
@@ -83,7 +92,7 @@ object BackupPayload {
             val credentialSize = reader.int
             val theme = BackupTheme.entries.getOrNull(reader.get().toInt()) ?: invalid()
             val notify = when (reader.get().toInt()) { 0 -> false; 1 -> true; else -> invalid() }
-            val count = if (version == 2) reader.int else 0
+            val count = if (version >= 2) reader.int else 0
             if (walletSize <= 0 || credentialSize !in 0..maxCredentialBytes || count !in 0..maxFuelEntries ||
                 walletSize.toLong() + credentialSize + count * 12L > reader.remaining()) invalid()
             wallet = ByteArray(walletSize).also { reader.get(it) }
@@ -96,9 +105,15 @@ object BackupPayload {
                 val chars = readChars(reader, maxProviderBytes)
                 try { fuel += FuelBackupEnvelope(id, revision, chars) } finally { chars.fill('\u0000') }
             }
+            val enzona = if (version == 3) {
+                val length = reader.int
+                if (length <= 0 || length > reader.remaining()) invalid()
+                val section = ByteArray(length).also { reader.get(it) }
+                try { EnzonaBackupCodec.decode(section) } finally { section.fill(0) }
+            } else emptyList()
             if (reader.hasRemaining()) invalid()
             validateFuel(snapshot, fuel)
-            return DecodedBackup(snapshot, credentials, BackupPreferences(theme, notify), fuel)
+            return DecodedBackup(snapshot, credentials, BackupPreferences(theme, notify), fuel, enzona)
         } catch (error: Exception) {
             credentials?.fill(0); fuel.forEach(FuelBackupEnvelope::close)
             if (error is BackupPayloadFailure) throw error

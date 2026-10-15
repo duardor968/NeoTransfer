@@ -1,5 +1,6 @@
 package dev.duardo.neotransfer
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -19,91 +20,115 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import dev.duardo.neotransfer.core.*
 import dev.duardo.neotransfer.data.*
+import dev.duardo.neotransfer.enzona.EnzonaInvoiceService
 import dev.duardo.neotransfer.platform.QrInput
 
-internal fun OperationCategory.title(): String = when (this) {
-    OperationCategory.PAYMENTS -> "Pagos y facturas"
-    OperationCategory.RECHARGES -> "Recargas"
-    OperationCategory.TRANSFERS -> "Transferencias"
-    OperationCategory.QUERIES -> "Consultas"
-    OperationCategory.ACCOUNTS -> "Cuentas y tarjetas"
-    OperationCategory.SECURITY -> "Acceso y seguridad"
-    OperationCategory.TELECOM -> "Telecomunicaciones"
-    OperationCategory.PROCEDURES -> "Gestiones"
-}
-
-internal fun OperationCategory.icon(): Int = when (this) {
-    OperationCategory.PAYMENTS -> R.drawable.ic_receipt_long
-    OperationCategory.RECHARGES, OperationCategory.TELECOM -> R.drawable.ic_smartphone
-    OperationCategory.TRANSFERS -> R.drawable.ic_swap_horiz
-    OperationCategory.QUERIES -> R.drawable.ic_search
-    OperationCategory.ACCOUNTS -> R.drawable.ic_credit_card
-    OperationCategory.SECURITY -> R.drawable.ic_security
-    OperationCategory.PROCEDURES -> R.drawable.ic_account_balance
-}
-
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun ServicesScreen(state: AppUiState, open: (OperationSpec) -> Unit, telecom: () -> Unit = {}, miTurno: () -> Unit = {}, fuel: () -> Unit = {}) {
+internal fun ServicesScreen(state: AppUiState, open: (OperationSpec, Map<String, String>) -> Unit,
+                            openEnzona: (EnzonaInvoiceService) -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
-    var category by rememberSaveable { mutableStateOf<String?>(null) }
-    var provider by rememberSaveable { mutableStateOf<String?>(null) }
-    val listState = rememberSaveable(category, provider, query, saver = LazyListState.Saver) { LazyListState() }
-    val all = state.services.filter { it.implementationStatus == ImplementationStatus.IMPLEMENTED }
-    val visible = all.filter { operation ->
-        (provider == null || operation.identities.any { it.provider.name == provider }) &&
-            (category == null || operation.category.name == category) &&
-            (query.isBlank() || operation.title.contains(query, true) || operation.category.title().contains(query, true))
+    var utilityName by rememberSaveable { mutableStateOf<String?>(null) }
+    var choosingActionKey by rememberSaveable { mutableStateOf<String?>(null) }
+    val availableIds = state.services.map { it.id }.toSet()
+    val groups = serviceGroups(OperationCatalog.all.filter { it.id in availableIds })
+    val selectedGroup = groups.firstOrNull { it.utility.name == utilityName }
+    val remoteSelected = selectedProduct(state)?.enzonaCardId != null
+    val products = walletProducts(state, includeEnzona = false)
+    val selectedId = state.selectedProductId ?: state.wallet.settings.selectedCardId ?: state.wallet.settings.selectedAccountId
+    val selectedRegistrationId = state.wallet.settings.selectedRegistrationId
+    val selectedRegistration = state.wallet.registrations.singleOrNull { it.id == selectedRegistrationId && it.enabled }
+    val selectedIdentity = if (remoteSelected) null else if (selectedId != null) products.singleOrNull { it.id == selectedId }?.takeIf {
+        it.registrationId == null || it.registrationId == selectedRegistration?.id && it.identity == selectedRegistration?.identity()
+    }?.identity else selectedRegistration?.identity()
+    val listState = rememberSaveable(utilityName, query, saver = LazyListState.Saver) { LazyListState() }
+    fun backToServices() { utilityName = null; query = ""; choosingActionKey = null }
+    BackHandler(enabled = utilityName != null && choosingActionKey == null) { backToServices() }
+    LaunchedEffect(groups.map { it.utility }, utilityName) {
+        if (utilityName != null && selectedGroup == null) backToServices()
     }
-    val showTelecom = (provider == null || provider == ProviderId.CUBACEL.name) &&
-        (category == OperationCategory.TELECOM.name || query.isNotBlank()) &&
-        (query.isBlank() || listOf("Información ETECSA", "Emergencias", "Consultas SMS").any { it.contains(query, true) })
-    val showTurns = (category == OperationCategory.PROCEDURES.name || query.contains("turno", true)) &&
-        (provider == null || provider != ProviderId.CUBACEL.name)
-    val showFuel = (category == OperationCategory.PAYMENTS.name || query.contains("combustible", true) || query.contains("cupón", true)) &&
-        (provider == null || provider in setOf(ProviderId.BPA.name, ProviderId.BANDEC.name, ProviderId.BANMET.name))
+    val visibleGroups = groups.filter { group -> query.isBlank() || group.utility.title.contains(query, true) ||
+        group.actions.any { it.title.contains(query, true) } }
+    val visibleActions = selectedGroup?.actions?.filter { action ->
+        query.isBlank() || action.title.contains(query, true)
+    }.orEmpty()
     Column(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
-        Text("Servicios", Modifier.padding(top = 20.dp, bottom = 20.dp), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
-        SearchField(query, { query = it }, "Buscar servicio")
-        Spacer(Modifier.height(12.dp))
-        ChoiceField(provider?.let { ProviderId.valueOf(it).title() } ?: "Todos los proveedores",
-            listOf("" to "Todos los proveedores") + all.flatMap { it.identities }.map { it.provider }.distinct().map { it.name to it.title() }) { provider = it.ifBlank { null } }
-        if (category != null) FlowRow(Modifier.fillMaxWidth().padding(top = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(OperationCategory.valueOf(category!!).title(), Modifier.align(Alignment.CenterVertically), style = MaterialTheme.typography.titleMedium)
-            TextButton(onClick = { category = null }) { Text("Ver categorías") }
-        }
+        if (selectedGroup == null) Text("Servicios", Modifier.padding(top = 20.dp, bottom = 20.dp),
+            style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+        else PageHeader(selectedGroup.utility.title, ::backToServices)
+        SearchField(query, { query = it }, if (selectedGroup == null) "Buscar servicio" else "Buscar acción")
         LazyColumn(Modifier.weight(1f), state = listState, contentPadding = PaddingValues(vertical = 16.dp)) {
-            if (showTelecom) item {
-                ActionRow("Información y números útiles", R.drawable.ic_smartphone, "Consultas ETECSA y emergencias", click = telecom)
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            }
-            if (showTurns) item {
-                ActionRow("Mis solicitudes MiTurno", R.drawable.ic_calendar_month, click = miTurno)
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            }
-            if (showFuel) item {
-                ActionRow("Mis cupones de combustible", R.drawable.ic_receipt_long, click = fuel)
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            }
-            if (query.isBlank() && category == null) {
-                if (visible.isEmpty()) item { EmptyAction("No hay servicios que coincidan", "Ver todos") { provider = null } }
-                OperationCategory.entries.forEach { group ->
-                    val members = visible.filter { it.category == group }
-                    if (members.isNotEmpty()) item(group.name) {
-                        ActionRow(group.title(), group.icon(), members.map { it.title.substringBefore(" · ") }.distinct().take(3).joinToString(", ")) { category = group.name }
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    }
+            if (selectedGroup == null) {
+                if (visibleGroups.isEmpty()) item {
+                    if (query.isNotBlank()) EmptyAction("No hay servicios que coincidan", "Limpiar búsqueda") { query = "" }
+                    else Text("No hay servicios disponibles", Modifier.padding(vertical = 28.dp), style = MaterialTheme.typography.titleMedium)
                 }
+                items(visibleGroups, key = { it.utility.name }) { group ->
+                    ActionRow(group.utility.title, group.utility.icon()) {
+                        val remoteService = enzonaServiceDestination(group.utility).takeIf { remoteSelected }
+                        if (remoteService != null) { backToServices(); openEnzona(remoteService) }
+                        else { utilityName = group.utility.name; query = "" }
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                }
+            } else if (remoteSelected && enzonaServiceDestination(selectedGroup.utility) != null) {
+                item { ActionRow("Consultar servicio", selectedGroup.utility.icon()) {
+                    val service = requireNotNull(enzonaServiceDestination(selectedGroup.utility))
+                    backToServices(); openEnzona(service)
+                } }
             } else {
-                if (visible.isEmpty() && !showTelecom && !showTurns && !showFuel) item { EmptyAction("No hay servicios que coincidan", "Limpiar búsqueda") { query = ""; category = null; provider = null } }
-                items(visible, key = { it.id }) { operation ->
-                    ActionRow(operation.title, operation.category.icon(), operation.identities.map { it.title() }.distinct().joinToString(" · ")) { open(operation) }
+                if (visibleActions.isEmpty()) item { EmptyAction("No hay acciones que coincidan", "Limpiar búsqueda") { query = "" } }
+                items(visibleActions, key = { it.key }) { action ->
+                    ActionRow(action.title, selectedGroup.utility.icon()) {
+                        val remoteService = enzonaServiceDestination(selectedGroup.utility, action).takeIf { remoteSelected }
+                        if (remoteService != null) {
+                            backToServices(); openEnzona(remoteService)
+                            return@ActionRow
+                        }
+                        // Shared contracts keep the compatible-origin choice in the existing form.
+                        val variant = action.resolve(selectedIdentity) ?: action.variants.singleOrNull()?.takeIf {
+                            it.spec.identities.size > 1
+                        }
+                        if (variant != null) open(variant.spec, variant.initialValues)
+                        else choosingActionKey = action.key
+                    }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
             }
         }
     }
+    selectedGroup?.actions?.singleOrNull { it.key == choosingActionKey }?.let { action ->
+        ModalBottomSheet(onDismissRequest = { choosingActionKey = null },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+                Text("Elegir origen", style = MaterialTheme.typography.headlineSmall)
+                LazyColumn(contentPadding = PaddingValues(vertical = 16.dp)) {
+                    items(action.variants, key = { it.spec.id }) { variant ->
+                        ActionRow(variant.spec.identities.joinToString(" · ") { it.title() }, R.drawable.ic_account_balance) {
+                            choosingActionKey = null
+                            open(variant.spec, variant.initialValues)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+internal fun enzonaServiceDestination(utility: ServiceUtility, action: ServiceAction? = null): EnzonaInvoiceService? = when (utility) {
+    ServiceUtility.ELECTRICITY -> EnzonaInvoiceService.ELECTRICITY
+    ServiceUtility.TELEPHONE -> EnzonaInvoiceService.FIXED_PHONE
+    ServiceUtility.NAUTA -> EnzonaInvoiceService.NAUTA
+    ServiceUtility.NAUTA_HOME -> EnzonaInvoiceService.NAUTA_HOME.takeIf {
+        action != null && action.variants.isNotEmpty() && action.variants.all { it.spec.id == "service.nauta.home" }
+    }
+    ServiceUtility.WATER, ServiceUtility.CUBACEL -> null
+}
+
+private fun ServiceUtility.icon(): Int = when (this) {
+    ServiceUtility.ELECTRICITY, ServiceUtility.WATER -> R.drawable.ic_receipt_long
+    ServiceUtility.TELEPHONE, ServiceUtility.NAUTA_HOME -> R.drawable.ic_home
+    ServiceUtility.NAUTA, ServiceUtility.CUBACEL -> R.drawable.ic_smartphone
 }
 
 private data class ServiceOriginUi(
@@ -138,7 +163,7 @@ private fun ServiceOriginUi.sameContext(other: ServiceOriginUi): Boolean = key =
     product?.number == other.product?.number && product?.currency == other.product?.currency && product?.source == other.product?.source
 
 private fun serviceOrigins(spec: OperationSpec, state: AppUiState): List<ServiceOriginUi> = buildList {
-    val products = walletProducts(state)
+    val products = walletProducts(state, includeEnzona = false)
     spec.identities.forEach { execution ->
         val authentication = spec.authenticationIdentity ?: execution
         val registrations = state.wallet.registrations.filter { it.identity() == authentication }
@@ -188,10 +213,11 @@ internal fun ServiceForm(spec: OperationSpec, state: AppUiState, actions: UiActi
                         initialValues: Map<String, String> = emptyMap(), addSource: () -> Unit = {}, initialRegistrationId: String? = null) {
     val origins = serviceOrigins(spec, state)
     var originKey by rememberSaveable(spec.id, initialValues, initialRegistrationId) { mutableStateOf(
+        if (selectedProduct(state)?.enzonaCardId != null) null else (
         initialRegistrationId?.let { id -> origins.firstOrNull { it.registration?.id == id && it.product == null && !it.manual }?.key }
             ?: origins.firstOrNull { state.selectedProductId != null && it.product?.id == state.selectedProductId }?.key
             ?: origins.filter { it.registration?.id == state.wallet.settings.selectedRegistrationId && it.product == null && !it.manual }.singleOrNull()?.key
-            ?: origins.singleOrNull()?.key) }
+            ?: origins.singleOrNull()?.key)) }
     var fallbackIdentityId by rememberSaveable(spec.id) { mutableStateOf(spec.identities.singleOrNull()?.id) }
     val origin = origins.firstOrNull { it.key == originKey }
     val identity = origin?.executionIdentity ?: spec.identities.firstOrNull { it.id == fallbackIdentityId }
@@ -200,7 +226,7 @@ internal fun ServiceForm(spec: OperationSpec, state: AppUiState, actions: UiActi
     var secretValues by remember(spec.id) { mutableStateOf(emptyMap<String, String>()) }
     val values = savedValues + secretValues
     var currency by rememberSaveable(spec.id) { mutableStateOf(selectedProduct(state)?.takeIf {
-        spec.supports(it.identity) && it.currency in spec.activeCurrencies
+        it.enzonaCardId == null && spec.supports(it.identity) && it.currency in spec.activeCurrencies
     }?.currency?.name) }
     var manualSource by rememberSaveable(spec.id) { mutableStateOf("") }
     var errors by remember(spec.id) { mutableStateOf(emptyList<OperationValidationError>()) }

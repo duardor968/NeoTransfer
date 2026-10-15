@@ -1,0 +1,257 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "29cd918c1423256235f666c769b006d6",
+    "entities": [
+      {
+        "tableName": "read_cache",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`ownerSubject` TEXT NOT NULL, `kind` TEXT NOT NULL, `resourceId` TEXT NOT NULL, `observedAt` INTEGER NOT NULL, `json` TEXT NOT NULL, PRIMARY KEY(`ownerSubject`, `kind`, `resourceId`))",
+        "fields": [
+          {
+            "fieldPath": "value.ownerSubject",
+            "columnName": "ownerSubject",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.resourceId",
+            "columnName": "resourceId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.observedAt",
+            "columnName": "observedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.json",
+            "columnName": "json",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "ownerSubject",
+            "kind",
+            "resourceId"
+          ]
+        }
+      },
+      {
+        "tableName": "card_links",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`ownerSubject` TEXT NOT NULL, `cardUuid` TEXT NOT NULL, `pan` TEXT, `alias` TEXT, PRIMARY KEY(`ownerSubject`, `cardUuid`))",
+        "fields": [
+          {
+            "fieldPath": "value.ownerSubject",
+            "columnName": "ownerSubject",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.cardUuid",
+            "columnName": "cardUuid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.pan",
+            "columnName": "pan",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.alias",
+            "columnName": "alias",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "ownerSubject",
+            "cardUuid"
+          ]
+        }
+      },
+      {
+        "tableName": "intent_journal",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`state` TEXT NOT NULL, `remoteId` TEXT, `restored` INTEGER NOT NULL, `id` TEXT NOT NULL, `ownerSubject` TEXT NOT NULL, `cardUuid` TEXT NOT NULL, `type` TEXT NOT NULL, `amount` TEXT NOT NULL, `currency` TEXT NOT NULL, `description` TEXT, `phone` TEXT, `preparedAt` INTEGER NOT NULL, `invoiceService` TEXT, `invoiceOwner` TEXT, `invoiceFolio` TEXT, `invoiceRoute` TEXT, `invoicePeriod` TEXT, `destination_value` TEXT NOT NULL, `destination_username` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "value.state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.remoteId",
+            "columnName": "remoteId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.restored",
+            "columnName": "restored",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.intent.id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.intent.ownerSubject",
+            "columnName": "ownerSubject",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.intent.cardUuid",
+            "columnName": "cardUuid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.intent.type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.intent.amount",
+            "columnName": "amount",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.intent.currency",
+            "columnName": "currency",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.intent.description",
+            "columnName": "description",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.intent.phone",
+            "columnName": "phone",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.intent.preparedAt",
+            "columnName": "preparedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.intent.invoiceService",
+            "columnName": "invoiceService",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.intent.invoiceOwner",
+            "columnName": "invoiceOwner",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.intent.invoiceFolio",
+            "columnName": "invoiceFolio",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.intent.invoiceRoute",
+            "columnName": "invoiceRoute",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.intent.invoicePeriod",
+            "columnName": "invoicePeriod",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "value.intent.destination.value",
+            "columnName": "destination_value",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.intent.destination.username",
+            "columnName": "destination_username",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_intent_journal_ownerSubject",
+            "unique": false,
+            "columnNames": [
+              "ownerSubject"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_intent_journal_ownerSubject` ON `${TABLE_NAME}` (`ownerSubject`)"
+          }
+        ]
+      },
+      {
+        "tableName": "transaction_history",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`ownerSubject` TEXT NOT NULL, `transactionUuid` TEXT NOT NULL, `observedAt` INTEGER NOT NULL, `json` TEXT NOT NULL, PRIMARY KEY(`ownerSubject`, `transactionUuid`))",
+        "fields": [
+          {
+            "fieldPath": "value.ownerSubject",
+            "columnName": "ownerSubject",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.transactionUuid",
+            "columnName": "transactionUuid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.observedAt",
+            "columnName": "observedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value.json",
+            "columnName": "json",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "ownerSubject",
+            "transactionUuid"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '29cd918c1423256235f666c769b006d6')"
+    ]
+  }
+}

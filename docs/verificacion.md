@@ -1,8 +1,24 @@
 # Verificación del desarrollo 1.0
 
-Corte: 27 de septiembre de 2026, versión de desarrollo `1.0.0-dev.5`. Estos resultados no son una certificación de operaciones bancarias ni una release 1.0.0.
+Corte: 8 de octubre de 2026, versión instalada `1.0.0-dev.6`. La aceptación real de ENZONA sigue pendiente. Estos resultados no son una certificación de operaciones bancarias ni una release 1.0.0.
 
-## Comprobado
+## ENZONA experimental: comprobaciones sintéticas
+
+- **379 pruebas JVM sin fallos:** 126 de `core` y 253 de `app`. Incluyen contratos HTTP, aislamiento de cuenta, sesión y renovación, un único envío por intento, evidencia tardía, respaldo e identificación de tarjetas. Son pruebas sintéticas; no acceden al servidor ENZONA.
+- La autorización queda invalidada al pausar o abandonar su contexto. La prueba retiene la escritura del diario, pausa y reanuda antes de liberarla y comprueba que no se envía el pago. Tras aprobar, cerrar la revisión no afirma que se canceló una operación que pudo enviarse; el resultado permanece asociado a su titular.
+- La señal de cargar tarjetas después del acceso sobrevive a recrear la pantalla, se consume una vez y no consulta saldos automáticamente. La carga local y la renovación de tokens no generan esa señal.
+- Titular y vencimiento conocidos se representan sin fabricar PAN ni registros bancarios; un formato remoto no demostrado no se convierte a otro. El historial ordena fechas ISO reconocidas sin usar la fecha de descarga como fecha de operación y conserva las fechas desconocidas.
+- Compilación de debug, preview, androidTest y release, más lint. APK firmado `dev.duardo.neotransfer`, código 8; certificado SHA-256 `057440783be510ab9fbec65903f3876e60e5f04c41ea14d029db4f5451d0aad9`.
+- Actualización de `dev.5` a `dev.6` con el mismo certificado y sin borrar datos. El titular confirmó tras desbloquear que se conservaron las tarjetas BPA/BANDEC y sus saldos. Se retiraron debug, androidTest y preview; quedó únicamente el paquete principal. SHA-256 del APK instalado: `2d62c5b3c847685c0d25776e38c3ae2ebf41fd3c80f39db8a7154213f7a04491`.
+- **288 comprobaciones Android sin fallos** en TECNO CM5 con Android 36, usando bases, claves y transporte sintéticos. Incluyen separación de titulares ENZONA, conservación del historial, diario sin reenvío, almacenamiento Keystore, restauración y rollback del respaldo. Los módulos excluidos se rechazan antes de preparar operaciones o acceder al módem; sus datos históricos se conservan.
+- Recorridos sintéticos en claro y oscuro: cartera, actividad bancaria y ENZONA, comprobantes, consultas de servicios, recarga Nauta Hogar, guardado de referencia, generación y revisión de QR, edición de tarjeta y transferencia hasta revisión. Un rechazo simulado conserva los datos y borra la contraseña; no hubo envío de dinero. Agua pide elegir explícitamente un acceso bancario cuando el origen seleccionado es ENZONA.
+- Con fuente al 150 %, las acciones de Inicio se distribuyen en dos filas y las etiquetas de navegación permanecen completas. Se comprobaron también el QR y su revisión ampliados. Los rótulos de tarjetas vecinas ya no dejan letras cortadas; los números conocidos permanecen visibles. La actividad de Inicio se alcanza mediante desplazamiento.
+- La revisión independiente no encontró bloqueadores de uso en los recorridos sintéticos mostrados. La cuenta consultada de Nauta no se repite cuando coincide con la devuelta. Quedan formatos de fecha del proveedor por contrastar; no se han extrapolado formatos desconocidos ni se certifica toda variante visual.
+- Una medición de seis transiciones de navegación, sin dumps de accesibilidad entre ellas, registró 432 frames: 1 marcado como janky por la métrica actual (0,23 %) y 68 por la métrica legacy (15,74 %), con percentil 95 de 65 ms y 99 de 300 ms. Los logs contienen avisos de plataforma; no se afirma fluidez perfecta ni se ha atribuido su causa. Las capturas por sí solas no certifican las animaciones.
+
+Reproducción: `./gradlew --no-daemon --offline :core:test :app:testDebugUnitTest :app:assembleDebug :app:assemblePreview :app:assembleRelease :app:lintDebug`, seguido de `:app:assembleDebugAndroidTest`. Las capturas, fixtures privados de investigación y logs del dispositivo no forman parte del repositorio.
+
+## Comprobaciones anteriores BPA/BANDEC, hasta dev.5
 
 - **204 pruebas JVM**, sin fallos: contratos, validaciones, análisis de recibos, respaldo, controladores y presentación de cuentas conocidas. Incluyen el rechazo de CUC para nuevas operaciones, conservación del código USD y lectura histórica de CUC.
 - **252 comprobaciones Android**, sin fallos, en TECNO CM5 con Android 36, más una ejecución específica anterior de contenido de notificaciones. Usan bases aisladas, claves y mensajes sintéticos, y un transporte que no envía operaciones bancarias.
@@ -24,8 +40,9 @@ Corte: 27 de septiembre de 2026, versión de desarrollo `1.0.0-dev.5`. Estos res
 
 ## Pendiente para la entrega
 
-- Selección entre varias tarjetas del mismo banco y aceptación de operaciones monetarias con autorización del titular. Las consultas reales disponibles de BPA/BANDEC se describen arriba; BANMET, MiTransfer y Clásica conservan evidencia técnica separada de aceptación real.
-- Respuestas demostradas de historial BPA/BANMET y últimos pagos BANDEC63; resultados de MiTurno105/106/107 y del historial de cupones. No extrapolar formatos ni inferir éxito.
+- Acceso real a ENZONA, tarjetas, saldo e historial. El titular creará la cuenta y vinculará primero sus tarjetas en la aplicación oficial; esa incorporación nativa está aplazada. No hay entrega de notificaciones ENZONA con la app cerrada demostrada.
+- Selección entre varias tarjetas del mismo banco y aceptación de operaciones monetarias con autorización concreta del titular. Las consultas reales disponibles de BPA/BANDEC se describen arriba; las funciones excluidas en [cobertura](cobertura.md) no forman parte de esta aceptación.
+- Respuestas demostradas de historial BPA y últimos pagos BANDEC63. No extrapolar formatos ni inferir éxito.
 - Cámara física con papel, manuscritos, reflejos y distintas condiciones; recepción y apertura de notificaciones tras muerte del proceso y restricciones del fabricante. La prueba de NotificationManager no reproduce esos escenarios ni el cierre forzado.
 - Recuperación automática por discrepancia entre saldos e historial. La consulta manual de BANDEC está disponible y probada; una diferencia de saldo nunca se convierte por sí sola en un movimiento.
 - Fidelidad 1:1 de las tarjetas: los recursos actuales son reconstrucciones y todavía no la acreditan. Revisión de los demás recorridos y publicación final con SHA-256. El APK de prueba `dev.5` está firmado con el mismo certificado de la instalación previa; no se ha publicado una release 1.0.0.

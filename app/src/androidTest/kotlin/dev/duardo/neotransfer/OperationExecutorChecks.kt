@@ -460,7 +460,7 @@ object OperationExecutorChecks {
             h.await { h.modem.services == listOf(40, 46, 45) }
             h.main { h.modem.reply(UssdResult.NetworkFailure(-1)) }
         }
-        case("Linked Clasica uses its personal parent session and preserves the product identity for encoding", ProviderId.MITRANSFER) { h ->
+        case("Retired linked Clasica preserves its legacy card but cannot prepare or dispatch", ProviderId.MITRANSFER) { h ->
             h.repository.putCard(CardRecord("classic", h.registration.id, "0000000000000001", "Clásica", currency = "USD", profileId = "CLASSIC"))
             h.await { h.wallet.snapshot.cards.any { it.id == "classic" } }
             val identity = ProviderIdentity(ProviderId.MITRANSFER, ProfileId.CLASSIC)
@@ -468,46 +468,41 @@ object OperationExecutorChecks {
                 productId = "classic", productNumber = "0000000000000001", productCurrency = "USD")
             val request = ServiceRequest("wallet.classic.transfer", identity, SourceSelector.Explicit("0000000000000001"),
                 values = mapOf("destination" to "0000000000000002", "amount" to "1"))
-            h.main { h.executor.execute(request, target.copy(productId = null, productNumber = null), "1234".toCharArray(), approved = true) }
-            check(h.main { h.modem.services.isEmpty() })
-            h.main { h.executor.execute(request, target, "1234".toCharArray(), approved = true) }
-            h.authenticate(); h.await { h.modem.services == listOf(40, 45) }
-            val operations = h.repository.snapshot().operations
-            check(operations.single { it.specId == "wallet.authenticate" }.profileId == "PERSONAL")
-            check(operations.single { it.specId == "wallet.classic.transfer" }.let { it.profileId == "CLASSIC" && it.registrationId == h.registration.id })
-            h.main { h.modem.reply(UssdResult.NetworkFailure(-1)) }
+            check(OperationCatalog.find(request.operationId) == null)
+            check(!OperationCatalog.supports(identity))
+            h.assertBlocked(request, target)
+            check(h.repository.snapshot().cards.single { it.id == "classic" }.profileId == "CLASSIC")
         }
-        case("MiTransfer context selects the explicit bag and rejects a mismatched selected currency", ProviderId.MITRANSFER) { h ->
+        case("Retired MiTransfer bags remain stored but neither implicit nor explicit selection can execute", ProviderId.MITRANSFER) { h ->
             h.repository.putAccount(AccountRecord("cup", h.registration.id, "", "CUP", currency = "CUP"))
             h.repository.putAccount(AccountRecord("usd", h.registration.id, "", "USD", currency = "USD"))
             h.repository.setSettings(h.repository.snapshot().settings.copy(selectedRegistrationId = h.registration.id,
                 selectedAccountId = "cup", selectedCardId = null, subscriptionId = 7))
             h.await { h.wallet.snapshot.settings.selectedAccountId == "cup" && h.wallet.snapshot.accounts.size == 2 }
             val controller = h.controller()
+            h.await { !controller.busy }
             val request = ServiceRequest("wallet.transfer", h.target().identity, currency = Currency.USD,
                 values = mapOf("mobile" to "50000001", "amount" to "1"))
             h.main {
                 check(runCatching { controller.serviceContext(request) }.isFailure)
-                val chosen = controller.serviceContext(request, "usd")
-                check(chosen.productId == "usd" && chosen.productNumber == "" && chosen.productCurrency == "USD")
+                check(runCatching { controller.serviceContext(request, "usd") }.isFailure)
                 controller.lock()
             }
+            check(OperationCatalog.find(request.operationId) == null)
+            h.assertBlocked(request, h.target().copy(productId = "usd", productNumber = "", productCurrency = "USD"))
+            check(h.repository.snapshot().accounts.map { it.id }.toSet() == setOf("cup", "usd"))
         }
-        case("QR execution keeps the original merchant and fixed amount immutable", ProviderId.MITRANSFER) { h ->
+        case("Retired MiTransfer QR cannot dispatch even with the original valid merchant and amount", ProviderId.MITRANSFER) { h ->
             val qr = QrPayment("FIXTURE", "123", Money("10.00".toBigDecimal(), Currency.CUP), "1", "", "", null, null, null)
             val request = WalletQrOperations.fromQr(h.target().identity, SourceSelector.Default, Currency.CUP, qr, qr.amount)
             val target = h.target().copy(originalQr = qr)
-            for (changes in listOf(mapOf("amount" to "250.00"), mapOf("provider" to "999"))) {
-                val altered = ServiceRequest(request.operationId, request.identity, request.source, request.currency, request.values + changes)
-                h.main { h.executor.execute(altered, target, "1234".toCharArray(), approved = true) }
-                check(h.main { h.modem.services.isEmpty() })
+            check(OperationCatalog.find(request.operationId) == null)
+            h.assertBlocked(request, target)
+            for (spec in WalletOperations.all + WalletQrOperations.all) {
+                check(OperationCatalog.find(spec.id) == null) { spec.id }
+                for (identity in spec.identities) h.assertBlocked(ServiceRequest(spec.id, identity),
+                    h.target().copy(identity = identity, authenticationIdentity = ProviderIdentity(ProviderId.MITRANSFER)))
             }
-            h.main { h.executor.execute(request, target.copy(originalQr = null), "1234".toCharArray(), approved = true) }
-            check(h.main { h.modem.services.isEmpty() })
-            h.main { h.executor.execute(request, target, "1234".toCharArray(), approved = true) }
-            h.await { h.modem.services == listOf(30) }
-            check(h.repository.snapshot().operations.single().qr?.transactionId == qr.transactionId)
-            h.main { h.modem.reply(UssdResult.NetworkFailure(-1)) }
         }
         case("Interactive USSD opens the native transport without using the callback modem API") { h ->
             val request = ServiceRequest("cubacel.plans", ProviderIdentity(ProviderId.CUBACEL))
@@ -639,16 +634,26 @@ object OperationExecutorChecks {
         }
         case("Access reservation reuses its durable ID and never disables an existing access") { h ->
             var reserved: RegistrationRecord? = null
-            h.main { h.wallet.reserveRegistration(ProviderIdentity(ProviderId.MITRANSFER), 7) { reserved = it } }
+            h.main { h.wallet.reserveRegistration(ProviderIdentity(ProviderId.BANDEC), 7) { reserved = it } }
             h.await { reserved != null }
             val first = requireNotNull(reserved)
             check(!first.enabled && first.credentialAlias == null)
             reserved = null
-            h.main { h.wallet.reserveRegistration(ProviderIdentity(ProviderId.MITRANSFER), 7) { reserved = it } }
+            h.main { h.wallet.reserveRegistration(ProviderIdentity(ProviderId.BANDEC), 7) { reserved = it } }
             h.await { reserved != null }; check(reserved == first)
             h.main { h.wallet.reserveRegistration(h.target().identity, 7) { check(it == h.registration); reserved = it } }
             h.await { reserved == h.registration }
             check(h.repository.snapshot().registrations.single { it.id == h.registration.id }.enabled)
+        }
+        case("Excluded MiTransfer access cannot reserve a registration or change existing bank access") { h ->
+            val before = h.repository.snapshot()
+            var rejected = false
+            var reserved = false
+            h.main { h.wallet.reserveRegistration(ProviderIdentity(ProviderId.MITRANSFER), 7,
+                onFailure = { rejected = true }) { reserved = true } }
+            h.await { rejected }
+            check(!reserved && h.repository.snapshot() == before)
+            check(h.main { h.modem.services.isEmpty() && h.nativeRequests.isEmpty() })
         }
         case("Wallet close waits for a cancelled blocking IO read before closing its repository") { h ->
             val entered = CountDownLatch(1)
@@ -677,23 +682,11 @@ object OperationExecutorChecks {
             } finally { release.countDown() }
             check(ended.await(10, TimeUnit.SECONDS) && repositoryClosed.get())
         }
-        case("Caja Extra rejects absent, changed and dynamic original QR before modem access") { h ->
+        case("Retired Caja Extra rejects its valid original QR without preparation or dispatch") { h ->
             val qr = QrPayment("ESTATICO", "123", Money("10.00".toBigDecimal(), Currency.CUP), "1", "", "", null, null, null)
             val request = CashExtraOperations.fromQr(h.target().identity, SourceSelector.Default, Currency.CUP, qr, qr.amount)
-            val altered = ServiceRequest(request.operationId, request.identity, request.source, request.currency, request.values + ("provider" to "999"))
-            for ((value, original) in listOf(request to null, altered to qr, request to qr.copy(transactionId = "DINAMICO"))) {
-                h.main { h.executor.execute(value, h.target().copy(originalQr = original), "1234".toCharArray(), approved = true) }
-                check(h.main { h.modem.services.isEmpty() })
-            }
-            h.main { h.executor.execute(request, h.target().copy(originalQr = qr), "1234".toCharArray(), approved = true) }
-            h.await { h.modem.services == listOf(40) }
-            h.main { h.modem.reply(Harness.processing) }
-            h.clock = h.clock.plusSeconds(1)
-            val access = BankSmsRecord(null, "Usted se ha autenticado en la plataforma de pagos moviles, en el Banco Popular de Ahorro, puede comenzar a utilizar nuestros servicios de pagos a traves del movil", h.clock, 7, sentAt = h.clock)
-            val result = SmsIngestor(h.repository, now = { h.clock }).ingest(access)
-            h.main { h.executor.observed(access, result) }
-            h.await { h.modem.services == listOf(40, 32) }
-            h.main { h.modem.reply(UssdResult.NetworkFailure(-1)) }
+            check(OperationCatalog.find(request.operationId) == null)
+            h.assertBlocked(request, h.target().copy(originalQr = qr))
         }
         case("Retired providers and profiles remain identifiable but cannot execute", ProviderId.MITRANSFER) { h ->
             val historical = RegistrationRecord("bfi-history", "owner", "BFI", "PERSONAL", "05", 7, null, "Histórico BFI")
@@ -702,29 +695,67 @@ object OperationExecutorChecks {
             val retired = listOf(
                 "bfi.balance" to ProviderIdentity(ProviderId.BFI),
                 "bpa.balance" to ProviderIdentity(ProviderId.BFI),
+                "banmet.balance" to ProviderIdentity(ProviderId.BANMET),
+                "banmet.transfer" to ProviderIdentity(ProviderId.BANMET),
                 "wallet.business.transfer" to ProviderIdentity(ProviderId.MITRANSFER, ProfileId.CLASSIC_BUSINESS),
                 "wallet.agent.mobile" to ProviderIdentity(ProviderId.MITRANSFER, ProfileId.AGENT),
             )
             for ((id, identity) in retired) {
                 val request = ServiceRequest(id, identity, currency = Currency.CUP)
-                check(OperationCatalog.validate(request).isNotEmpty())
-                check(runCatching { OperationCatalog.encode(request) }.isFailure)
+                check(!OperationCatalog.supports(identity))
                 val target = if (identity.provider == ProviderId.BFI)
                     ServiceExecutionContext(historical.id, identity, 7, null, historical)
                 else h.target().copy(identity = identity, authenticationIdentity = h.target().identity)
-                h.main { h.executor.execute(request, target, "1234".toCharArray(), approved = true) }
-                check(h.main { h.modem.services.isEmpty() })
+                h.assertBlocked(request, target)
             }
             for (id in listOf("miboleto.offers", "miboleto.redeem", "miboleto.seller.request-code", "wallet.ticket.buy", "wallet.ticket.list")) {
                 check(OperationCatalog.find(id) == null)
                 val request = ServiceRequest(id, h.target().identity)
-                h.main { h.executor.execute(request, h.target(), "1234".toCharArray(), approved = true) }
-                check(h.main { h.modem.services.isEmpty() })
+                h.assertBlocked(request)
             }
             check(OperationCatalog.all.all { it.identities.all(OperationCatalog::supports) })
-            for (provider in listOf("bpa", "bandec", "banmet")) check(OperationCatalog.find("$provider.transfer") != null)
+            for (provider in listOf("bpa", "bandec")) check(OperationCatalog.find("$provider.transfer") != null)
+            check(OperationCatalog.find("banmet.transfer") == null)
             check(h.repository.snapshot().registrations.single { it.id == historical.id } == historical)
             check(h.repository.snapshot().operations.isEmpty())
+        }
+        val excludedServices = linkedMapOf(
+            "gas" to listOf("gas"),
+            "Propia TFA and JovenClub" to listOf("propia", "tfa", "jovenclub"),
+            "plans and MiTransfer recharge" to listOf("plans", "wallet.recharge"),
+            "ONAT OFA and organizations" to listOf("onat.rc", "onat.nit", "ofa.contribution", "organization", "onat.query.complete", "onat.query.fiscal"),
+            "fines" to listOf("fine.contravention", "fine.traffic", "fine.contravention.query", "fine.traffic.query"),
+            "postal" to listOf("postal"),
+            "loans" to listOf("loan", "loan.bandec", "loan.installment"),
+            "deposits" to listOf("deposit.bpa", "deposit.bandec", "deposit.banmet", "deposit.close"),
+            "contracted services" to listOf("contracted.add", "contracted.query", "contracted.remove", "contracted.pay"),
+        )
+        for ((family, suffixes) in excludedServices) for (provider in listOf(ProviderId.BPA, ProviderId.BANDEC))
+            case("Excluded $family cannot prepare or dispatch through $provider", provider) { h ->
+                for (suffix in suffixes) {
+                    val id = "service.$suffix"
+                    check(OperationCatalog.find(id) == null) { id }
+                    h.assertBlocked(ServiceRequest(id, h.target().identity, currency = Currency.CUP,
+                        values = mapOf("account" to "000000000001", "paymentType" to "2", "amount" to "10")))
+                }
+            }
+        for (provider in listOf(ProviderId.BPA, ProviderId.BANDEC))
+            case("Excluded $provider management actions cannot prepare or dispatch", provider) { h ->
+                for (suffix in listOf("limits", "change-limits", "digital-pin", "recover-pin", "reprint-card", "open-account",
+                    "statement", "fiscal-account", "loan-query", "postal-query", "exchange-rate")) {
+                    val id = "${provider.name.lowercase()}.$suffix"
+                    check(OperationCatalog.find(id) == null) { id }
+                    h.assertBlocked(ServiceRequest(id, h.target().identity))
+                }
+            }
+        case("Excluded Cubacel calls advances vouchers and SMS cannot reach either transport") { h ->
+            val identity = ProviderIdentity(ProviderId.CUBACEL)
+            for (suffix in listOf("advance", "voucher", "call", "call99", "emergency", "infoSms")) {
+                val id = "cubacel.$suffix"
+                check(OperationCatalog.find(id) == null) { id }
+                h.assertBlocked(ServiceRequest(id, identity, values = mapOf("mobile" to "50000001")),
+                    ServiceExecutionContext(null, identity, 7, null, null))
+            }
         }
         case("Nauta receipt settles the actual debit and cannot be reused for a second request", ProviderId.BANDEC) { h ->
             val request = h.nautaRequest()
@@ -846,37 +877,24 @@ object OperationExecutorChecks {
             check(h.repository.snapshot().operations.filter { it.specId in setOf(debt.operationId, recharge.operationId) }.none { it.status == OperationStatus.CONFIRMED })
             check(h.repository.snapshot().receipts.all { it.operationId == null })
         }
-        case("Stamp receipt identifies payer and entity before completing the bank request", ProviderId.BANDEC) { h ->
+        case("Retired stamp payment and query cannot dispatch despite complete payer and entity fields", ProviderId.BANDEC) { h ->
             val request = ServiceRequest("service.stamp", h.target().identity, currency = Currency.CUP, values = mapOf(
                 "municipality" to "2101", "taxpayer" to "00000000000", "taxCode" to "1", "period" to "9/2026", "amount" to "50", "entity" to "95016"))
-            h.main { h.executor.execute(request, h.target(), "12345".toCharArray(), approved = true) }
-            h.authenticate(); h.await { h.modem.services == listOf(40, 43) }
-            h.main { h.modem.reply(Harness.processing) }
-            h.clock = h.clock.plusSeconds(1)
-            val body = "Banco Bandec El pago del impuesto sobre el documento (sello del timbre) fue completado.\nCI: 00000000000\nEntidad: Oficinas Tramites MININT\nValor del sello: 50 CUP\nImporte Pagado: 50 CUP\nNro. Transaccion Banco: STAMP01\nIdSello: 000000000001."
-            for (bad in listOf(body.replace("CI: 00000000000", "CI: 00000000001"),
-                body.replace("Oficinas Tramites MININT", "Otros tramites"), body.replace("IdSello: 000000000001.", ""),
-                body.replace("CI: 00000000000", ""), body.replace("Nro. Transaccion Banco: STAMP01", ""))) {
-                h.observe(BankSmsRecord(null, bad.replace("STAMP01", "BAD" + bad.hashCode().toUInt()), h.clock, 7, sentAt = h.clock))
-                check(h.repository.snapshot().operations.single { it.specId == request.operationId }.status != OperationStatus.CONFIRMED)
+            for (id in listOf("service.stamp", "service.stamp.query")) {
+                check(OperationCatalog.find(id) == null)
+                h.assertBlocked(ServiceRequest(id, request.identity, request.source, request.currency, request.values))
             }
-            h.observe(BankSmsRecord(null, body, h.clock, 7, sentAt = h.clock))
-            check(h.repository.snapshot().operations.single { it.specId == request.operationId }.status == OperationStatus.CONFIRMED)
         }
-        case("MiTurno rechecks the date after authentication crosses midnight", ProviderId.BANDEC) { h ->
+        case("Retired MiTurno rejects past current and future bookings without authentication or queues", ProviderId.BANDEC) { h ->
             val day = java.time.LocalDate.of(2026, 9, 23)
             h.clock = day.atTime(23, 59, 59).atZone(java.time.ZoneId.systemDefault()).toInstant()
-            fun request(date: String) = ServiceRequest("service.miturno.change", h.target().identity,
-                values = mapOf("identity" to "00000000001", "serviceType" to "1", "date" to date))
-            h.main { h.executor.execute(request("22/09/2026"), h.target(), "12345".toCharArray(), approved = true) }
-            check(h.main { h.modem.services.isEmpty() })
-            h.main { h.executor.execute(request("23/09/2026"), h.target(), "12345".toCharArray(), approved = true) }
-            h.authenticate(); h.await { !h.executor.busy }
-            check(h.main { h.modem.services == listOf(40) })
-            check(h.repository.snapshot().operations.none { it.specId == "service.miturno.change" })
-            h.main { h.executor.execute(request("24/09/2026"), h.target(), "12345".toCharArray(), approved = true) }
-            h.await { h.modem.services == listOf(40, 105) }
-            h.main { h.modem.reply(UssdResult.NetworkFailure(-1)) }
+            for (suffix in listOf("reserve", "change", "cancel", "query")) {
+                val id = "service.miturno.$suffix"
+                check(OperationCatalog.find(id) == null)
+                for (date in listOf("22/09/2026", "23/09/2026", "24/09/2026")) h.assertBlocked(
+                    ServiceRequest(id, h.target().identity, values = mapOf("identity" to "00000000001", "serviceType" to "1",
+                        "entity" to "1", "branch" to "1", "phone" to "50000001", "date" to date)))
+            }
         }
         case("Conflicting stamp identities under one bank reference are not collapsed as duplicate facts", ProviderId.BANDEC) { h ->
             val body = "Banco Bandec El pago del impuesto sobre el documento (sello del timbre) fue completado.\nCI: 00000000000\nEntidad: Oficinas Tramites MININT\nValor del sello: 50 CUP\nImporte Pagado: 50 CUP\nNro. Transaccion Banco: SAMESTAMP\nIdSello: 000000000001."
@@ -902,111 +920,33 @@ object OperationExecutorChecks {
             check(protected.blob.startsWith("1:") && !protected.blob.contains(Harness.fuelEnvelope))
             check(stored.receipts.single().operationId == null && stored.operations.isEmpty())
         }
-        case("Fuel purchase evidence arriving before the callback waits for its valid acknowledgement", ProviderId.BANDEC) { h ->
-            h.beginFuel()
-            h.clock = h.clock.plusSeconds(1)
-            h.observeFuel(BankSmsRecord(null, h.fuelBody(), h.clock, 7, sentAt = h.clock))
-            check(h.repository.snapshot().operations.single { it.specId == "service.fuel" }.status != OperationStatus.CONFIRMED)
-            check(h.repository.snapshot().fuelObservations.single().purchaseEvidence != null)
-            h.main { h.modem.reply(Harness.processing) }
-            h.await { h.wallet.snapshot.operations.single { it.specId == "service.fuel" }.status == OperationStatus.CONFIRMED }
-            val operation = h.repository.snapshot().operations.single { it.specId == "service.fuel" }
-            check(operation.currency == "CUP" && operation.parameters["amountCurrency"] == "1")
-            check(h.repository.snapshot().receipts.single().operationId == operation.id)
-            h.clock = h.clock.plusSeconds(1)
-            h.observeFuel(BankSmsRecord(null, h.fuelBody(), h.clock, 7, sentAt = h.clock))
-            check(h.repository.snapshot().receipts.size == 1 && h.repository.snapshot().movements.size == 1)
-        }
-        for (late in listOf(false, true)) case("A ${if (late) "late" else "timely"} acknowledged fuel receipt persists with presentation limited to its wait", ProviderId.BANDEC) { h ->
-            h.beginFuel(); h.main { h.modem.reply(Harness.processing) }
-            h.await { h.wallet.snapshot.operations.single { it.specId == "service.fuel" }.status == OperationStatus.AWAITING_CONFIRMATION }
-            val sent = h.clock.plusSeconds(1)
-            if (late) {
-                h.elapseTimeout()
-                h.await { h.wallet.snapshot.operations.single { it.specId == "service.fuel" }.timeoutAt != null }
+        case("Retired Fuel purchase and coupon actions cannot prepare dispatch or queue a refresh", ProviderId.BANDEC) { h ->
+            for (id in listOf("service.fuel", "service.fuel.movements", "service.fuel.list", "service.fuel.status", "service.fuel.refresh-key")) {
+                check(OperationCatalog.find(id) == null)
+                h.assertBlocked(ServiceRequest(id, h.target().identity, currency = Currency.CUP,
+                    values = mapOf("amount" to "10", "serial" to "0000000000001")))
             }
-            val before = h.main { h.results.toList() }
-            h.clock = h.clock.plusSeconds(2)
-            h.observeFuel(BankSmsRecord(null, h.fuelBody(), h.clock, 7, sentAt = sent))
-            h.await { h.wallet.snapshot.operations.single { it.specId == "service.fuel" }.status == OperationStatus.CONFIRMED }
-            check(h.repository.snapshot().receipts.single().operationId != null)
-            check(h.main { if (late) h.results == before else h.results == before + "Compra del cupón confirmada por el comprobante del banco." })
-            check(h.main { h.modem.services == listOf(40, 35) })
         }
-        case("A received coupon cannot override a rejected purchase callback", ProviderId.BANDEC) { h ->
-            h.beginFuel()
-            h.clock = h.clock.plusSeconds(1)
-            h.observeFuel(BankSmsRecord(null, h.fuelBody(), h.clock, 7, sentAt = h.clock))
-            h.main { h.modem.reply(UssdResult.Response("Solicitud rechazada")) }
-            h.await { !h.executor.busy }
-            h.clock = h.clock.plusSeconds(1)
-            h.observeFuel(BankSmsRecord(null, h.fuelBody(), h.clock, 7, sentAt = h.clock))
-            check(h.repository.snapshot().operations.single { it.specId == "service.fuel" }.status != OperationStatus.CONFIRMED)
-            check(h.repository.snapshot().fuelCoupons.size == 1 && h.repository.snapshot().receipts.single().operationId == null)
-        }
-        case("Fuel confirmation expires when its callback is missing or arrives outside the local evidence window", ProviderId.BANDEC) { h ->
-            h.beginFuel()
-            h.clock = h.clock.plusSeconds(1)
-            h.observeFuel(BankSmsRecord(null, h.fuelBody(), h.clock, 7, sentAt = h.clock))
-            check(h.repository.snapshot().receipts.single().operationId == null)
-            h.clock = h.clock.plusSeconds(31)
-            h.main { h.modem.reply(Harness.processing) }
-            h.await { !h.executor.busy }
-            h.observeFuel(BankSmsRecord(null, h.fuelBody(), h.clock, 7, sentAt = h.clock))
-            check(h.repository.snapshot().operations.single { it.specId == "service.fuel" }.status != OperationStatus.CONFIRMED)
-            check(h.main { h.modem.services == listOf(40, 35) })
-        }
-        case("Fuel status renewal list and coupon credit are observations rather than bank purchase receipts", ProviderId.BANDEC) { h ->
-            h.beginFuel(); h.main { h.modem.reply(Harness.processing) }
+        case("Legacy Fuel status renewal list and credit remain observations without a live purchase", ProviderId.BANDEC) { h ->
             for ((header, label) in listOf("Estado del cupon de combustible con" to "Saldo actual",
                 "Actualizado el token del cupon de combustible con" to "Saldo actual",
                 "Se ha realizado una devolucion al cupon de combustible con" to "Importe acreditado")) {
                 h.clock = h.clock.plusSeconds(1)
                 h.observeFuel(BankSmsRecord(null, h.fuelBody(header = header, amountLabel = label), h.clock, 7, sentAt = h.clock))
-                check(h.repository.snapshot().operations.single { it.specId == "service.fuel" }.status != OperationStatus.CONFIRMED)
+                check(h.repository.snapshot().operations.isEmpty())
+                check(h.repository.snapshot().receipts.none { it.operationId != null })
             }
             h.clock = h.clock.plusSeconds(1)
             val body = "Mis cupones de combustible.\nNo.Serie;Saldo actual;Importe pagado;Moneda;ID Banco;ID TM;Fecha;Banco;DatosCupon\n" +
                 "0000000000002;10.00;10.00;CUP;BANK2;TM2;23/09/2026;BANDEC;${Harness.fuelEnvelope}"
             h.observeFuel(BankSmsRecord(null, body, h.clock, 7, sentAt = h.clock))
-            check(h.repository.snapshot().operations.single { it.specId == "service.fuel" }.status != OperationStatus.CONFIRMED)
             check(h.repository.snapshot().receipts.none { it.operationId != null })
             h.clock = h.clock.plusSeconds(1)
             h.observeFuel(BankSmsRecord(null, h.fuelBody(serial = "0000000000003", reference = "BANK3"), h.clock, 7, sentAt = h.clock))
-            check(h.repository.snapshot().operations.single { it.specId == "service.fuel" }.status == OperationStatus.CONFIRMED)
-        }
-        case("Fuel rejects mismatched bank SIM amount currency and nonfresh evidence without deriving a discount", ProviderId.BANDEC) { h ->
-            h.beginFuel(); h.main { h.modem.reply(Harness.processing) }
-            val started = h.repository.snapshot().operations.single { it.specId == "service.fuel" }.startedAt
-            h.clock = h.clock.plusSeconds(1)
-            val messages = listOf(
-                BankSmsRecord(null, h.fuelBody(serial = "0000000000001", reference = "WRONG1", bank = "BPA"), h.clock, 7, sentAt = h.clock),
-                BankSmsRecord(null, h.fuelBody(serial = "0000000000002", reference = "WRONG2"), h.clock, 8, sentAt = h.clock),
-                BankSmsRecord(null, h.fuelBody(serial = "0000000000003", reference = "WRONG3", amount = "9.00"), h.clock, 7, sentAt = h.clock),
-                BankSmsRecord(null, h.fuelBody(serial = "0000000000004", reference = "WRONG4", currency = "USD"), h.clock, 7, sentAt = h.clock),
-                BankSmsRecord(null, h.fuelBody(serial = "0000000000005", reference = "WRONG5"), h.clock.plusSeconds(60), 7, sentAt = h.clock.plusSeconds(60)),
-                BankSmsRecord(null, h.fuelBody(serial = "0000000000006", reference = "WRONG6"), Instant.ofEpochMilli(started - 1), 7, sentAt = Instant.ofEpochMilli(started - 1)),
-            )
-            for (record in messages) {
-                h.observeFuel(record)
-                check(h.repository.snapshot().operations.single { it.specId == "service.fuel" }.status != OperationStatus.CONFIRMED)
-            }
-        }
-        case("A late fuel purchase cannot choose the newer of two identical requests after uncertainty was reviewed", ProviderId.BANDEC) { h ->
-            h.beginFuel(); h.main { h.modem.reply(Harness.processing) }
-            h.await { h.wallet.snapshot.operations.single { it.specId == "service.fuel" }.status == OperationStatus.AWAITING_CONFIRMATION }
-            val first = h.repository.snapshot().operations.single { it.specId == "service.fuel" }
-            check(h.repository.updateOperationStatus(first.id, first.status, OperationStatus.UNCERTAIN, h.clock.toEpochMilli()))
-            h.repository.putOperation(first.copy(status = OperationStatus.UNCERTAIN, reviewRequired = false))
-            h.await { h.wallet.snapshot.operations.single { it.specId == "service.fuel" }.status == OperationStatus.UNCERTAIN }
-            h.clock = h.clock.plusSeconds(31)
-            h.main { h.executor.execute(h.fuelRequest(), h.target(), "12345".toCharArray(), approved = true) }
-            h.await { h.modem.services == listOf(40, 35, 35) }
-            h.main { h.modem.reply(Harness.processing) }
-            h.clock = h.clock.plusSeconds(1)
-            h.observeFuel(BankSmsRecord(null, h.fuelBody(), h.clock, 7, sentAt = h.clock))
-            check(h.repository.snapshot().operations.filter { it.specId == "service.fuel" }.let { it.size == 2 && it.none { op -> op.status == OperationStatus.CONFIRMED } })
-            check(h.repository.snapshot().receipts.single().operationId == null)
+            val stored = h.repository.snapshot()
+            check(stored.fuelCoupons.map { it.serial }.toSet() == setOf("0000000000001", "0000000000002", "0000000000003"))
+            check(stored.receipts.isNotEmpty() && stored.receipts.all { it.operationId == null } && stored.operations.isEmpty())
+            check(h.main { h.modem.services.isEmpty() && h.nativeRequests.isEmpty() && h.confirmations.isEmpty() && h.refreshCallbacks.isEmpty() })
         }
         case("An automatic balance shares the original deadline and cannot extend a timeout") { h ->
             val started = h.clock
@@ -1194,6 +1134,29 @@ object OperationExecutorChecks {
             }
         }
         fun target() = ServiceExecutionContext(registration.id, ProviderIdentity(ProviderId.valueOf(registration.providerId)), 7, null, registration, accessGeneration = generation)
+        fun assertBlocked(request: ServiceRequest, executionContext: ServiceExecutionContext = target()) {
+            check(OperationCatalog.find(request.operationId) == null || !OperationCatalog.supports(request.identity)) { request.operationId }
+            check(OperationCatalog.validate(request).isNotEmpty()) { request.operationId }
+            check(runCatching { OperationCatalog.encode(request) }.exceptionOrNull() is IllegalArgumentException) { request.operationId }
+            val before = repository.snapshot()
+            val pin = "1".repeat(request.identity.bank?.pinLength ?: 4).toCharArray()
+            var prepared = false
+            main {
+                check(!executor.busy && modem.isIdle())
+                val resultCount = results.size
+                executor.execute(request, executionContext, pin, approved = true, onPrepared = { prepared = true })
+                check(!prepared && !executor.busy && modem.isIdle())
+                check(pin.all { it == '\u0000' })
+                check(results.size == resultCount + 1 && results.last().isNotBlank())
+                check(modem.services.isEmpty() && nativeRequests.isEmpty() && confirmations.isEmpty())
+                check(timeoutCallbacks.isEmpty() && refreshCallbacks.isEmpty())
+            }
+            // Flush the real persistence queue before asserting no operation or refresh was enqueued.
+            var drained = false
+            main { wallet.transact(block = { Unit }, onSuccess = { drained = true }) }
+            await { drained }
+            check(repository.snapshot() == before) { "La operación retirada alteró datos o encoló trabajo" }
+        }
         fun controller(protector: FuelEnvelopeProtector? = null) = main {
             BankController(context, modem, { emptyList() }, { listOf(SimChoice(7, "Fixture")) }, { clock }, wallet, protector).also(controllers::add)
         }
@@ -1218,11 +1181,6 @@ object OperationExecutorChecks {
             var finished = false
             main { executor.observed(record, result); wallet.transact(block = { Unit }, onSuccess = { finished = true }) }
             await { finished }
-        }
-        fun fuelRequest() = ServiceRequest("service.fuel", target().identity, currency = Currency.CUP, values = mapOf("amount" to "10"))
-        fun beginFuel() {
-            main { executor.execute(fuelRequest(), target(), "12345".toCharArray(), approved = true) }
-            authenticate(); await { modem.services == listOf(40, 35) }
         }
         fun fuelBody(serial: String = "0000000000001", reference: String = "BANK1", amount: String = "10.00", currency: String = "CUP",
                      bank: String = "Bandec", header: String = "El pago del cupon de combustible fue completado.", amountLabel: String = "Importe pagado") =

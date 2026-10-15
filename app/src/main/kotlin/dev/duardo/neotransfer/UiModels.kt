@@ -2,6 +2,10 @@ package dev.duardo.neotransfer
 
 import dev.duardo.neotransfer.core.*
 import dev.duardo.neotransfer.data.*
+import dev.duardo.neotransfer.enzona.EnzonaRemoteCard
+import dev.duardo.neotransfer.enzona.EnzonaWalletState
+import java.math.BigDecimal
+import java.text.Normalizer
 import java.time.Instant
 
 internal enum class ProductKind { CARD, ACCOUNT, WALLET }
@@ -10,6 +14,9 @@ internal data class WalletProductUi(
     val kind: ProductKind, val name: String, val number: String?, val currency: Currency?,
     val source: SourceSelector, val available: Money? = null, val balanceAt: Instant? = null,
     val card: CardRecord? = null, val account: AccountRecord? = null,
+    val enzonaCardId: String? = null, val rawCurrency: String? = null,
+    val last4: String? = null, val rawAvailable: BigDecimal? = null,
+    val displayHolderName: String? = null, val displayExpiry: String? = null,
 )
 
 internal fun ProviderIdentity.title(): String = when (profile) {
@@ -33,7 +40,7 @@ internal fun ProviderIdentity.accessIdentity(): ProviderIdentity =
     if (provider == ProviderId.MITRANSFER) ProviderIdentity(ProviderId.MITRANSFER) else this
 
 internal fun authenticationProviders(): List<ProviderIdentity> = ProviderId.entries
-    .filter { it.bank != null || it == ProviderId.MITRANSFER }.map { ProviderIdentity(it) }.filter(OperationCatalog::supports)
+    .filter { it.bank != null }.map { ProviderIdentity(it) }.filter(OperationCatalog::supports)
 
 internal fun registrationLabel(registration: RegistrationRecord, state: AppUiState): String {
     val name = registration.label.ifBlank { registration.identity()?.title().orEmpty() }
@@ -45,25 +52,24 @@ internal fun registrationLineLabel(registration: RegistrationRecord, state: AppU
     registration.linePhone ?: state.sims.firstOrNull { it.id == registration.subscriptionId }?.label
         ?: registration.previousLinePhone?.let { "Línea anterior: $it" }
 
-internal fun productCurrencies(identity: ProviderIdentity): List<Currency> = when {
-    !OperationCatalog.supports(identity) -> emptyList()
-    identity.provider == ProviderId.MITRANSFER && identity.profile == ProfileId.CLASSIC -> listOf(Currency.USD)
-    identity.provider == ProviderId.MITRANSFER -> listOf(Currency.CUP, Currency.USD)
-    else -> CurrencyContract.BANK.active
-}
+internal fun productCurrencies(identity: ProviderIdentity): List<Currency> =
+    if (identity in authenticationProviders()) CurrencyContract.BANK.active else emptyList()
 
 internal fun hasAccess(state: AppUiState, identity: ProviderIdentity): Boolean =
     state.wallet.registrations.any { it.identity() == identity.accessIdentity() && it.id in state.configuredRegistrationIds } ||
         (state.wallet.registrations.none { it.identity() == identity.accessIdentity() } && identity.bank?.let { it in state.configuredBanks } == true)
 
 internal fun hasProductAccess(state: AppUiState, product: WalletProductUi): Boolean =
-    product.registrationId?.let { id -> id in state.configuredRegistrationIds &&
+    if (product.enzonaCardId != null) state.enzonaWallet.owner != null &&
+        state.enzonaWallet.cards.any { it.fundingSourceUuid == product.enzonaCardId }
+    else product.registrationId?.let { id -> id in state.configuredRegistrationIds &&
         state.wallet.registrations.singleOrNull { it.id == id }?.identity() == product.identity.accessIdentity()
     } ?: hasAccess(state, product.identity)
 
 internal fun initialCompatibleProduct(state: AppUiState, products: List<WalletProductUi>): WalletProductUi? =
-    if (state.selectedProductId != null) products.firstOrNull { it.id == state.selectedProductId }
-    else products.firstOrNull { it.identity.bank == state.bank }
+    if (state.enzonaWallet.selectedCardId != null) null
+    else if (state.selectedProductId != null) products.firstOrNull { it.id == state.selectedProductId && it.enzonaCardId == null }
+    else products.firstOrNull { it.enzonaCardId == null && it.identity.bank == state.bank }
 
 private fun BalanceRecord.validSentAt(): Long? = sentAt?.takeIf { it > 0 && it <= at && it <= System.currentTimeMillis() }
 private fun BalanceRecord.displayAt(): Long = validSentAt() ?: at
@@ -85,7 +91,7 @@ internal fun latestRegistrationBalance(rows: List<BalanceRecord>): BalanceRecord
     return dated.maxByOrNull { it.second }?.first ?: rows.maxByOrNull { it.at }
 }
 
-internal fun walletProducts(state: AppUiState): List<WalletProductUi> {
+internal fun walletProducts(state: AppUiState, includeHistorical: Boolean = false, includeEnzona: Boolean = true): List<WalletProductUi> {
     val wallet = state.wallet
     val products = buildList {
         wallet.cards.forEach { card ->
@@ -155,11 +161,80 @@ internal fun walletProducts(state: AppUiState): List<WalletProductUi> {
             }
         }
     }
-    return products.filter { OperationCatalog.supports(it.identity) }
+    val combined = if (includeEnzona) mergeEnzonaProducts(products, state.enzonaWallet) else products
+    return combined.filter { it.enzonaCardId != null || OperationCatalog.supports(it.identity) ||
+        (includeHistorical && (it.card != null || it.account != null)) }
 }
 
 internal fun selectedProduct(state: AppUiState, products: List<WalletProductUi> = walletProducts(state)): WalletProductUi? =
-    products.firstOrNull { it.id == state.selectedProductId } ?: products.firstOrNull { it.identity.bank == state.bank } ?: products.firstOrNull()
+    if (state.enzonaWallet.selectedCardId != null) products.singleOrNull { it.enzonaCardId == state.enzonaWallet.selectedCardId }
+    else products.firstOrNull { it.id == state.selectedProductId } ?: products.firstOrNull { it.enzonaCardId != null }
+        ?: products.firstOrNull { it.identity.bank == state.bank } ?: products.firstOrNull()
+
+internal fun enzonaBankIdentity(name: String?): ProviderIdentity? {
+    val normalized = name?.let { Normalizer.normalize(it, Normalizer.Form.NFD) }
+        ?.replace(Regex("\\p{M}+"), "")?.trim()?.replace(Regex("\\s+"), " ")?.uppercase()
+    return when (normalized) {
+        "BPA", "BANCO POPULAR DE AHORRO" -> ProviderIdentity.forBank(Bank.BPA)
+        "BANDEC", "BANCO DE CREDITO Y COMERCIO" -> ProviderIdentity.forBank(Bank.BANDEC)
+        else -> null
+    }
+}
+
+internal fun EnzonaRemoteCard.knownPan(wallet: EnzonaWalletState): String? = wallet.links.singleOrNull {
+    it.ownerSubject == wallet.owner && it.cardUuid == fundingSourceUuid
+}?.pan?.takeIf { it.matches(Regex("[0-9]{16}")) && (last4.isNullOrBlank() || it.takeLast(4) == last4) }
+
+internal fun mergeEnzonaProducts(local: List<WalletProductUi>, wallet: EnzonaWalletState): List<WalletProductUi> {
+    if (wallet.owner == null) return local
+    val linkedLocalIds = mutableSetOf<String>()
+    val remote = wallet.cards.mapNotNull { card ->
+        val observed = wallet.balances[card.fundingSourceUuid]
+        if (card.currency.equals("CUC", ignoreCase = true) || observed?.value?.currency.equals("CUC", ignoreCase = true))
+            return@mapNotNull null
+        val pan = card.knownPan(wallet)
+        val linked = local.singleOrNull { pan != null && it.kind == ProductKind.CARD && it.number == pan &&
+            it.enzonaCardId == null }?.takeIf { OperationCatalog.supports(it.identity) }
+        val explicitBank = enzonaBankIdentity(card.bankName)
+        val conflictingBank = explicitBank != null && local.any {
+            pan != null && it.kind == ProductKind.CARD && it.number == pan && it.enzonaCardId == null && it.identity != explicitBank
+        }
+        val compatibleLocal = linked.takeUnless { conflictingBank }
+        val identity = compatibleLocal?.identity ?: explicitBank ?: return@mapNotNull null
+        compatibleLocal?.let { linkedLocalIds += it.id }
+        val link = wallet.links.singleOrNull { it.ownerSubject == wallet.owner && it.cardUuid == card.fundingSourceUuid }
+            .takeUnless { conflictingBank }
+        val currencyText = observed?.value?.currency ?: card.currency
+        val currency = Currency.entries.singleOrNull { it.name == currencyText }
+        val amount = observed?.value?.availableBalance
+        WalletProductUi("enzona:${card.fundingSourceUuid}", null, identity, ProductKind.CARD,
+            link?.alias?.takeIf(String::isNotBlank) ?: compatibleLocal?.name?.takeIf(String::isNotBlank) ?: identity.title(),
+            pan.takeUnless { conflictingBank }, currency, SourceSelector.Default,
+            available = if (amount != null && currency != null && amount.signum() >= 0 && amount.scale() <= 2) Money(amount, currency) else null,
+            balanceAt = observed?.let { Instant.ofEpochMilli(it.observedAt) },
+            enzonaCardId = card.fundingSourceUuid, rawCurrency = currencyText,
+            last4 = card.last4?.takeIf { it.matches(Regex("[0-9]{4}")) }, rawAvailable = amount,
+            displayHolderName = card.cardholder?.takeIf(String::isNotBlank) ?: compatibleLocal?.card?.holderName?.printableCardHolder(),
+            displayExpiry = card.expiryDate?.takeIf(String::isNotBlank) ?: compatibleLocal?.card?.expiry?.printedCardExpiry())
+    }
+    return local.filterNot { it.id in linkedLocalIds } + remote
+}
+
+internal fun WalletProductUi.numberLabel(): String? = number?.let(::readableAccount)
+    ?: last4?.let { "Terminación $it" }
+
+private fun String.printableCardHolder(): String? = takeIf { it.isNotBlank() && it.none(Char::isISOControl) }
+
+// No conversion of compact digits or other remote date formats without a proven contract.
+private fun String.printedCardExpiry(): String? = takeIf { it.matches(Regex("(0[1-9]|1[0-2])/[0-9]{2}")) }
+
+internal fun WalletProductUi.cardHolderLabel(): String? = (displayHolderName ?: card?.holderName)?.printableCardHolder()
+
+internal fun WalletProductUi.cardExpiryLabel(): String? = (displayExpiry ?: card?.expiry)?.printedCardExpiry()
+
+internal fun WalletProductUi.balanceLabel(): String = if (enzonaCardId != null) rawAvailable?.let { value ->
+    listOfNotNull(value.toPlainString(), rawCurrency).joinToString(" ")
+} ?: "Sin consultar" else available?.let(::formatMoney) ?: "Sin consultar"
 
 internal fun displayRecipients(state: AppUiState): List<Recipient> =
     state.wallet.contacts.flatMap { contact ->

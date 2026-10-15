@@ -28,7 +28,7 @@ class BackupPayloadTest {
     @Test fun `unknown version and malformed lengths reject before allocation`() {
         val source = BackupPayload.encode(WalletSnapshot(), "synthetic".toByteArray(), BackupPreferences(BackupTheme.SYSTEM, true))
         assertFailsWith<BackupPayloadFailure.UnsupportedVersion> {
-            BackupPayload.decode(source.copyOf().also { it[7] = 3 })
+            BackupPayload.decode(source.copyOf().also { it[7] = 4 })
         }
         assertFailsWith<BackupPayloadFailure.InvalidPayload> {
             BackupPayload.decode(source.copyOf().also { it[8] = 0x7f })

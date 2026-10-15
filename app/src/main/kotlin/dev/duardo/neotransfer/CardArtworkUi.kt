@@ -36,15 +36,17 @@ internal fun cardArtwork(identity: ProviderIdentity): CardArtwork? = when {
 
 /** Printed artwork is separate from accessible, known account data. */
 @Composable
-internal fun RestoredCard(product: WalletProductUi, artwork: CardArtwork, modifier: Modifier, click: () -> Unit) {
+internal fun RestoredCard(product: WalletProductUi, artwork: CardArtwork, modifier: Modifier, captionAlpha: Float, click: () -> Unit) {
     val density = LocalDensity.current
+    val holderName = product.cardHolderLabel()
+    val expiry = product.cardExpiryLabel()
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         BoxWithConstraints(Modifier.fillMaxWidth().aspectRatio(1.586f)
             .graphicsLayer { shadowElevation = 5.dp.toPx(); shape = RoundedCornerShape(12.dp); clip = true }
             .clickable(onClick = click)
             .clearAndSetSemantics {
                 contentDescription = listOfNotNull(product.identity.title(), product.name, product.number?.let(::readableAccount), product.currency?.name,
-                    product.card?.holderName, product.card?.expiry?.let { "Vence $it" }).joinToString(" · ")
+                    holderName, expiry?.let { "Vence $it" }).joinToString(" · ")
                 role = Role.Button
                 onClick("Gestionar tarjeta") { click(); true }
             }) {
@@ -60,7 +62,7 @@ internal fun RestoredCard(product: WalletProductUi, artwork: CardArtwork, modifi
             }
             if (product.identity.bank in setOf(Bank.BPA, Bank.BANDEC)) {
                 val holderTop = if (product.identity.bank == Bank.BPA) .72f else .76f
-                product.card?.holderName?.let { name ->
+                holderName?.let { name ->
                     Text(name, Modifier.offset(x = maxWidth * .087f, y = maxHeight * holderTop).width(maxWidth * .70f),
                         color = Color(0xFF111411), fontSize = with(density) { (maxHeight * .085f).toSp() }, maxLines = 1)
                 }
@@ -68,23 +70,25 @@ internal fun RestoredCard(product: WalletProductUi, artwork: CardArtwork, modifi
                     Text(currency.name, Modifier.offset(x = maxWidth * .06f, y = maxHeight * .858f),
                         color = Color(0xFF111411), fontSize = with(density) { (maxHeight * .085f).toSp() })
                 }
-                Text("VENCE:" + product.card?.expiry?.let { " $it" }.orEmpty(),
+                Text("VENCE:" + expiry?.let { " $it" }.orEmpty(),
                     Modifier.offset(x = maxWidth * .30f, y = maxHeight * .858f),
                     color = Color(0xFF111411), fontSize = with(density) { (maxHeight * .085f).toSp() })
             }
-            product.card?.expiry?.takeIf { product.identity.bank !in setOf(Bank.BPA, Bank.BANDEC) }?.let { expiry ->
+            expiry?.takeIf { product.identity.bank !in setOf(Bank.BPA, Bank.BANDEC) }?.let { expiryText ->
                 val classic = product.identity.profile == ProfileId.CLASSIC
                 val left = when { classic -> .735f; product.identity.provider == ProviderId.BANMET -> .49f; else -> .445f }
                 val top = when { classic -> .90f; product.identity.provider == ProviderId.BANMET -> .81f; else -> .858f }
-                Text(expiry, Modifier.offset(x = maxWidth * left, y = maxHeight * top),
+                Text(expiryText, Modifier.offset(x = maxWidth * left, y = maxHeight * top),
                     color = if (classic) Color(0xFFC6B75D) else Color(0xFF111411),
                     fontSize = with(density) { (maxHeight * if (classic) .052f else .085f).toSp() })
             }
         }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().graphicsLayer { alpha = captionAlpha }, verticalAlignment = Alignment.CenterVertically) {
             Text(product.name.ifBlank { product.identity.title() }, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
             product.currency?.let { Text(it.name, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
-        if (density.fontScale > 1.2f) product.number?.let { Text(readableAccount(it), style = MaterialTheme.typography.titleMedium) }
+        if (density.fontScale > 1.2f) product.number?.let {
+            Text(readableAccount(it), Modifier.graphicsLayer { alpha = captionAlpha }, style = MaterialTheme.typography.titleMedium)
+        }
     }
 }

@@ -2,26 +2,20 @@ package dev.duardo.neotransfer
 
 import dev.duardo.neotransfer.core.fuel.FuelCoupon
 import dev.duardo.neotransfer.core.fuel.FuelProviderEnvelope
-import dev.duardo.neotransfer.core.fuel.ProtectedFuelEnvelope
 import dev.duardo.neotransfer.data.OperationRecord
 import dev.duardo.neotransfer.data.OperationStatus
-import dev.duardo.neotransfer.fuel.FuelSecretStore
 import java.time.Instant
 import java.time.ZoneOffset
-import javax.crypto.spec.SecretKeySpec
 
 /** Preview source set only. All values are synthetic; no telephony, provider or AndroidKeyStore access. */
 internal data class PreviewDomainFixtures(
     val fuelCoupons: List<FuelCoupon>,
-    val protectedFuelEnvelopes: Map<String, ProtectedFuelEnvelope>,
-    val fuelSecretStore: FuelSecretStore,
     val miTurnoRequests: List<OperationRecord>,
 )
 
 internal fun previewDomainFixtures(now: Instant = Instant.now()): PreviewDomainFixtures {
     // The test vector decodes to synthetic PIN 1234 and TOKEN987; it is provider ciphertext, not a real coupon.
     val providerEnvelope = "W3ePK80M6VKxq9C60HXAHg==|+yRrfQTQ/zLIJShacXR3ow=="
-    val store = FuelSecretStore { SecretKeySpec(ByteArray(32) { 9 }, "AES") }
     val observed = now.minusSeconds(3_600).toEpochMilli()
     val reportedDate = now.atZone(ZoneOffset.UTC).toLocalDate().toString()
 
@@ -44,9 +38,6 @@ internal fun previewDomainFixtures(now: Instant = Instant.now()): PreviewDomainF
         coupon("0000000000003", "Cupón archivado", "40.00", "18.00", "BANK1", "TM1", secret = true, archived = true, hoursAgo = 24),
         coupon("0000000000004", "Saldo no reportado", "60.00", null, "BANK1", "TM1", secret = true, hoursAgo = 3),
     )
-    val envelopes = coupons.filter { it.secretRevision != null }.associate { coupon ->
-        coupon.id to store.protect(coupon, providerEnvelope.toCharArray())
-    }
 
     fun turn(id: String, provider: String, bankCode: String, entity: String, branch: String,
              beneficiary: String, status: OperationStatus, hoursAgo: Long): OperationRecord = OperationRecord(
@@ -62,5 +53,5 @@ internal fun previewDomainFixtures(now: Instant = Instant.now()): PreviewDomainF
         turn("preview-turn-confirmed", "BPA", "01", "1", "030313", "00000000000", OperationStatus.CONFIRMED, 6),
         turn("preview-turn-uncertain", "BANMET", "03", "4", "4289476", "00000000000", OperationStatus.UNCERTAIN, 2),
     )
-    return PreviewDomainFixtures(coupons, envelopes, store, requests)
+    return PreviewDomainFixtures(coupons, requests)
 }

@@ -20,9 +20,17 @@ import dev.duardo.neotransfer.core.*
 import dev.duardo.neotransfer.data.*
 import dev.duardo.neotransfer.platform.QrInput
 import dev.duardo.neotransfer.platform.BankSmsRecord
-import dev.duardo.neotransfer.platform.TelecomSmsController
-import dev.duardo.neotransfer.fuel.FuelController
 import java.time.Instant
+import dev.duardo.neotransfer.enzona.EnzonaWalletState
+import dev.duardo.neotransfer.enzona.EnzonaSessionUiState
+import dev.duardo.neotransfer.enzona.EnzonaLoginScreen
+import dev.duardo.neotransfer.enzona.EnzonaPaymentDraft
+import dev.duardo.neotransfer.enzona.EnzonaResolvedQr
+import dev.duardo.neotransfer.enzona.EnzonaOwnQr
+import dev.duardo.neotransfer.enzona.EnzonaInvoiceLookup
+import dev.duardo.neotransfer.enzona.EnzonaInvoiceService
+import dev.duardo.neotransfer.enzona.isEnzonaQrCandidate
+import java.math.BigDecimal
 
 data class PickedContact(val name: String, val phone: String)
 
@@ -37,9 +45,11 @@ data class AppUiState(
     val selectedProductId: String? = null,
     val configuredRegistrationIds: Set<String> = emptySet(),
     val notificationsEnabled: Boolean = true,
-    val services: List<OperationSpec> = BankingOperations.all,
+    val services: List<OperationSpec> = OperationCatalog.all,
     val serviceResult: String? = null,
     val accessRecoveryAvailable: Boolean = false,
+    val enzonaWallet: EnzonaWalletState = EnzonaWalletState(),
+    val enzonaSession: EnzonaSessionUiState = EnzonaSessionUiState(),
 )
 
 class UiActions(
@@ -72,13 +82,20 @@ class UiActions(
     val runQrService: (ServiceRequest, QrPayment) -> Unit = { _, _ -> },
     val validateService: (ServiceRequest) -> List<OperationValidationError> = { emptyList() },
     val clearServiceResult: () -> Unit = {},
-    val requestSmsPermission: () -> Unit = {},
-    val renameFuel: (String, String) -> Unit = { _, _ -> },
-    val archiveFuel: (String, Boolean) -> Unit = { _, _ -> },
-    val authorizeFuel: (String, String, (Boolean) -> Unit) -> Unit = { _, _, result -> result(false) },
+    val connectEnzona: () -> Unit = {},
+    val disconnectEnzona: () -> Unit = {},
+    val refreshEnzonaCards: () -> Unit = {},
+    val refreshEnzonaActivity: () -> Unit = {},
+    val saveEnzonaCard: (String, String, String?) -> Unit = { _, _, _ -> },
+    val enzonaCallback: (String) -> Unit = {},
+    val cancelEnzonaLogin: () -> Unit = {},
+    val payEnzona: (EnzonaPaymentDraft, CharArray, (String?) -> Unit) -> Unit = { _, password, done -> password.fill('\u0000'); done("No se pudo autorizar") },
+    val resolveEnzonaQr: (String, (EnzonaResolvedQr?) -> Unit) -> Unit = { _, done -> done(null) },
+    val createEnzonaQr: (BigDecimal, String, String, (EnzonaOwnQr?) -> Unit) -> Unit = { _, _, _, done -> done(null) },
+    val queryEnzonaService: (EnzonaInvoiceService, String, (EnzonaInvoiceLookup?) -> Unit) -> Unit = { _, _, done -> done(null) },
 )
 
-private enum class Page { HOME, ACTIVITY, CONTACTS, SERVICES, SETTINGS, WALLET, BANKS, PRODUCT_EDIT, CONTACT_DETAIL, CONTACT_EDIT, TRANSFER, RECHARGE, BILLS, SCAN, ENROLL, SERVICE_FORM, RECEIVE, STATISTICS, TELECOM_INFO, MITURNO, FUEL }
+private enum class Page { HOME, ACTIVITY, CONTACTS, SERVICES, SETTINGS, WALLET, BANKS, PRODUCT_EDIT, CONTACT_DETAIL, CONTACT_EDIT, TRANSFER, RECHARGE, BILLS, SCAN, ENROLL, SERVICE_FORM, SERVICE_ENZONA, RECEIVE, STATISTICS }
 private val roots = listOf(Page.HOME, Page.ACTIVITY, Page.CONTACTS, Page.SERVICES)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -86,8 +103,7 @@ private val roots = listOf(Page.HOME, Page.ACTIVITY, Page.CONTACTS, Page.SERVICE
 fun NeoTransferApp(state: AppUiState, actions: UiActions, initialQr: QrPayment? = null,
                    incomingPayment: String? = null, consumeIncomingPayment: () -> Unit = {},
                    incomingReceiptId: String? = null, consumeIncomingReceipt: () -> Unit = {},
-                   telecomController: TelecomSmsController? = null, smsPermission: Boolean = false,
-                   fuelController: FuelController? = null) {
+                   initialEnzonaQr: EnzonaResolvedQr? = null) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { context.getSharedPreferences("appearance", Context.MODE_PRIVATE) }
     val persistedTheme = prefs.getString("theme", null)
@@ -95,12 +111,15 @@ fun NeoTransferApp(state: AppUiState, actions: UiActions, initialQr: QrPayment? 
         ?: if (prefs.contains("dark")) if (prefs.getBoolean("dark", true)) ThemePreference.DARK else ThemePreference.LIGHT else ThemePreference.SYSTEM) }
     val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
     var stack by rememberSaveable { mutableStateOf(listOf(Page.HOME.name)) }
-    val page = Page.valueOf(stack.last())
+    val validStack = stack.filter { name -> Page.entries.any { it.name == name } }.ifEmpty { listOf(Page.HOME.name) }
+    val page = Page.valueOf(validStack.last())
+    LaunchedEffect(validStack) { if (stack != validStack) stack = validStack }
     val savedState = rememberSaveableStateHolder()
     var selectedReceipt by remember { mutableStateOf<MovementItem?>(null) }
     var draft by remember { mutableStateOf(PaymentDraft()) }
     var review by remember { mutableStateOf<MoneyAction?>(null) }
     var qr by remember { mutableStateOf(initialQr) }
+    var enzonaQr by remember { mutableStateOf(initialEnzonaQr) }
     var resolve by remember { mutableStateOf(false) }
     var resolvingUncertain by remember { mutableStateOf<UncertainTransfer?>(null) }
     var linkingReceipt by remember { mutableStateOf<HistoryEntry?>(null) }
@@ -110,43 +129,22 @@ fun NeoTransferApp(state: AppUiState, actions: UiActions, initialQr: QrPayment? 
     var enrollIdentity by remember { mutableStateOf<ProviderIdentity?>(null) }
     var selectedServiceId by rememberSaveable { mutableStateOf<String?>(null) }
     var serviceInitialValues by remember { mutableStateOf(emptyMap<String, String>()) }
-    var serviceInitialRegistrationId by remember { mutableStateOf<String?>(null) }
-    var fuelSensitive by remember { mutableStateOf(false) }
-    var serviceChoices by remember { mutableStateOf(emptyList<OperationSpec>()) }
-    var serviceChoiceDestination by remember { mutableStateOf("") }
-    var serviceChoicePhone by remember { mutableStateOf("") }
+    var enzonaService by rememberSaveable { mutableStateOf(EnzonaInvoiceService.ELECTRICITY.name) }
     var scannerMode by remember { mutableStateOf(ScanMode.QR) }
     var scanTarget by remember { mutableStateOf<((String) -> Unit)?>(null) }
     val snackbar = remember { SnackbarHostState() }
 
-    fun back() { if (stack.size > 1) stack = stack.dropLast(1) else stack = listOf(Page.HOME.name) }
+    fun back() { stack = if (validStack.size > 1) validStack.dropLast(1) else listOf(Page.HOME.name) }
     fun go(target: Page) {
         if (target in roots) stack = listOf(target.name)
-        else if (target != page) stack = stack + target.name
+        else if (target != page) stack = validStack + target.name
     }
     fun configure(identity: ProviderIdentity) { enrollIdentity = identity; identity.bank?.let(actions.selectBank); go(Page.ENROLL) }
     fun editProduct(product: WalletProductUi?) { editedProductId = product?.id; go(Page.PRODUCT_EDIT) }
-    fun openService(spec: OperationSpec) { selectedServiceId = spec.id; serviceInitialValues = emptyMap(); serviceInitialRegistrationId = null; go(Page.SERVICE_FORM) }
-    fun openPaymentService(spec: OperationSpec, destination: String, phone: String = "") {
-        openService(spec)
-        val field = spec.fields.firstOrNull { it.key in listOf("destination", "mobile") }
-        if (field != null && destination.isNotEmpty()) serviceInitialValues = mapOf(field.key to destination)
-        if (phone.isNotEmpty() && spec.fields.any { it.key == "phone" }) serviceInitialValues = serviceInitialValues + ("phone" to phone)
+    fun openService(spec: OperationSpec, initialValues: Map<String, String> = emptyMap()) {
+        selectedServiceId = spec.id; serviceInitialValues = initialValues; go(Page.SERVICE_FORM)
     }
     fun newPayment(target: Page, destination: String = "", name: String = "", phone: String = "") {
-        val product = selectedProduct(state)
-        val identity = product?.identity
-        val legacy = identity == null || (target == Page.TRANSFER && identity.bank in listOf(Bank.BPA, Bank.BANDEC, Bank.BANMET)) ||
-            (target != Page.TRANSFER && identity.bank in listOf(Bank.BPA, Bank.BANDEC))
-        if (!legacy && identity != null) {
-            val options = state.services.filter { spec -> spec.supports(identity) && spec.implementationStatus == ImplementationStatus.IMPLEMENTED &&
-                (if (target == Page.TRANSFER) spec.category == OperationCategory.TRANSFERS &&
-                    (destination.isEmpty() || spec.fields.any { it.key == "destination" })
-                else spec.id in listOf("service.mobile", "service.mobile.mlc", "wallet.mobile.cup", "wallet.mobile.usd", "wallet.agent.mobile")) &&
-                (product?.currency == null || spec.currencies.isEmpty() || product.currency in spec.currencies) }
-            if (options.size == 1) { openPaymentService(options.single(), destination, phone); return }
-            if (options.isNotEmpty()) { serviceChoices = options; serviceChoiceDestination = destination; serviceChoicePhone = phone; return }
-        }
         draft = PaymentDraft(destination = destination, name = name, phone = phone); go(target)
     }
     fun scanNumber(phone: Boolean, callback: (String) -> Unit) { scannerMode = if (phone) ScanMode.MOBILE else ScanMode.CARD; scanTarget = callback }
@@ -156,6 +154,8 @@ fun NeoTransferApp(state: AppUiState, actions: UiActions, initialQr: QrPayment? 
                 is QrInput.Card -> newPayment(Page.TRANSFER, input.card, phone = input.phone.orEmpty())
                 is QrInput.Payment -> { qr = input.value }
             }
+        }.onFailure {
+            if (state.enzonaSession.connected && isEnzonaQrCandidate(code)) actions.resolveEnzonaQr(code) { enzonaQr = it }
         }
     }
     LaunchedEffect(state.unlocked, incomingPayment) {
@@ -184,22 +184,27 @@ fun NeoTransferApp(state: AppUiState, actions: UiActions, initialQr: QrPayment? 
         if (state.pending != null) { review = null; qr = null; stack = listOf(Page.HOME.name) }
     }
     BackHandler(enabled = (state.unlocked || !state.hasCredentials) && page != Page.HOME && review == null && qr == null && scanTarget == null) { back() }
-    SideEffect { actions.protectScreen(state.unlocked && (!state.hasCredentials || page == Page.ENROLL || (page == Page.FUEL && fuelSensitive) ||
+    LaunchedEffect(state.unlocked) { if (!state.unlocked) { enzonaQr = null; review = null } }
+    SideEffect { actions.protectScreen(!state.unlocked || state.enzonaSession.authorizationUrl != null || enzonaQr != null || page == Page.SERVICE_ENZONA || (page == Page.TRANSFER && state.enzonaWallet.selectedCardId != null) || (!state.hasCredentials || page == Page.ENROLL ||
         (page == Page.SERVICE_FORM && state.services.firstOrNull { it.id == selectedServiceId }?.fields?.any { it.sensitive && !it.suppliedByAccess } == true))) }
 
     NeoTheme(when (theme) { ThemePreference.SYSTEM -> systemDark; ThemePreference.LIGHT -> false; ThemePreference.DARK -> true }) {
         Scaffold(snackbarHost = { if (review == null && qr == null) SnackbarHost(snackbar) }, bottomBar = {
-            if (state.unlocked && state.hasCredentials && page in roots) NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+            if (state.unlocked && state.hasCredentials && state.enzonaSession.authorizationUrl == null && page in roots) NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                 listOf(Triple(Page.HOME, "Inicio", R.drawable.ic_home), Triple(Page.ACTIVITY, "Actividad", R.drawable.ic_history),
                     Triple(Page.CONTACTS, "Contactos", R.drawable.ic_contacts), Triple(Page.SERVICES, "Servicios", R.drawable.ic_receipt_long)).forEach { (target, label, icon) ->
-                    NavigationBarItem(selected = page == target, onClick = { go(target) }, icon = { Icon(painterResource(icon), null) }, label = { Text(label) })
+                    NavigationBarItem(selected = page == target, onClick = { go(target) }, icon = { Icon(painterResource(icon), null) }, label = {
+                        Text(label, style = if (androidx.compose.ui.platform.LocalDensity.current.fontScale > 1.2f)
+                            MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium)
+                    })
                 }
             }
         }) { padding ->
             Box(Modifier.fillMaxSize().padding(padding).imePadding()) {
                 when {
                     !state.unlocked -> LockScreen(state.busy, state.accessRecoveryAvailable && state.hasCredentials, actions.unlock) { resetAccess = true }
-                    (!state.hasCredentials && page != Page.SERVICE_FORM) || page == Page.ENROLL -> Enrollment(state, actions, enrollIdentity, ::back, ::openService)
+                    state.enzonaSession.authorizationUrl != null -> EnzonaLoginScreen(state.enzonaSession.authorizationUrl, actions.enzonaCallback, actions.cancelEnzonaLogin)
+                    (!state.hasCredentials && page != Page.SERVICE_FORM) || page == Page.ENROLL -> Enrollment(state, actions, enrollIdentity, ::back, { openService(it) })
                     else -> AnimatedContent(page, label = "Navegación") { destination ->
                         savedState.SaveableStateProvider(destination.name) {
                             when (destination) {
@@ -207,16 +212,19 @@ fun NeoTransferApp(state: AppUiState, actions: UiActions, initialQr: QrPayment? 
                                     { newPayment(Page.TRANSFER) }, { scannerMode = ScanMode.QR; go(Page.SCAN) }, { newPayment(Page.RECHARGE) },
                                     { go(Page.SERVICES) }, { go(Page.ACTIVITY) }, { selectedReceipt = it }, { resolve = true }, ::configure, { go(Page.RECEIVE) }, ::editProduct)
                                 Page.ACTIVITY -> {
+                                    if (state.enzonaWallet.selectedCardId != null) EnzonaActivityScreen(state, actions)
+                                    else {
                                     val identity = selectedProduct(state)?.identity ?: ProviderIdentity.forBank(state.bank)
                                     val query = state.services.firstOrNull { it.id.endsWith(".recent-operations") && it.supports(identity) }
                                     MovementsScreen(state, actions, { resolvingUncertain = it }, { resolve = true }, query?.let { spec -> { openService(spec) } }, { go(Page.STATISTICS) })
+                                    }
                                 }
                                 Page.CONTACTS -> ContactsScreen(state, actions, { selectedContactId = null; go(Page.CONTACT_EDIT) }, { selectedContactId = it.id; go(Page.CONTACT_DETAIL) })
-                                Page.SERVICES -> ServicesScreen(state, ::openService, { go(Page.TELECOM_INFO) }, { go(Page.MITURNO) }, { go(Page.FUEL) })
+                                Page.SERVICES -> ServicesScreen(state, ::openService) { service -> enzonaService = service.name; go(Page.SERVICE_ENZONA) }
                                 Page.SETTINGS -> SettingsScreen(state, actions, theme, { theme = it; prefs.edit().putString("theme", it.name).remove("dark").apply() }, ::back, { go(Page.BANKS) })
                                 Page.BANKS -> BanksScreen(state, actions, ::back, ::configure)
                                 Page.WALLET -> WalletManager(state, ::back, { editProduct(null) }, ::editProduct, { go(Page.BANKS) })
-                                Page.PRODUCT_EDIT -> ProductEditor(state, walletProducts(state).firstOrNull { it.id == editedProductId }, actions, ::back,
+                                Page.PRODUCT_EDIT -> ProductEditor(state, walletProducts(state, includeHistorical = true).firstOrNull { it.id == editedProductId }, actions, ::back,
                                     { go(Page.BANKS) }, { scanNumber(false, it) })
                                 Page.CONTACT_DETAIL -> state.wallet.contacts.firstOrNull { it.id == selectedContactId }?.let { contact ->
                                     ContactDetail(contact, actions, ::back, { go(Page.CONTACT_EDIT) }, { newPayment(Page.TRANSFER, it.number, contact.name,
@@ -224,35 +232,20 @@ fun NeoTransferApp(state: AppUiState, actions: UiActions, initialQr: QrPayment? 
                                 } ?: EmptyAction("El contacto ya no está en la agenda", "Volver a contactos", { go(Page.CONTACTS) })
                                 Page.CONTACT_EDIT -> ContactEditor(state, state.wallet.contacts.firstOrNull { it.id == selectedContactId }, actions, ::back,
                                     { scanNumber(false, it) }, { scanNumber(true, it) })
-                                Page.TRANSFER, Page.RECHARGE, Page.BILLS -> MoneyForm(when (destination) { Page.TRANSFER -> PaymentPage.TRANSFER; Page.RECHARGE -> PaymentPage.RECHARGE; else -> PaymentPage.BILLS },
-                                    state, actions, draft, { draft = it }, ::back, { review = it }, ::configure, { editProduct(null) }, ::scanNumber)
-                                Page.SERVICE_FORM -> state.services.firstOrNull { it.id == selectedServiceId }?.let { spec -> ServiceForm(spec, state, actions, ::back, ::configure, ::scanNumber, serviceInitialValues, { editProduct(null) }, serviceInitialRegistrationId) }
-                                    ?: EmptyAction("No se encontró el servicio", "Volver a servicios", { go(Page.SERVICES) })
-                                Page.SCAN -> ScannerScreen(state, actions, scannerMode, { scannerMode = it }, ::back, { code -> readQr(code) },
-                                    { number -> newPayment(if (scannerMode == ScanMode.MOBILE) Page.RECHARGE else Page.TRANSFER, number) }, paused = qr != null)
-                                Page.ENROLL -> Unit
-                                Page.RECEIVE -> ReceiveQrScreen(state, actions, ::back)
-                                Page.STATISTICS -> StatisticsScreen(state, ::back)
-                                Page.TELECOM_INFO -> if (telecomController != null) TelecomScreen(state, telecomController, actions.requestSmsPermission, smsPermission, ::back)
-                                    else EmptyAction("Las consultas por SMS no están conectadas en esta sesión de pruebas", "Volver", ::back)
-                                Page.MITURNO -> MiTurnoScreen(state, ::back, open = { request, registrationId ->
-                                    state.services.firstOrNull { it.id == request.operationId }?.let { spec ->
-                                        openService(spec); serviceInitialValues = request.values; serviceInitialRegistrationId = registrationId
-                                        actions.selectRegistration(registrationId)
+                                Page.TRANSFER, Page.RECHARGE, Page.BILLS -> if (destination == Page.TRANSFER && state.enzonaWallet.selectedCardId != null) {
+                                    key(state.enzonaSession.ownerSubject) {
+                                        EnzonaTransferScreen(state, actions, ::back, draft.destination, draft.phone, ::scanNumber)
                                     }
-                                }, newRequest = {
-                                    val wallet = selectedProduct(state)?.identity?.provider == ProviderId.MITRANSFER
-                                    state.services.firstOrNull { it.id == if (wallet) "wallet.miturno.reserve" else "service.miturno.reserve" }?.let(::openService)
-                                }, openReceipt = { receiptId ->
-                                    val ids = state.wallet.movements.filter { it.receiptId == receiptId }.map { it.id }.toSet()
-                                    selectedReceipt = appFinancialHistory(state).firstOrNull { it.storedId in ids }
-                                })
-                                Page.FUEL -> if (fuelController != null) FuelScreen(state.wallet.fuelCoupons, fuelController,
-                                    FuelActions(openOperation = { id, values -> state.services.firstOrNull { it.id == id }?.let { spec ->
-                                        openService(spec); serviceInitialValues = values
-                                    } }, rename = actions.renameFuel, archive = actions.archiveFuel, authorizeSecret = actions.authorizeFuel),
-                                    ::back, { fuelSensitive = it })
-                                    else EmptyAction("Los cupones no están conectados en esta sesión de pruebas", "Volver", ::back)
+                                } else MoneyForm(when (destination) { Page.TRANSFER -> PaymentPage.TRANSFER; Page.RECHARGE -> PaymentPage.RECHARGE; else -> PaymentPage.BILLS },
+                                    state, actions, draft, { draft = it }, ::back, { review = it }, ::configure, { editProduct(null) }, ::scanNumber)
+                                Page.SERVICE_FORM -> state.services.firstOrNull { it.id == selectedServiceId }?.let { spec -> ServiceForm(spec, state, actions, ::back, ::configure, ::scanNumber, serviceInitialValues, { editProduct(null) }) }
+                                    ?: EmptyAction("No se encontró el servicio", "Volver a servicios", { go(Page.SERVICES) })
+                                Page.SERVICE_ENZONA -> EnzonaServiceScreen(EnzonaInvoiceService.valueOf(enzonaService), state, actions, ::back)
+                                Page.SCAN -> ScannerScreen(state, actions, scannerMode, { scannerMode = it }, ::back, { code -> readQr(code) },
+                                    { number -> newPayment(if (scannerMode == ScanMode.MOBILE) Page.RECHARGE else Page.TRANSFER, number) }, paused = qr != null || enzonaQr != null || state.busy)
+                                Page.ENROLL -> Unit
+                                Page.RECEIVE -> if (state.enzonaWallet.selectedCardId != null) EnzonaReceiveScreen(state, actions, ::back) else ReceiveQrScreen(state, actions, ::back)
+                                Page.STATISTICS -> StatisticsScreen(state, ::back)
                             }
                         }
                     }
@@ -261,12 +254,6 @@ fun NeoTransferApp(state: AppUiState, actions: UiActions, initialQr: QrPayment? 
             }
         }
         if (state.unlocked || !state.hasCredentials) {
-            if (serviceChoices.isNotEmpty()) ModalBottomSheet(onDismissRequest = { serviceChoices = emptyList() }) {
-                Column(Modifier.fillMaxWidth().padding(24.dp)) {
-                    Text("Elegir operación", style = MaterialTheme.typography.headlineSmall)
-                    serviceChoices.forEach { spec -> ActionRow(spec.title, spec.category.icon()) { openPaymentService(spec, serviceChoiceDestination, serviceChoicePhone); serviceChoices = emptyList() } }
-                }
-            }
             scanTarget?.let { callback ->
                 Dialog(onDismissRequest = { scanTarget = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
                     Surface(Modifier.fillMaxSize()) {
@@ -277,6 +264,7 @@ fun NeoTransferApp(state: AppUiState, actions: UiActions, initialQr: QrPayment? 
                 }
             }
             qr?.let { value -> QrPaymentReview(value, state, actions, { qr = null }, { qr = null; editProduct(null) }, { qr = null; configure(it) }) }
+            enzonaQr?.let { value -> EnzonaQrReview(value, state, actions) { enzonaQr = null } }
             review?.let { MoneyReview(it, state, actions) { review = null } }
             selectedReceipt?.let { MovementDetail(it, displayRecipients(state), actions.share) { selectedReceipt = null } }
             if (resolvingUncertain != null) {
@@ -326,7 +314,10 @@ internal fun ScannerScreen(state: AppUiState, actions: UiActions, mode: ScanMode
         }
         if (!state.cameraPermission) TextButton(onClick = actions.cameraPermission, modifier = Modifier.padding(horizontal = 24.dp)) { Text("Permitir cámara") }
         QrCamera(Modifier.weight(1f).fillMaxWidth(), paused = paused, onCode = { code ->
-            runCatching { QrInput.parse(code) }.onSuccess { error = null; onCode(code) }.onFailure { error = it.message ?: "QR no compatible" }
+            runCatching { QrInput.parse(code) }.onSuccess { error = null; onCode(code) }.onFailure {
+                if (!fixedMode && state.enzonaSession.connected && isEnzonaQrCandidate(code)) { error = null; onCode(code) }
+                else error = "QR no compatible"
+            }
         }, onError = { error = it }, mode = mode, onNumber = onNumber)
         (error ?: externalError)?.let { Text(it, Modifier.padding(24.dp), color = MaterialTheme.colorScheme.error) }
     }

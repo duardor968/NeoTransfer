@@ -107,6 +107,10 @@ private fun BackupDialogs(flow: BackupFlow) {
                     Text("${state.snapshot.accounts.size} cuentas · ${state.snapshot.cards.size} tarjetas")
                     Text("${state.snapshot.contacts.size} contactos · ${state.snapshot.services.size} servicios")
                     Text("${state.snapshot.operations.size} operaciones · ${state.snapshot.receipts.size} comprobantes")
+                    if (state.enzona.isNotEmpty()) {
+                        Text("${state.enzona.size} cuentas ENZONA")
+                        Text("${state.enzona.sumOf { it.cardLinks.size }} vínculos · ${state.enzona.sumOf { it.journal.size }} operaciones ENZONA")
+                    }
                     Text(if (state.hasCredentials) "Claves incluidas" else "Sin claves")
                 }
             },

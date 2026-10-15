@@ -4,9 +4,9 @@
 
 # NeoTransfer
 
-NeoTransfer es una aplicación Android independiente para gestionar tarjetas, consultas, transferencias, pagos y servicios en Cuba. No está afiliada a ETECSA, Transfermóvil ni a las entidades financieras. Cada operación depende de los servicios disponibles para la línea y del registro de su titular.
+NeoTransfer es una aplicación Android independiente para gestionar tarjetas, consultas, transferencias, pagos y servicios en Cuba. No está afiliada a ENZONA, ETECSA, Transfermóvil ni a las entidades financieras. Cada operación depende de los servicios disponibles y del registro de su titular.
 
-**Estado:** el repositorio tiene la [etiqueta v0.2.0](https://github.com/duardor968/NeoTransfer/tree/v0.2.0). Aún no hay publicaciones en GitHub Releases ni una versión pública 1.0.0. El trabajo hacia 1.0 está en este repositorio; el código en desarrollo no demuestra por sí solo que una operación haya sido aceptada por un banco o proveedor.
+**Estado:** `1.0.0-dev.6` (`versionCode 8`), una entrega de prueba con integración ENZONA experimental; no es una release 1.0. La [etiqueta v0.2.0](https://github.com/duardor968/NeoTransfer/tree/v0.2.0) conserva la base histórica. Las APIs implementadas proceden de contratos reconstruidos estáticamente: todavía no se ha probado una cuenta ENZONA ni una operación de dinero por ese canal.
 
 <p align="center">
   <img src="docs/images/home.png" width="250" alt="Cartera con tarjeta, saldo y acciones">
@@ -14,29 +14,32 @@ NeoTransfer es una aplicación Android independiente para gestionar tarjetas, co
   <img src="docs/images/contacts.png" width="250" alt="Contactos con tarjetas y teléfonos">
 </p>
 
-Capturas del desarrollo 1.0 con datos ficticios. Los diseños de tarjetas siguen en revisión.
+Capturas de desarrollo con datos ficticios; no demuestran aceptación de operaciones por un proveedor. Los diseños de tarjetas siguen en revisión.
 
 ## Alcance
 
 La base etiquetada v0.2.0 incluye acceso biométrico, consulta de saldo, formularios de transferencia y servicios, lectura QR e historial para BPA y BANDEC. La consulta de saldo se probó con una cuenta real; esa prueba no certifica las demás operaciones.
 
-La línea de desarrollo amplía la cartera a BPA, BANDEC, BANMET, MiTransfer y Clásica personal; incorpora contactos, cámara, consultas y pagos, MiTurno, cupones de combustible y respaldo cifrado. Cada operación tiene sus propios campos, validaciones y límites de evidencia. Consulta el [resumen de cobertura](docs/cobertura.md) y el [protocolo](docs/protocolo.md) para conocer el alcance de cada contrato.
+La entrega actual se centra en tarjetas propias BPA y BANDEC, cartera, saldo, transferencias, QR, actividad y comprobantes. ENZONA incorpora APIs de consulta y pago de electricidad, telefonía fija y recarga de cuentas Nauta/Nauta Hogar, además de referencias guardadas. Se conservan los canales USSD de las funciones elegidas, los contactos, la cámara/OCR, la biometría, las notificaciones y el respaldo cifrado. Consulta el [resumen de cobertura](docs/cobertura.md) y el [protocolo](docs/protocolo.md) para distinguir implementación de validación real.
 
-Quedan fuera de esta etapa BFI, Bulevar, Clásica Empresarial, el perfil agente de MiTransfer, MiBoleto, las reservas OFA 8 y 9 y Votomóvil 215. El aporte OFA 94 y las operaciones personales restantes están dentro del alcance de desarrollo, sujetos a contratos y validación por operación.
+Agua, recarga móvil Cubacel desde banco y pago separado de deuda Nauta Hogar continúan por USSD: sus contratos de envío ENZONA no están demostrados. Los planes y consultas Cubacel desde saldo telefónico, incluido el menú `*133#`, son funciones distintas de una recarga bancaria. No se reenvía dinero automáticamente ni se cambia de ENZONA a USSD después de un fallo.
+
+Quedan fuera las tarjetas propias BANMET, MiTransfer, Clásica, MiTurno, combustible, gas, impuestos, multas, giros y las demás gestiones enumeradas en [cobertura](docs/cobertura.md). La exclusión de tarjetas propias BANMET no excluye destinatarios de otros bancos. Se conserva la recepción de SMS existente; **no hay entrega push ENZONA demostrada con la aplicación cerrada**.
 
 ## Requisitos
 
 - Android 15 o posterior y telefonía celular para operaciones USSD.
+- Conexión a Internet y una cuenta con tarjetas vinculadas en ENZONA oficial para la prueba de ese canal.
 - Biometría fuerte configurada para proteger los accesos bancarios.
 - Línea, registro y permisos compatibles con cada servicio. La cámara es opcional para las funciones que la usan.
 
 ## Primeros pasos
 
-Cuando exista una versión publicada, descarga su APK desde [GitHub Releases](https://github.com/duardor968/NeoTransfer/releases) e instálalo en un teléfono compatible. Por ahora, la línea 1.0 sigue en desarrollo.
+Esta entrega de desarrollo se prepara para una prueba manual del titular. Una futura publicación se distribuirá desde [GitHub Releases](https://github.com/duardor968/NeoTransfer/releases); la compilación experimental no debe presentarse como una versión estable.
 
-1. Abre NeoTransfer, elige el banco o proveedor y la línea telefónica registrada. Guarda el acceso con tu clave y huella. Si aún no tienes registro, usa «Crear registro» para ese proveedor.
-2. En «Mi cartera», toca «Añadir tarjeta o cuenta», elige el acceso y guarda el producto con su nombre y moneda.
-3. Selecciona el producto de origen antes de consultar, pagar o transferir. Revisa los datos y el resultado de cada operación en la aplicación.
+1. Para probar ENZONA, crea la cuenta y vincula primero las tarjetas en la aplicación oficial. El alta nativa de tarjetas en NeoTransfer queda aplazada para esta entrega.
+2. Conecta esa cuenta desde NeoTransfer para consultar sus tarjetas. Los accesos BPA/BANDEC por USSD conservan su registro y su línea; la sesión ENZONA y el desbloqueo biométrico local son independientes.
+3. Selecciona el producto y el canal de origen antes de consultar, pagar o transferir. Revisa la operación y su resultado; un timeout o un saldo actualizado no confirma un pago.
 
 ## Desarrollo
 

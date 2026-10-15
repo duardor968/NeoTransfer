@@ -37,14 +37,15 @@ import kotlin.math.absoluteValue
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.distinctUntilChanged
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun WalletHome(state: AppUiState, actions: UiActions, settings: () -> Unit, manage: () -> Unit,
                         banks: () -> Unit, transfer: () -> Unit, scan: () -> Unit, recharge: () -> Unit,
                         services: () -> Unit, activity: () -> Unit, receipt: (MovementItem) -> Unit,
                         resolve: () -> Unit, configure: (ProviderIdentity) -> Unit, receive: () -> Unit = {}, addCard: (WalletProductUi?) -> Unit) {
-    val products = remember(state.wallet, state.accounts, state.configuredBanks, state.bank, state.balanceAt) { walletProducts(state) }
+    val products = remember(state.wallet, state.accounts, state.configuredBanks, state.bank, state.balanceAt, state.enzonaWallet) { walletProducts(state) }
     val selected = selectedProduct(state, products)
+    val busy = state.busy || state.enzonaWallet.busy
     val pager = rememberPagerState(initialPage = products.indexOf(selected).coerceAtLeast(0), pageCount = { products.size })
     val latestProducts by rememberUpdatedState(products)
     val latestSelected by rememberUpdatedState(selected)
@@ -55,16 +56,18 @@ internal fun WalletHome(state: AppUiState, actions: UiActions, settings: () -> U
         }
     }
     LaunchedEffect(selected?.id) {
+        if (selected?.enzonaCardId != null && state.enzonaWallet.selectedCardId == null) actions.selectProduct(selected.id)
         val index = products.indexOfFirst { it.id == selected?.id }
         if (index >= 0 && index != pager.currentPage) pager.scrollToPage(index)
     }
     fun query() {
         if (pager.isScrollInProgress) return
         val product = products.getOrNull(pager.settledPage) ?: return
-        if (!hasProductAccess(state, product)) configure(product.identity.accessIdentity())
+        if (product.enzonaCardId != null) actions.balanceProduct(product.id)
+        else if (!hasProductAccess(state, product)) configure(product.identity.accessIdentity())
         else if (!state.permissions) actions.permissions() else actions.balanceProduct(product.id)
     }
-    PullToRefreshBox(isRefreshing = state.busy, onRefresh = { if (!state.busy) query() }) {
+    PullToRefreshBox(isRefreshing = busy, onRefresh = { if (!busy) query() }) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
             item {
                 Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, top = 12.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -77,7 +80,9 @@ internal fun WalletHome(state: AppUiState, actions: UiActions, settings: () -> U
                     TextButton(onClick = manage) { Text("Gestionar") }
                 }
                 if (products.isEmpty()) Column(Modifier.padding(horizontal = 24.dp)) {
-                    Primary("Añadir tarjeta o cuenta") { addCard(null) }
+                    if (state.enzonaSession.connected) Primary("Actualizar tarjetas", !busy, actions.refreshEnzonaCards)
+                    else Primary("Conectar ENZONA", !state.enzonaSession.busy, actions.connectEnzona)
+                    TextButton(onClick = { addCard(null) }) { Text("Añadir tarjeta o cuenta bancaria") }
                 } else {
                     HorizontalPager(pager, contentPadding = PaddingValues(horizontal = 24.dp), pageSpacing = 12.dp,
                         modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 8.dp), key = { products[it].id }) { index ->
@@ -85,7 +90,7 @@ internal fun WalletHome(state: AppUiState, actions: UiActions, settings: () -> U
                         ProductVisual(products[index], Modifier.graphicsLayer {
                             rotationY = offset * -7f; cameraDistance = 18 * density
                             scaleX = 1f - offset.absoluteValue * .045f; scaleY = scaleX
-                        }, manage)
+                        }, captionAlpha = (1f - offset.absoluteValue * 2f).coerceIn(0f, 1f), click = manage)
                     }
                     if (products.size > 1) Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.Center) {
                         products.forEachIndexed { index, _ ->
@@ -95,7 +100,7 @@ internal fun WalletHome(state: AppUiState, actions: UiActions, settings: () -> U
                         }
                     }
                     val current = products.getOrNull(pager.currentPage) ?: products.first()
-                    if (current.card == null && current.account == null && current.identity.bank != null) {
+                    if (current.enzonaCardId == null && current.card == null && current.account == null && current.identity.bank != null) {
                         TextButton(onClick = { addCard(current) }, modifier = Modifier.padding(horizontal = 12.dp)) {
                             Icon(painterResource(R.drawable.ic_add), null, Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp)); Text("Añadir tarjeta de ${current.identity.title()}")
@@ -104,24 +109,26 @@ internal fun WalletHome(state: AppUiState, actions: UiActions, settings: () -> U
                     Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp)) {
                         Text("Saldo disponible", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Text(current.available?.let(::formatMoney) ?: "Sin consultar", Modifier.weight(1f),
-                                style = if (current.available == null) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.headlineLarge,
+                            Text(current.balanceLabel(), Modifier.weight(1f),
+                                style = if (current.available == null && current.rawAvailable == null) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.headlineLarge,
                                 fontWeight = FontWeight.SemiBold)
-                            IconButton(onClick = ::query, enabled = !state.busy && !pager.isScrollInProgress) { Icon(painterResource(R.drawable.ic_refresh), "Consultar saldo") }
+                            IconButton(onClick = ::query, enabled = !busy && !pager.isScrollInProgress) { Icon(painterResource(R.drawable.ic_refresh), "Consultar saldo") }
                         }
                         current.balanceAt?.let { Text(dateText(it), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
                 }
-                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    QuickAction("Transferir", R.drawable.ic_swap_horiz, transfer, selectionReady && !state.busy)
-                    QuickAction("Escanear", R.drawable.ic_qr_code_scanner, scan, !state.busy && (products.isEmpty() || selectionReady))
-                    QuickAction("Recargar", R.drawable.ic_smartphone, recharge, selectionReady && !state.busy)
-                    QuickAction("Servicios", R.drawable.ic_receipt_long, services, !state.busy && (products.isEmpty() || selectionReady))
+                FlowRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                    maxItemsInEachRow = if (LocalDensity.current.fontScale > 1.2f) 2 else 4,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    QuickAction("Transferir", R.drawable.ic_swap_horiz, transfer, selectionReady && !busy, Modifier.weight(1f))
+                    QuickAction("Escanear", R.drawable.ic_qr_code_scanner, scan, !busy && (products.isEmpty() || selectionReady), Modifier.weight(1f))
+                    QuickAction("Recargar", R.drawable.ic_smartphone, recharge, selectionReady && !busy, Modifier.weight(1f))
+                    QuickAction("Servicios", R.drawable.ic_receipt_long, services, !busy && (products.isEmpty() || selectionReady), Modifier.weight(1f))
                 }
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     TextButton(onClick = banks) { Text("Bancos y accesos") }
-                    if (selected?.number?.matches(Regex("[0-9]{16}")) == true)
-                        TextButton(onClick = receive, enabled = selected.id == products.getOrNull(pager.settledPage)?.id) {
+                    if (selected?.enzonaCardId != null || selected?.number?.matches(Regex("[0-9]{16}")) == true)
+                        TextButton(onClick = receive, enabled = selected?.id == products.getOrNull(pager.settledPage)?.id) {
                             Icon(painterResource(R.drawable.ic_qr_code_scanner), null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("Mi QR")
                         }
                 }
@@ -144,19 +151,26 @@ internal fun WalletHome(state: AppUiState, actions: UiActions, settings: () -> U
                     }
                 }
             } }
-            item { Box(Modifier.padding(horizontal = 24.dp)) { SectionTitle("Actividad reciente", "Ver toda", activity) } }
-            val recent = appFinancialHistory(state).take(4)
-            if (recent.isEmpty()) item { Box(Modifier.padding(horizontal = 24.dp)) { EmptyAction("Todavía no hay movimientos", "Actualizar actividad", actions.refresh) } }
-            items(recent, key = { it.key }) { movement ->
-                Box(Modifier.padding(horizontal = 24.dp)) { MovementRow(movement, displayRecipients(state), showDate = true) { receipt(movement) } }
+            if (products.getOrNull(pager.currentPage)?.enzonaCardId != null || selected?.enzonaCardId != null) {
+                item { Column(Modifier.padding(horizontal = 24.dp)) {
+                    SectionTitle("Actividad reciente", "Ver toda", activity)
+                    EnzonaRecentActivity(state, activity)
+                } }
+            } else {
+                item { Box(Modifier.padding(horizontal = 24.dp)) { SectionTitle("Actividad reciente", "Ver toda", activity) } }
+                val recent = appFinancialHistory(state).take(4)
+                if (recent.isEmpty()) item { Box(Modifier.padding(horizontal = 24.dp)) { EmptyAction("Todavía no hay movimientos", "Actualizar actividad", actions.refresh) } }
+                items(recent, key = { it.key }) { movement ->
+                    Box(Modifier.padding(horizontal = 24.dp)) { MovementRow(movement, displayRecipients(state), showDate = true) { receipt(movement) } }
+                }
             }
         }
     }
 }
 
 @Composable
-internal fun ProductVisual(product: WalletProductUi, modifier: Modifier = Modifier, click: () -> Unit) {
-    if (product.card == null && product.account == null && product.number == null) {
+internal fun ProductVisual(product: WalletProductUi, modifier: Modifier = Modifier, captionAlpha: Float = 1f, click: () -> Unit) {
+    if (product.enzonaCardId == null && product.card == null && product.account == null && product.number == null) {
         Box(modifier.fillMaxWidth()) {
             ActionRow(product.identity.title(), R.drawable.ic_account_balance,
                 product.name.takeIf { it.isNotBlank() && it != product.identity.title() }, click = click)
@@ -165,7 +179,12 @@ internal fun ProductVisual(product: WalletProductUi, modifier: Modifier = Modifi
     }
     val isCard = product.kind == ProductKind.CARD
     val artwork = cardArtwork(product.identity)
-    if (isCard && artwork != null) { RestoredCard(product, artwork, modifier, click); return }
+    if (isCard && artwork != null) {
+        val visual = if (product.enzonaCardId == null) product else product.copy(
+            number = product.numberLabel(), name = "${product.name} · ENZONA")
+        RestoredCard(visual, artwork, modifier, captionAlpha, click)
+        return
+    }
     val largeText = LocalDensity.current.fontScale > 1.2f
     val shape = RoundedCornerShape(if (isCard) 24.dp else 18.dp)
     val content = MaterialTheme.colorScheme.onSurface
@@ -174,23 +193,23 @@ internal fun ProductVisual(product: WalletProductUi, modifier: Modifier = Modifi
         .background(MaterialTheme.colorScheme.surfaceContainerHigh).clickable(onClick = click)) {
         Column(Modifier.fillMaxWidth().then(if (!largeText && isCard) Modifier.fillMaxHeight() else Modifier).padding(24.dp), verticalArrangement = Arrangement.SpaceBetween) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(product.identity.title(), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = content)
+            Text(product.identity.title() + if (product.enzonaCardId != null) " · ENZONA" else "", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = content)
             Icon(painterResource(if (isCard) R.drawable.ic_credit_card else R.drawable.ic_account_balance), null, tint = content.copy(alpha = .8f))
         }
         Spacer(Modifier.height(16.dp))
-        product.number?.let { Text(readableAccount(it), style = MaterialTheme.typography.titleLarge.copy(letterSpacing = if (isCard) 1.sp else 0.sp), color = content) }
+        product.numberLabel()?.let { Text(it, style = MaterialTheme.typography.titleLarge.copy(letterSpacing = if (isCard) 1.sp else 0.sp), color = content) }
         Row(Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.Bottom) {
             Text(product.name.ifBlank { if (isCard) "Tarjeta" else if (product.kind == ProductKind.WALLET) "Monedero" else "Cuenta" },
                 Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = content.copy(alpha = .8f))
-            product.currency?.let { Text(it.name, style = MaterialTheme.typography.labelLarge, color = content.copy(alpha = .8f)) }
+            (product.rawCurrency ?: product.currency?.name)?.let { Text(it, style = MaterialTheme.typography.labelLarge, color = content.copy(alpha = .8f)) }
         }
         }
     }
 }
 
 @Composable
-private fun QuickAction(label: String, icon: Int, click: () -> Unit, enabled: Boolean = true) {
-    Column(Modifier.widthIn(min = 72.dp).graphicsLayer { alpha = if (enabled) 1f else .38f }.clip(MaterialTheme.shapes.large).clickable(enabled = enabled, onClick = click).padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+private fun QuickAction(label: String, icon: Int, click: () -> Unit, enabled: Boolean = true, modifier: Modifier = Modifier) {
+    Column(modifier.widthIn(min = 72.dp).graphicsLayer { alpha = if (enabled) 1f else .38f }.clip(MaterialTheme.shapes.large).clickable(enabled = enabled, onClick = click).padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.size(52.dp)) {
             Box(contentAlignment = Alignment.Center) { Icon(painterResource(icon), null, Modifier.size(24.dp)) }
         }
@@ -200,13 +219,14 @@ private fun QuickAction(label: String, icon: Int, click: () -> Unit, enabled: Bo
 
 @Composable
 internal fun WalletManager(state: AppUiState, back: () -> Unit, add: () -> Unit, edit: (WalletProductUi) -> Unit, banks: () -> Unit) {
-    val products = walletProducts(state)
+    val products = walletProducts(state, includeHistorical = true)
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(24.dp)) {
         item { PageHeader("Mi cartera", back) { IconButton(onClick = add) { Icon(painterResource(R.drawable.ic_add), "Añadir tarjeta o cuenta") } } }
         if (products.isEmpty()) item { Primary("Añadir tarjeta o cuenta", onClick = add) }
         items(products, key = { it.id }) { product ->
             ActionRow(product.name.ifBlank { product.identity.title() }, if (product.kind == ProductKind.CARD) R.drawable.ic_credit_card else R.drawable.ic_account_balance,
-                listOfNotNull(product.identity.title(), product.number?.let(::readableAccount), product.currency?.name).joinToString(" · ")) { edit(product) }
+                listOfNotNull(product.identity.title(), "ENZONA".takeIf { product.enzonaCardId != null },
+                    product.numberLabel(), product.rawCurrency ?: product.currency?.name).joinToString(" · ")) { edit(product) }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
         item { Spacer(Modifier.height(24.dp)); ActionRow("Bancos y accesos", R.drawable.ic_account_balance, click = banks) }
@@ -217,11 +237,20 @@ internal fun WalletManager(state: AppUiState, back: () -> Unit, add: () -> Unit,
 @Composable
 internal fun ProductEditor(state: AppUiState, existing: WalletProductUi?, actions: UiActions, back: () -> Unit,
                            addBank: () -> Unit, scan: ((String) -> Unit) -> Unit) {
-    val registrations = state.wallet.registrations.filter { it.identity() in authenticationProviders() }
+    if (existing?.enzonaCardId != null) {
+        EnzonaCardEditor(state, existing.enzonaCardId, actions, back)
+        return
+    }
     val editingStoredProduct = existing?.card != null || existing?.account != null
+    val registrations = state.wallet.registrations.filter {
+        it.identity() in authenticationProviders() || (editingStoredProduct && it.id == existing?.registrationId)
+    }
+    val historical = existing?.takeIf { editingStoredProduct }?.let {
+        !OperationCatalog.supports(it.identity) || (it.currency != null && it.currency !in productCurrencies(it.identity))
+    } == true
     var kind by rememberSaveable(existing?.id) { mutableStateOf(existing?.kind?.takeIf { editingStoredProduct } ?: ProductKind.CARD) }
     var registrationId by rememberSaveable(existing?.id) { mutableStateOf(existing?.registrationId ?: state.wallet.settings.selectedRegistrationId?.takeIf { id -> registrations.any { it.id == id } } ?: registrations.firstOrNull()?.id) }
-    var profile by rememberSaveable(existing?.id) { mutableStateOf(existing?.identity?.profile ?: ProfileId.PERSONAL) }
+    val profile = existing?.identity?.profile?.takeIf { editingStoredProduct } ?: ProfileId.PERSONAL
     var number by rememberSaveable(existing?.id) { mutableStateOf(existing?.number?.takeIf { editingStoredProduct || it.all(Char::isDigit) }.orEmpty()) }
     var name by rememberSaveable(existing?.id) { mutableStateOf(existing?.name.orEmpty()) }
     var holder by rememberSaveable(existing?.id) { mutableStateOf(existing?.card?.holderName.orEmpty()) }
@@ -244,47 +273,37 @@ internal fun ProductEditor(state: AppUiState, existing: WalletProductUi?, action
     LaunchedEffect(state.notice) { if (saving && state.notice != null) { error = state.notice; savingCard = null; savingAccount = null } }
     val registration = registrations.firstOrNull { it.id == registrationId }
     val identity = registration?.productIdentity(profile.name)
-    val miTransfer = registration?.identity() == ProviderIdentity(ProviderId.MITRANSFER)
-    val monedero = miTransfer && profile == ProfileId.PERSONAL && existing?.card == null
-    val validProfile = identity != null && (if (miTransfer) profile in setOf(ProfileId.PERSONAL, ProfileId.CLASSIC) else profile == ProfileId.PERSONAL) &&
-        !(miTransfer && existing?.card != null && profile == ProfileId.PERSONAL)
+    val validProfile = identity in authenticationProviders()
     val currencies = identity?.let(::productCurrencies).orEmpty()
     val selectedCurrency = currency?.let { runCatching { Currency.valueOf(it) }.getOrNull() }?.takeIf { it in currencies }
         ?: currencies.singleOrNull().takeIf { currency == null }
-    val validNumber = monedero || number.matches(Regex("[0-9]{16}"))
-    val resultingKind = if (monedero) ProductKind.WALLET else if (miTransfer && !editingStoredProduct) ProductKind.CARD else kind
-    val validExpiry = resultingKind != ProductKind.CARD || expiry.isEmpty() || expiry.matches(Regex("(0[1-9]|1[0-2])[0-9]{2}"))
-    val duplicate = registration != null && if (resultingKind == ProductKind.CARD) {
+    val validNumber = number.matches(Regex("[0-9]{16}"))
+    val validExpiry = kind != ProductKind.CARD || expiry.isEmpty() || expiry.matches(Regex("(0[1-9]|1[0-2])[0-9]{2}"))
+    val duplicate = !historical && registration != null && if (kind == ProductKind.CARD) {
         state.wallet.cards.any { it.id != existing?.card?.id && it.registrationId == registration.id && it.number == number }
-    } else state.wallet.accounts.any { it.id != existing?.account?.id && it.registrationId == registration.id &&
-        (if (monedero) it.number.isEmpty() && it.currency == selectedCurrency?.name && registration.productIdentity(it.profileId)?.profile == ProfileId.PERSONAL else it.number == number) }
+    } else state.wallet.accounts.any { it.id != existing?.account?.id && it.registrationId == registration.id && it.number == number }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         PageHeader(if (!editingStoredProduct) "Añadir a la cartera" else "Editar producto", back)
         Text("Banco o proveedor", style = MaterialTheme.typography.titleMedium)
-        if (editingStoredProduct) Detail(registration?.identity()?.title() ?: "Acceso", registration?.let { registrationLabel(it, state) } ?: "Acceso no disponible")
+        if (editingStoredProduct) Detail(existing?.identity?.title() ?: "Acceso", registration?.let { registrationLabel(it, state) } ?: "Acceso no disponible")
         else {
             ChoiceField(registration?.let { registrationLabel(it, state) } ?: "Elegir acceso",
                 registrations.map { it.id to registrationLabel(it, state) }) { id ->
-                registrationId = id; profile = ProfileId.PERSONAL; currency = null; number = ""
-                kind = if (registrations.first { it.id == id }.providerId == ProviderId.MITRANSFER.name) ProductKind.WALLET else ProductKind.CARD
+                registrationId = id; currency = null; number = ""; kind = ProductKind.CARD
             }
             TextButton(onClick = addBank) { Text("Añadir banco o proveedor") }
         }
-        if (miTransfer) {
-            val profiles = if (existing?.card != null) listOf(ProfileId.CLASSIC)
-                else if (existing?.account != null) listOf(existing.identity.profile)
-                else listOf(ProfileId.PERSONAL, ProfileId.CLASSIC)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                profiles.forEach { value -> FilterChip(profile == value, { profile = value; currency = null; if (!editingStoredProduct) number = "" },
-                    label = { Text(if (value == ProfileId.PERSONAL) "Monedero" else ProviderIdentity(ProviderId.MITRANSFER, value).title()) }) }
-            }
-        } else if (!editingStoredProduct) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (!editingStoredProduct) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(ProductKind.CARD, ProductKind.ACCOUNT).forEach { item -> FilterChip(kind == item, { kind = item }, label = { Text(if (item == ProductKind.CARD) "Tarjeta" else "Cuenta") }) }
         }
         Field("Nombre en la cartera", name, { name = it })
-        if (!monedero) Field(if (resultingKind == ProductKind.CARD) "Número de tarjeta" else "Número de cuenta", number, { number = digits(it, 16) }, KeyboardType.Number,
-            trailing = if (resultingKind == ProductKind.CARD) { { IconButton(onClick = { scan { number = it } }) { Icon(painterResource(R.drawable.ic_qr_code_scanner), "Leer número de tarjeta") } } } else null)
-        if (resultingKind == ProductKind.CARD) {
+        if (historical) {
+            existing?.number?.let { Detail(if (kind == ProductKind.CARD) "Número de tarjeta" else "Número de cuenta", it) }
+            existing?.card?.holderName?.let { Detail("Titular impreso", it) }
+            existing?.card?.expiry?.let { Detail("Vencimiento", it) }
+        } else Field(if (kind == ProductKind.CARD) "Número de tarjeta" else "Número de cuenta", number, { number = digits(it, 16) }, KeyboardType.Number,
+            trailing = if (kind == ProductKind.CARD) { { IconButton(onClick = { scan { number = it } }) { Icon(painterResource(R.drawable.ic_qr_code_scanner), "Leer número de tarjeta") } } } else null)
+        if (!historical && kind == ProductKind.CARD) {
             Field("Titular impreso (opcional)", holder, { holder = it.take(80) })
             Field("Vencimiento · MM/AA (opcional)", expiry, { text ->
                 expiry = digits(text.replace("/", ""), 4)
@@ -292,22 +311,30 @@ internal fun ProductEditor(state: AppUiState, existing: WalletProductUi?, action
             if (expiry.length >= 4 && !validExpiry)
                 Text("Vencimiento no válido", color = MaterialTheme.colorScheme.error)
         }
-        if (currencies.size == 1) Detail("Moneda", currencies.single().name)
+        if (historical) existing?.currency?.let { Detail("Moneda", it.name) }
+        else if (currencies.size == 1) Detail("Moneda", currencies.single().name)
         else ChoiceField(selectedCurrency?.name ?: "Moneda", currencies.map { it.name to it.name }) { currency = it }
-        if (duplicate) Text(if (monedero) "Este monedero ya está en la cartera" else "Este número ya está en la cartera", color = MaterialTheme.colorScheme.error)
+        if (duplicate) Text("Este número ya está en la cartera", color = MaterialTheme.colorScheme.error)
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        Primary(if (saving) "Guardando" else "Guardar", !saving && !duplicate && validProfile && name.isNotBlank() && validNumber && validExpiry && registration != null && selectedCurrency != null) {
+        Primary(if (saving) "Guardando" else "Guardar", !saving && name.isNotBlank() &&
+            (historical || (!duplicate && validProfile && validNumber && validExpiry && registration != null && selectedCurrency != null))) {
             runCatching {
                 actions.dismissNotice(); error = null
                 val id = existing?.card?.id ?: existing?.account?.id ?: java.util.UUID.randomUUID().toString()
-                if (resultingKind == ProductKind.CARD) {
+                if (historical && existing?.card != null) {
+                    val value = existing.card.copy(label = name.trim())
+                    savingCard = value; actions.saveCard(value)
+                } else if (historical && existing?.account != null) {
+                    val value = existing.account.copy(label = name.trim())
+                    savingAccount = value; actions.saveAccount(value)
+                } else if (kind == ProductKind.CARD) {
                     val value = CardRecord(id, requireNotNull(registrationId), number, name.trim(), existing?.card?.accountId, requireNotNull(selectedCurrency).name,
                         existing?.card?.isDefault ?: false, existing?.card?.favorite ?: false, profile.name,
                         holder.trim().ifEmpty { null }, expiry.takeIf { it.isNotEmpty() }?.let { it.take(2) + "/" + it.drop(2) })
                     savingCard = value; actions.saveCard(value)
                 } else {
-                    val value = AccountRecord(id, requireNotNull(registrationId), if (monedero) "" else number, name.trim(), requireNotNull(selectedCurrency).name,
-                        if (monedero) false else existing?.account?.isDefault ?: false, existing?.account?.favorite ?: false, profile.name)
+                    val value = AccountRecord(id, requireNotNull(registrationId), number, name.trim(), requireNotNull(selectedCurrency).name,
+                        existing?.account?.isDefault ?: false, existing?.account?.favorite ?: false, profile.name)
                     savingAccount = value; actions.saveAccount(value)
                 }
             }.onFailure { error = it.message; savingCard = null; savingAccount = null }

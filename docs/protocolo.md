@@ -1,14 +1,16 @@
-# Protocolo de Transfermóvil (referencia para NeoTransfer)
+# Protocolos de referencia para NeoTransfer
 
-Soporte activo: BPA, BANDEC, BANMET, MiTransfer personal, Clásica personal y servicios Cubacel. BFI, Clásica empresarial, el perfil Agente, Bulevar, MiBoleto, las reservas de visitas/recorridos OFA y Votomóvil se retiraron por decisión de alcance. Los aportes OFA94 de BANDEC, BANMET y MiTransfer personal permanecen. Sus identificadores históricos se conservan únicamente para lectura/importación; no habilitan formularios ni ejecución.
+La entrega `1.0.0-dev.6` (`versionCode 8`) mantiene tarjetas propias BPA/BANDEC, los servicios elegidos y extras Cubacel, e incorpora ENZONA experimental. El alcance vigente está en [cobertura](cobertura.md). Las tablas USSD conservan referencias de otros proveedores y gestiones excluidas —incluidos BANMET propio, MiTransfer, Clásica, MiTurno, combustible y OFA94— para interpretar contratos y datos históricos; no habilitan su ejecución. Esta limitación de productos propios no excluye destinatarios de otros bancos.
 
 CUC no se ofrece para productos ni operaciones nuevas, conforme a su [retirada de circulación (Decreto-Ley 17/2020, artículo 2)](https://www.gacetaoficial.gob.cu/sites/default/files/goc-2020-ex68.pdf#page=4). Se conserva para interpretar datos históricos. Retirar una opción no renumera el contrato: CUP sigue siendo `1` y USD `3` en la codificación bancaria; el identificador histórico CUC sigue siendo `2`.
 
-Extraído el 2026-09-21 de fuentes públicas y, para lo que ninguna cuenta, del APK Transfermóvil 1.260416 (versionCode 162, paquete `cu.etecsa.cubacel.tr.tm`). Lo marcado **[no verificado]** se confirma con la SIM en la primera rebanada (autenticación → saldo → transferencia → pago QR).
+La referencia USSD procede de fuentes públicas y del análisis estático de Transfermóvil 1.260416 (versionCode 162, paquete `cu.etecsa.cubacel.tr.tm`). Lo marcado **[no verificado]** requiere evidencia específica del proveedor. Las muestras BPA/BANDEC de §5 y la consulta real de §6 se conservan como evidencia de esos casos, sin extenderlas a ENZONA ni a otras operaciones.
 
 Fuentes públicas: [rodnye/ussd-codes-cuba](https://github.com/rodnye/ussd-codes-cuba) · [Códigos USSD Transfermóvil, Portal de Holguín](https://www.holguin.gob.cu/es/codigos-ussd-transfermovil) · [Guía BANMET, Cubadebate](http://agendaeconomica.cubadebate.cu/guia-completa-asi-se-usan-los-codigos-de-marcacion-para-el-banco-metropolitano/) · [Códigos BANDEC, Directorio Cubano](https://www.directoriocubano.info/acontecer/asi-puedes-usar-transfermovil-sin-la-app-todos-los-codigos-de-bandec-paso-a-paso/) · [Registro, sesión y SMS, Cubatramite](https://cubatramite.com/pagar-en-linea-desde-la-aplicacion-transfermovil/) · [QR y deep link de comercio, roberticovinales/transfermovil](https://github.com/roberticovinales/transfermovil/blob/main/crearpago.php).
 
-## 1. Transporte
+## 1. Transportes
+
+Los apartados 1.1–1.3 describen USSD; ENZONA usa HTTP (§1.4). Un error o incertidumbre no autoriza reenvío de dinero ni cambio automático entre ambos canales.
 
 - Formato ordinario de una operación bancaria: `*444*<servicio>*<parámetros codificados>*<versión>#`. El modo parcial divide una operación en varios mensajes USSD (§1.3).
   - `444` es el código de acceso a la plataforma (string `codigoAcceso`); `versión` es `1260416` (string `version_transfermovil`). Ambos viven en la tabla AppConfig (`codigo`, `number`) y la app puede actualizarlos desde el SMS de bienvenida ("Su número … tiene la versión X").
@@ -17,7 +19,7 @@ Fuentes públicas: [rodnye/ussd-codes-cuba](https://github.com/rodnye/ussd-codes
 - Respuesta: USSD inmediato "Su solicitud está siendo procesada, espere un SMS…"; el resultado real llega por **SMS del remitente `PAGOxMOVIL`** (§5). No hacen falta datos móviles, solo red celular.
 - Códigos "de menú" sin parámetros (`*444*46#`, `*444*45#`…): la red pregunta campo a campo por diálogos USSD. Son el catálogo público y el plan B manual desde cualquier teléfono; no se automatizan.
 
-### 1.1 Sesión bancaria
+### 1.1 Sesión bancaria USSD
 
 - Autenticar: servicio `40`, parámetros `<banco>*<clave>`. Desconectar: `*444*70#` sin parámetros.
 - La app guarda banco activo y hora de autenticación y da la sesión por válida **1 hora**; hay **un solo banco activo** a la vez. Caducidad real en el servidor: **[no verificado]**.
@@ -43,6 +45,28 @@ Activado en el original por `activarussdparcial`. Se codifica la cadena completa
 - El argumento `MAX_PARAMETERS_PQUETE=4` tampoco participa en esta agrupación. NeoTransfer conserva los identificadores completos; usa paquetes para sobres de más de 130 caracteres y rechaza paquetes que todavía superen 130. Es una restricción conservadora del cliente, **no un máximo de red demostrado**. El original recorta identificadores antes del envío; NeoTransfer no reproduce ese cambio silencioso.
 - Referencia: `pAzq93vIl3/MX9gh9mLxd`, contrastada con DEX. Pruebas locales: 800 vectores QR de ocho payloads y 100 semillas; 4.020 paquetes de referencia. Fixtures sintéticos en `core/src/test/resources/qr-vectors.tsv`.
 
+### 1.4 ENZONA experimental
+
+Las APIs de `app/enzona` implementan contratos reconstruidos estáticamente; no se ha probado acceso con una cuenta ENZONA ni una operación de dinero por este canal. Para la prueba del titular, registro de cuenta y primera vinculación de tarjetas se realizan en ENZONA oficial. El alta nativa de tarjetas queda fuera de esta entrega; consultar tarjetas remotas o enlazarlas a datos locales no equivale a registrarlas ante el proveedor.
+
+La sesión remota y sus tokens son independientes del registro USSD, la SIM y el desbloqueo biométrico local. Las solicitudes a `https://api.enzona.net` usan Bearer, `accept: application/json` y el encabezado de versión del cliente reconstruido. La compatibilidad actual de autorización, renovación y respuestas debe comprobarse con el titular.
+
+| Familia | Contrato implementado bajo `https://api.enzona.net` | Límite |
+| --- | --- | --- |
+| Tarjetas | GET `/coremz/1.0.2/card/username/{subject}` | UUID remoto, últimos dígitos y PAN conocido no son intercambiables. |
+| Saldo/últimas operaciones bancarias | GET `/coremz/1.0.2/api/balance/lastOperations/{funding_source_uuid}` | No es el historial ENZONA ni prueba de un pago pendiente. |
+| Actividad ENZONA | GET `/operations/v1.0.0/operations/account` | Conservar estados e identificadores recibidos; cobertura real pendiente. |
+| Transferencia | POST `/transfer/v1.0.0/transfer/card` o `/transfer/v1.0.0/transfer/account` | Contratos diferentes según destinatario, sin aceptación real demostrada. |
+| QR | Resolución GET `/qr/v1.0.0/qr/{code}` y pago POST `/payment/v1.0.0/payments/vendor/code` | Resolver o dibujar un QR no confirma un pago. |
+| Facturas/recargas | GET `/invoice/v1.0.0/invoice/search`; POST `/invoice/v1.0.0/invoice/payment` | Electricidad `2222`, fijo `4441`, Nauta `4443`, Nauta Hogar `4445`. |
+| Referencias remotas | GET `/invoice/v1.0.0/client-id/search`; POST `/invoice/v1.0.0/client-id` | Distintas de un favorito local; los wrappers de respuesta varían por familia. |
+
+Electricidad consulta `client[].invoice[]` y envía `metadata` como string JSON con `folio` y `route`. ETECSA consulta `datalist.data[]`; sus pagos usan `service_name` para `client_id` y `owner`. El pago fijo toma `to_pay`; la recarga Nauta/Hogar toma el importe introducido. `current_debt`, `unpaid_debt` y `current_unpaid_debt` permanecen separados: recargar no demuestra liquidar deuda. Los encoders reciben `encryptedPassword`; el coordinador aplica el cifrado y registra el intento antes del envío.
+
+HTTP 200 sólo acredita una respuesta: electricidad evalúa su código de resultado; ETECSA distingue `Aceptada`, `Pendiente` y `Fallida`. `getPaymentPasswordIntent` ausente, vacío o null no demuestra por sí mismo un rechazo; datos no vacíos o malformados mantienen la cautela del parser. Un resultado incierto no se convierte en éxito por actualizar el saldo ni se reenvía automáticamente.
+
+Agua, recarga móvil desde banco y pago separado de deuda Hogar conservan USSD: no hay contrato de envío ENZONA demostrado para esas operaciones. Los planes y consultas Cubacel desde saldo telefónico, incluido `*133#`, mantienen su canal y no se confunden con recarga bancaria. Los SMS existentes se conservan; no hay entrega push ENZONA demostrada con la app cerrada.
+
 ## 2. Codificación de parámetros
 
 La cadena `a*b*c` **no se envía en claro**. Método de referencia: `rDEl7rW1aN.code()`.
@@ -62,7 +86,7 @@ Validación del port, en dos pasos:
 1. En el PC: compilar esas clases tal cual (solo necesitan un stub de `Uri.encode` y de `BuildConfig.FLAVOR`) y generar vectores entrada → salida; el port debe reproducirlos fijando el mismo `cod_ram` (los 2 primeros dígitos de la salida).
 2. Con la SIM: la plataforma acepta la cadena y llega el SMS.
 
-## 3. Catálogo de operaciones (BPA y BANDEC)
+## 3. Catálogo de referencia USSD (BPA y BANDEC)
 
 Parámetros en orden, antes de codificar. Campos comunes:
 
@@ -116,7 +140,7 @@ Servicios Cubacel, no bancarios, se marcan tal cual y sin codificar: `*222#` sal
 - Agua: servicios 19 (La Habana), 51 (resto del país), 21 (Varadero). BANDEC usa cinco campos en región 2 y seis en las otras, con moneda 0; BPA/BANMET siempre seis. La opción total es 1 en La Habana/Varadero; la pantalla inicia tipo 0 en resto del país. Fuentes: `zOs55UzH6z`, `T4RQ5wDJDt`, `BoMBck6OXT`.
 - ONAT actual (43): `<modo>*<DPA>*<RC05/NIT>*<RC04/tributo>*<periodo>*<importe>*<moneda>*<origen>`; modo RC=1 usa DPA/período `0000`, NIT=2 requiere municipio y mes/año (`ROgpLrCtHa:391-435`). Sellos añade entidad antes de moneda. `TGMSi5UDp7:261,267` cambia el orden NIT/tributo en su ruta parcial; el DEX `submitForm` 010a/0110/0116 confirma el intercambio. El encoder conserva una variante parcial con ese orden y la misma semilla, antes de agrupar los paquetes.
 - Nauta 59, Nauta Hogar 84 y deuda 86: `<usuarioSinDominio>*<tipoCuenta>*<importe>*<moneda>*<movil>*<origen>*<1/2/3>`. El móvil omitido es `0000000`. Propia 77, Joven Club 93, TFA 108, planes 6 y combustible 35 tienen campos específicos, recogidos en `ServiceOperations` con referencias al formulario.
-- MiTransfer usa bolsa USD=1/CUP=2, distintas de las monedas bancarias. Recarga móvil vigente:54 CUP. Nauta Plus34 y Extra USD33 conservan las rutas de MiTransfer personal. Fuentes: `zzyNbaqs1U`, `HZgbT8IXPf`, `f3Ttlx30sMT`.
+- En el cliente analizado, MiTransfer usa bolsa USD=1/CUP=2, distintas de las monedas bancarias. Recarga móvil:54 CUP. Nauta Plus34 y Extra USD33 pertenecen a esas rutas históricas; MiTransfer está fuera del alcance actual. Fuentes: `zzyNbaqs1U`, `HZgbT8IXPf`, `f3Ttlx30sMT`.
 - Clásica 45 desde el menú usa `1*<tarjetaOrigen>*<destino>*<importe>*<compartirMovil>*<movilConfirmacion>*<compartirSaldo>*1`, bajo sesión MiTransfer. El prefijo `08*<PIN>*` solo aparece en la variante externa con argumento `R1sDOSqZ2z` (`l3GXbXAyUW:195-199,295-318`; entradas `OJ3XxacXOT`, `f6Y2Wmtg6jQ`, `KeTIEVSfVo`). El catálogo normal usa la primera ruta.
 - Extracción MiTransfer95 concatena DPA con bolsa0 en el último átomo, sin separador (`f9Reflqt3EZ.submitForm`, DEX00e9–00ee). Se conserva el wire observado, sin afirmar aceptación de red.
 - Consultar un extracto por correo (26) cobra comisión; no clasificarlo como lectura sin autorización. Los recibos de solicitudes no confirman un movimiento de dinero.
@@ -124,7 +148,7 @@ Servicios Cubacel, no bancarios, se marcan tal cual y sin codificar: `*222#` sal
 
 Los constructores son propios y no ejecutan USSD. Los fixtures de contratos y el oráculo de codificación comprueban orden, valores omitidos y sobre; no prueban aceptación por la red.
 
-### 3.2 Navegación vigente y credenciales
+### 3.2 Navegación del cliente de referencia y credenciales
 
 Las rutas bancarias parten de `S9ycHcoxAzy`: BPA → `kChOHNVmzz` (consultas `kmO9Md6JHr`, operaciones `voNSkP3P8q`, configuración `f5AFyaj0rtx`); BANDEC → `s684VE6Dm0` (`R7PmVxXLJZC`, `bLlRBTTLue`, servicios contratados `Kgii4NH4Ce`, configuración `X7obECfkKf`); BANMET → `Q7htFIAC0SE` (`PEi17BvMam`, `Vdv5nYP39d`, `RC71RyOpsk`). Los constructores del catálogo citan el formulario que selecciona el handler de estas pestañas.
 
@@ -148,10 +172,10 @@ MiTransfer → `ofOuyCSKWI` usa sesión `H0kVHR7zuu`, consultas `UMVR3qrc3V`, op
 
 La conversión CUC→CUP87 no forma parte del catálogo normal: sus enums y handlers permanecen en el APK, pero `f5AFyaj0rtx.initData`, `X7obECfkKf.initData` y `RC71RyOpsk.initData` no añaden ese ítem. El registro de accesos directos `nljtDl5MIf` tampoco lo registra. La reflexión de `FBsQzP3Zfj.goToFragment` parte precisamente de ese registro. Se retiran las tres specs y sus fixtures; esto no afirma que el servidor haya eliminado87.
 
-OFA94 se conserva únicamente para BANDEC, BANMET y MiTransfer: menús, enums y accesos directos demuestran esas rutas. BPA no tiene formulario94 ni subopción OFA: su diálogo ONAT ofrece RC, NIT y sellos43. No se adapta el contrato BANDEC a BPA por semejanza.
+OFA94 tiene rutas de referencia en BANDEC, BANMET y MiTransfer: menús, enums y accesos directos las demuestran en el cliente analizado. BPA no tiene formulario94 ni subopción OFA: su diálogo ONAT ofrece RC, NIT y sellos43. OFA y ONAT están fuera del alcance actual; no se adapta el contrato BANDEC a BPA por semejanza.
 
 Nauta Plus34 tiene dos rutas activas en `rR6oImkdEU.showDialogNautaPlus` y el acceso directo equivalente de `FBsQzP3Zfj`: con cuenta `usuario*móvil*1`; sin cuenta `0000*móvil*1`. El móvil es obligatorio, de ocho dígitos y comienza por5/6. La cuenta se escribe sin espacios ni dominio y se conserva su capitalización; `toLowerCase()` no reasigna el campo. El layout no impone límite20 a la cuenta. La [FAQ oficial de ETECSA, pregunta43](https://www.etecsa.cu/es/preguntas-frecuentes?faq=4339) confirma la cuenta internacional y el móvil de notificación. El envío usa la ruta nativa `ACTION_CALL` de `FBsQzP3Zfj:144–171`, representada como `INTERACTIVE_USSD`; no se afirma haber inspeccionado la respuesta o aceptación de red.
-### 3.5 MiTurno: solicitud y gestión posterior
+### 3.5 MiTurno: referencia histórica, fuera de alcance
 
 - El envío102 solicita un turno: proveedor `1` BPA, `2` BANDEC, `3` BANMET o `4` MiTransfer, servicio, DPA de sucursal, CI/pasaporte, móvil de confirmación y débito según el contrato. No envía fecha ni hora.
 - Cambiar fecha105 envía proveedor, servicio, CI/pasaporte y la fecha nueva elegida. Cancelar106 envía proveedor, servicio y CI/pasaporte. Consultar107 envía proveedor y CI/pasaporte. No se requiere ni se transmite un identificador de reserva: `rGY5dubJYU:211`, `GPsckxvkPu:204`, `V0zQxQBN2i:136`, `Wwc5crW71D:163`, `QVPgkl8ZGC:156`, `x12rSjPY6pZ:100`.
@@ -238,7 +262,9 @@ Siguen fuera de la interfaz: gestión completa de tarjetas y destinatarios, hist
 
 ## 7. Catálogos y gestiones personales
 
-### Catálogos y gestiones activas completadas en core
+### Catálogos y gestiones conservados como referencia
+
+La presencia de estos contratos en `core` no los incorpora al catálogo actual. Combustible, multas y las demás gestiones excluidas permanecen fuera de esta entrega.
 
 - `TerritoryCatalog` conserva16 provincias y168 municipios del catálogo DPA usado por los servicios personales. `ServiceCatalogData` conserva además sucursales, entidades y relaciones territoriales necesarias para los selectores.
 - BANDEC tiene cinco pestañas: `s684VE6Dm0.getItem(3) → Kgii4NH4Ce` expone servicios contratados; configuración está en `X7obECfkKf`. Agregar/consultar/eliminar abren `q9DNC6bnexm` y servicio **52** con tres parámetros: operación `1/3/2`, tipo `1` teléfono o `2` electricidad, factura o `000` al consultar. Pagar abre `g7yG4Frdxy`, operación `4`, y añade moneda `0` y origen. No anexar origen a las otras tres variantes.

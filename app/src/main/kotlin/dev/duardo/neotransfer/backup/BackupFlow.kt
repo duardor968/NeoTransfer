@@ -12,6 +12,7 @@ import dev.duardo.neotransfer.core.backup.BackupFailure
 import dev.duardo.neotransfer.core.fuel.FuelBackupEnvelope
 import dev.duardo.neotransfer.data.RestoreResult
 import dev.duardo.neotransfer.data.WalletSnapshot
+import dev.duardo.neotransfer.enzona.data.EnzonaLocalExport
 import dev.duardo.neotransfer.platform.AccessCredentials
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,7 +30,8 @@ sealed interface BackupFlowState {
     data class ExportPassword(val error: String? = null) : BackupFlowState
     data class ImportPassword(val error: String? = null) : BackupFlowState
     data class Working(val label: String) : BackupFlowState
-    data class OwnPreview(val snapshot: WalletSnapshot, val hasCredentials: Boolean) : BackupFlowState
+    data class OwnPreview(val snapshot: WalletSnapshot, val hasCredentials: Boolean,
+                          val enzona: List<EnzonaLocalExport> = emptyList()) : BackupFlowState
     data class TrmPreviewState(val source: TrmPreview, val mapping: TrmWalletMapping) : BackupFlowState
     data class Completed(val imported: Int, val conflicts: List<String>, val pendingAccesses: Int) : BackupFlowState
     data object Exported : BackupFlowState
@@ -49,6 +51,8 @@ class BackupFlow(
     private val onRestored: () -> Unit,
     private val exportFuel: (WalletSnapshot) -> List<FuelBackupEnvelope>,
     private val restoreWithFuel: (WalletSnapshot, List<FuelBackupEnvelope>) -> RestoreResult,
+    private val exportEnzona: () -> List<EnzonaLocalExport>,
+    private val restoreEnzona: (List<EnzonaLocalExport>, () -> RestoreResult) -> RestoreResult,
 ) : AutoCloseable {
     var state by mutableStateOf<BackupFlowState>(BackupFlowState.Idle)
         private set
@@ -137,7 +141,7 @@ class BackupFlow(
                         val value = snapshot()
                         val fuel = exportFuel(value)
                         try {
-                            val payload = BackupPayload.encode(value, vaultBytes, readPreferences(), fuel)
+                            val payload = BackupPayload.encode(value, vaultBytes, readPreferences(), fuel, exportEnzona())
                             try { BackupEnvelope.encrypt(payload, password) } finally { payload.fill(0) }
                         } finally { fuel.forEach(FuelBackupEnvelope::close) }
                     }
@@ -228,7 +232,7 @@ class BackupFlow(
                     decoded?.close()
                     decoded = result
                     bytes.fill(0); pendingImport = null
-                    state = BackupFlowState.OwnPreview(result.snapshot, result.credentials.isNotEmpty())
+                    state = BackupFlowState.OwnPreview(result.snapshot, result.credentials.isNotEmpty(), result.enzona)
                 }
             } catch (error: Exception) {
                 if (!closed && request == generation) state = BackupFlowState.ImportPassword(
@@ -256,7 +260,7 @@ class BackupFlow(
         decryptVault { currentBytes ->
             if (closed || request != generation) { currentBytes?.fill(0); return@decryptVault }
             if (currentBytes == null) {
-                state = BackupFlowState.OwnPreview(source.snapshot, source.credentials.isNotEmpty())
+                state = BackupFlowState.OwnPreview(source.snapshot, source.credentials.isNotEmpty(), source.enzona)
                 return@decryptVault
             }
             scope.launch {
@@ -269,7 +273,9 @@ class BackupFlow(
                                 else AccessCredentials.decode(source.credentials)
                             imported.use { importedCredentials ->
                                 CredentialMerge.plan(snapshot(), currentCredentials, source.snapshot, importedCredentials).use { plan ->
-                                    val result = restoreWithFuel(plan.snapshotForImport, source.fuelEnvelopes)
+                                    val result = restoreEnzona(source.enzona) {
+                                        restoreWithFuel(plan.snapshotForImport, source.fuelEnvelopes)
+                                    }
                                     RestoreWork(result, plan.encodeMerged(currentCredentials,
                                         result.registrationsToReassociate.toSet()), plan.pendingRegistrationIds.size)
                                 }

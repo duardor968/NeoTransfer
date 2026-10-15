@@ -22,8 +22,20 @@ import org.json.JSONObject
 import java.time.Instant
 import java.time.LocalTime
 import java.util.concurrent.Executors
+import dev.duardo.neotransfer.enzona.*
+import dev.duardo.neotransfer.enzona.data.RoomEnzonaRepository
 
 class NeoTransferApplication : Application() {
+    internal val enzonaHttp by lazy { EnzonaHttp() }
+    internal val enzonaRepository by lazy { RoomEnzonaRepository.open(this) }
+    internal val enzonaSession by lazy { EnzonaSessionCoordinator(EnzonaSessionStore(this), enzonaHttp, EnzonaDeviceInfo(this)::fields) }
+    internal val enzonaWallet by lazy { EnzonaWalletCoordinator(enzonaSession, EnzonaReadApi(enzonaHttp), enzonaRepository) }
+    internal val enzonaQr by lazy { EnzonaQrApi(enzonaHttp) }
+    internal val enzonaPayments by lazy {
+        val key = resources.openRawResource(R.raw.enzona_public_key).bufferedReader().use { it.readText() }
+        EnzonaPaymentCoordinator(enzonaSession, enzonaRepository, EnzonaPaymentApi(enzonaHttp),
+            EnzonaPaymentRequests(EnzonaPaymentRequests.publicKeyFromPem(key)))
+    }
     val wallet by lazy { WalletCoordinator(this, notificationDelivery = { receipt, state -> notifications.deliver(receipt, state) }) }
     val notifications by lazy { TransferNotifications(this) }
     val fuelSecrets by lazy { FuelSecretStore(this) }
@@ -31,12 +43,20 @@ class NeoTransferApplication : Application() {
     val accessSession = AccessSession(android.os.SystemClock::elapsedRealtime)
     private val accessHandler = Handler(Looper.getMainLooper())
     private val expireAccess = Runnable {
-        if (accessSession.shouldLockInBackground()) controller.lock()
+        if (accessSession.shouldLockInBackground()) {
+            controller.lock()
+            enzonaSession.suspendAccess()
+            enzonaWallet.activate(null)
+        }
     }
 
     fun enterForeground() {
         accessHandler.removeCallbacks(expireAccess)
-        if (accessSession.enterForeground()) controller.lock()
+        if (accessSession.enterForeground()) {
+            controller.lock()
+            enzonaSession.suspendAccess()
+            enzonaWallet.activate(null)
+        }
         controller.resumeForeground()
     }
 
