@@ -6,6 +6,7 @@ import dev.duardo.neotransfer.core.model.OwnCard
 import dev.duardo.neotransfer.core.protocol.BalanceQuery
 import dev.duardo.neotransfer.core.protocol.CubacelQuery
 import dev.duardo.neotransfer.core.protocol.CubacelQueryKind
+import dev.duardo.neotransfer.core.protocol.HistoryQuery
 import dev.duardo.neotransfer.core.protocol.QrPay
 import dev.duardo.neotransfer.core.protocol.Source
 import dev.duardo.neotransfer.core.protocol.Transfer
@@ -374,6 +375,49 @@ class LedgerScenarioTest {
         assertEquals(cup("120.00"), view.balances.getValue(bandec.number).value)
         assertTrue(view.operations.isEmpty())
         assertEquals("ref:AY000H1", view.movements.single().id)
+    }
+
+    @Test fun `last operations fill in what no receipt reported, once, without double counting`() {
+        val phone = Phone(listOf(bandec))
+        phone.receive(Sms.balanceBandec(bandec.number, "1000.00")) // 15/10, 06:00 in Cuba
+        phone.advance(Duration.ofDays(1))
+        phone.receive(Sms.sent(Bank.BANDEC, friend, "100.00", "KW000R1"))
+        assertEquals(cup("900.00"), phone.balance(bandec))
+        val id = phone.submit(HistoryQuery(Bank.BANDEC))
+        phone.pump()
+        assertEquals(listOf(40, 48), phone.services)
+        val answer = Sms.history(
+            Sms.row("16/10/2026", "Banca Movil Transferencia", "KW000R1", false, "100.00"), // the receipt already said it
+            Sms.row("16/10/2026", "POS Extraccion", "AP000P1", false, "50.00"), // no receipt: card payment
+            Sms.row("15/10/2026", "Credito: ", "EA0001", true, "1.25"), // same day as the balance: already in it
+        )
+        phone.receive(answer)
+        assertIs<OperationState.Confirmed>(phone.state(id))
+        val movements = phone.view().movements
+        assertEquals(listOf("KW000R1", "AP000P1", "EA0001"), movements.map { it.reference })
+        val card = movements[1]
+        assertEquals(MovementKind.OTHER, card.kind)
+        assertEquals("POS Extraccion", card.label)
+        assertTrue(card.dateOnly && card.external)
+        assertEquals(bandec.number, card.debitCard)
+        assertEquals(cup("850.00"), phone.balance(bandec))
+        // The next answer repeats the same rows: nothing changes.
+        phone.minutes(5)
+        phone.receive(answer)
+        assertEquals(3, phone.view().movements.size)
+        assertEquals(cup("850.00"), phone.balance(bandec))
+    }
+
+    @Test fun `last operations rows without reference dedupe by day, direction and amount`() {
+        val phone = Phone(listOf(bandec))
+        phone.receive(Sms.sent(Bank.BANDEC, friend, "20.00", "KW000R2"))
+        val pos = Sms.row("15/10/2026", "POS Extraccion", null, false, "20.00")
+        phone.receive(Sms.history(pos, pos, pos))
+        // Three rows of 20 that day: one is the receipt, two are new; a later answer repeating them adds nothing.
+        assertEquals(3, phone.view().movements.size)
+        phone.receive(Sms.history(pos, pos, pos))
+        assertEquals(3, phone.view().movements.size)
+        assertEquals(2, phone.view().movements.count { it.reference == null })
     }
 
     @Test fun `operations survive storage without secrets`() {

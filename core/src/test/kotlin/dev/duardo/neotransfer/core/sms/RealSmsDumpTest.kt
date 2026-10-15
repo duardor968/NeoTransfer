@@ -52,11 +52,12 @@ class RealSmsDumpTest {
         val view = Ledger.evaluate(emptyList(), records, cards, now)
         println("Replay: ${bandec.size} BANDEC card(s); movements ${view.movements.size} " +
             view.movements.groupingBy { "${it.kind}/${it.direction}/${if (it.debitCard != null || it.creditCard != null) "attributed" else "unattributed"}" }.eachCount())
-        assertEquals(view.movements.size, view.movements.map { it.reference }.distinct().size)
+        assertEquals(view.movements.size, view.movements.map { it.id }.distinct().size)
         val outcome = mutableMapOf<String, Int>()
         sorted.forEachIndexed { index, record ->
             val balance = record.message as? SmsMessage.Balance ?: return@forEachIndexed
-            val before = Ledger.evaluate(emptyList(), sorted.take(index), cards, record.sentAt).balances
+            val known = Ledger.evaluate(emptyList(), sorted.take(index), cards, record.sentAt)
+            val before = known.balances
             for (card in cards) {
                 val observed = Ledger.evaluate(emptyList(), sorted.take(index + 1), cards, record.sentAt).balances.getValue(card.number)
                 if (observed.observedAt != record.sentAt) continue
@@ -67,7 +68,8 @@ class RealSmsDumpTest {
                     else -> {
                         val delta = observed.value!!.amount - projected.amount
                         val baseAt = before.getValue(card.number).observedAt!!
-                        val between = view.movements.filter { it.at > baseAt && it.at <= record.sentAt && (it.debitCard == card.number || it.creditCard == card.number) }
+                        // Movements known at that point: last-operations rows learned later cannot be applied earlier.
+                        val between = known.movements.filter { it.at > baseAt && it.at <= record.sentAt && (it.debitCard == card.number || it.creditCard == card.number) }
                         val explainsByMovement = between.any { it.amount.amount.compareTo(delta.abs()) == 0 }
                         "differed(${if (delta.signum() > 0) "+" else "-"}, movementsBetween=${between.size}, equalsOneMovement=$explainsByMovement, gapHours=${java.time.Duration.between(baseAt, record.sentAt).toHours()})"
                     }

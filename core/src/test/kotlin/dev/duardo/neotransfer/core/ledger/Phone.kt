@@ -84,6 +84,12 @@ object Sms {
     fun received(to: String, amount: String, ref: String) =
         "El titular del telefono 5350000009 le ha realizado una transferencia a la cuenta $to de $amount CUP. Nro. Transaccion $ref. Fecha: 15/10/2026."
 
+    /** BANDEC last operations; rows from [row]. */
+    fun history(vararg rows: String) =
+        "Banco Bandec Ultimas operaciones. \n Fecha;Servicio;Operacion;Monto;Moneda;NoTransaccion \n " + rows.joinToString(" | \n ") + " | \n"
+    fun row(date: String, service: String, ref: String?, credit: Boolean, amount: String) =
+        "$date;$service${ref?.let { " Ref: $it" }.orEmpty()};${if (credit) "Cr" else "Db"};$amount;CUP;"
+
     private fun mask6(card: String) = card.take(6) + "XXXXXX" + card.takeLast(4)
     private fun mask4(card: String) = card.take(4) + "XXXXXXXX" + card.takeLast(4)
 }

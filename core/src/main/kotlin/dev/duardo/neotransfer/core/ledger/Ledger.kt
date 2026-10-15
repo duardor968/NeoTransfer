@@ -50,7 +50,7 @@ class LedgerView internal constructor(
     val session: Session?,
     /** Banks whose saved key was rejected; nothing goes out for them until the key is saved again. */
     val blockedBanks: Set<Bank>,
-    /** Activity: receipts as movements, newest first. Authentications never appear. */
+    /** Activity: receipts, then last-operations rows no receipt reported; newest first. Authentications never appear. */
     val movements: List<Movement>,
     /** Balance per own card number. */
     val balances: Map<String, CardBalance>,

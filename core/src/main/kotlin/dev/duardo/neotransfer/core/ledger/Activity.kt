@@ -8,6 +8,7 @@ import dev.duardo.neotransfer.core.model.OwnCard
 import dev.duardo.neotransfer.core.protocol.BalanceQuery
 import dev.duardo.neotransfer.core.protocol.BankRequest
 import dev.duardo.neotransfer.core.protocol.ElectricityBill
+import dev.duardo.neotransfer.core.protocol.HistoryQuery
 import dev.duardo.neotransfer.core.protocol.MobileRecharge
 import dev.duardo.neotransfer.core.protocol.NautaPayment
 import dev.duardo.neotransfer.core.protocol.PhoneBill
@@ -21,22 +22,26 @@ import dev.duardo.neotransfer.core.sms.SmsMessage
 import dev.duardo.neotransfer.core.sms.SmsRecord
 import java.math.BigDecimal
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 
-enum class MovementKind { TRANSFER, QR_PAYMENT, SERVICE }
+/** [OTHER]: a bank movement known only from last operations (card payment, ATM, interest…). */
+enum class MovementKind { TRANSFER, QR_PAYMENT, SERVICE, OTHER }
 enum class Direction { IN, OUT, BETWEEN_OWN }
 
 /**
  * One money movement for Activity, built from a bank receipt (its copies and duplicates merged by
- * reference). Card attribution is computed from the current cards, never stored.
+ * reference) or, when no receipt reported it, from a last-operations row (`48`).
+ * Card attribution is computed from the current cards, never stored.
  */
 data class Movement(
-    /** Stable: `ref:<bank reference>`. */
+    /** Stable: `ref:<bank reference>`; `day:…` for a last-operations row without reference. */
     val id: String,
     val kind: MovementKind,
     val service: PaidService?,
     val direction: Direction,
     val amount: Money,
-    /** SMSC time of the receipt. */
+    /** SMSC time of the receipt; start of the day in Cuba when [dateOnly]. */
     val at: Instant,
     val bank: Bank?,
     /** Own card debited, when it can be told without ambiguity. */
@@ -45,11 +50,16 @@ data class Movement(
     val creditCard: String?,
     /** Destination account or mask, sender phone, merchant or service account. */
     val counterparty: String?,
-    val reference: String,
+    /** Null only for a last-operations row without reference. */
+    val reference: String?,
     /** The app operation that produced it; null when made elsewhere (Transfermóvil, another phone…). */
     val operationId: String?,
     /** Balance stated by the receipt, as written by the bank. */
     val balanceAfter: Money?,
+    /** The bank's wording of a last-operations row ("POS Extraccion"); null for receipts. */
+    val label: String? = null,
+    /** Known only by its date (last operations): there is no time of day. */
+    val dateOnly: Boolean = false,
 ) {
     val external: Boolean get() = operationId == null
 }
@@ -69,8 +79,10 @@ internal class Activity(
 ) {
     private class Entry(val movement: Movement, val order: Long)
 
-    private val entries: List<Entry> = sms.filter { it.message is Receipt }
+    private val receipts: List<Entry> = sms.filter { it.message is Receipt }
         .groupBy { (it.message as Receipt).reference }.values.mapNotNull(::movement)
+
+    private val entries: List<Entry> = receipts + history()
 
     val movements: List<Movement> = entries.map { it.movement }.sortedByDescending { it.at }
 
@@ -109,6 +121,42 @@ internal class Activity(
         return Entry(movement, primary.id)
     }
 
+    /**
+     * Last operations (`48`) fill in what no receipt reported: a lost SMS, card payments, ATM. A row
+     * repeated in later answers counts once (same reference; without one, same day, direction and
+     * amount, as many times as one answer lists it), and a row a receipt already reported is skipped
+     * (same reference; without one, same bank, day, direction and amount).
+     */
+    private fun history(): List<Entry> {
+        val referenced = receipts.mapNotNullTo(mutableSetOf()) { it.movement.reference }
+        val reported = receipts.groupingBy { dayKey(it.movement.bank, it.movement.at.atZone(CUBA).toLocalDate(),
+            it.movement.direction == Direction.IN, it.movement.amount) }.eachCount()
+        val found = linkedMapOf<String, Entry>()
+        for (record in sms) {
+            val message = record.message as? SmsMessage.History ?: continue
+            val source = (operationOf[record.id]?.let(operations::get)?.request as? HistoryQuery)?.source
+            val listed = mutableMapOf<String, Int>()
+            for (row in message.entries) {
+                val id = row.reference?.let { "ref:$it" } ?: run {
+                    val key = dayKey(message.bank, row.date, row.credit, row.amount)
+                    val occurrence = listed.merge(key, 1, Int::plus)!!
+                    if (occurrence <= (reported[key] ?: 0)) return@run null
+                    "day:$key:$occurrence"
+                } ?: continue
+                if (id in found || row.reference?.let(referenced::contains) == true) continue
+                val card = if (source is Source.Card) own(source.number) else defaultCard(message.bank, row.amount.currency, record.sentAt)
+                found[id] = Entry(Movement(id, if (row.description.contains("transferencia", true)) MovementKind.TRANSFER else MovementKind.OTHER,
+                    null, if (row.credit) Direction.IN else Direction.OUT, row.amount, row.date.atStartOfDay(CUBA).toInstant(), message.bank,
+                    card.takeUnless { row.credit }, card.takeIf { row.credit }, null, row.reference, null, null,
+                    label = row.description, dateOnly = true), record.id)
+            }
+        }
+        return found.values.toList()
+    }
+
+    private fun dayKey(bank: Bank?, day: LocalDate, credit: Boolean, amount: Money) =
+        "$bank:$day:${if (credit) "cr" else "db"}:${amount.amount.stripTrailingZeros().toPlainString()}:${amount.currency}"
+
     private fun sourceOf(request: BankRequest): Source? = when (request) {
         is Transfer -> request.source
         is QrPay -> request.source
@@ -138,6 +186,11 @@ internal class Activity(
     }
 
     private class Observation(val card: String, val value: Money, val at: Instant, val order: Long)
+
+    private companion object {
+        /** Last-operations dates are Cuban calendar days. */
+        val CUBA: ZoneId = ZoneId.of("America/Havana")
+    }
 
     /** Balance answers: BANDEC by card mask (available balance); BPA's single figure by the query's origin. */
     private fun observations(): List<Observation> = sms.flatMap { record ->

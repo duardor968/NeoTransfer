@@ -21,7 +21,7 @@ sealed interface SmsMessage {
 
     data class Balance(val bank: Bank, val rows: List<BalanceRow>) : SmsMessage
 
-    /** Last operations (`48`), as listed by the bank. Not movements: receipts are. */
+    /** Last operations (`48`), as listed by the bank. Rows no receipt reported become movements. */
     data class History(val bank: Bank, val entries: List<HistoryEntry>) : SmsMessage
 
     /** Outgoing transfer receipt. [sourceMask] is null when the default account paid ("Ordenante: CUP"). */
