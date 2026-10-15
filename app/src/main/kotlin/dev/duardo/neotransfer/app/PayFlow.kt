@@ -56,7 +56,7 @@ class PayDestination(
         problem?.let { return PayQrUi.Unsupported(it) }
         val payment = payment ?: return PayQrUi.Scanning
         val sources = sources(book, payment)
-        if (sources.isEmpty()) return PayQrUi.Unsupported("Añade una tarjeta en ${payment.amount.currency.name} para pagar este código")
+        if (sources.isEmpty()) return PayQrUi.Unsupported("Para pagar este código hace falta una tarjeta en ${payment.amount.currency.name}", addCard = true)
         val index = sources.indexOfFirst { it.card.id == source }.coerceAtLeast(0)
         val fixedDescription = payment.description.isNotEmpty()
         val (reference, label, editable) = when {
@@ -101,6 +101,7 @@ class PayDestination(
     }
 
     override fun close() { app.navigator.remove(this) }
+    override fun addCard() = app.navigator.push(BankChoiceDestination(app, setup = false))
     override fun amount(value: String) { amount = value.filter { it.isDigit() || it == '.' || it == ',' }.take(12) }
     override fun reference(value: String) { description = value.take(60) }
     override fun source(index: Int) {

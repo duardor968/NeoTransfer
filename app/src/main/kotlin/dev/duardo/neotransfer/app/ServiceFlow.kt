@@ -288,16 +288,16 @@ class CubacelDestination(private val app: AppModel) : Destination(), CubacelActi
         val balance = (latest[CubacelQueryKind.BALANCE] as? OperationState.Answered)?.text
         CubacelScreen(
             CubacelUi(
-                line = "Esta línea",
+                line = null,
                 balance = balance?.let(::cup),
                 expires = balance?.let(::date),
-                results = CubacelQuery.entries.map { query ->
+                balanceLoading = latest[CubacelQueryKind.BALANCE]?.inFlight == true,
+                results = CubacelQuery.entries.filter { it != CubacelQuery.Balance }.map { query ->
                     val state = latest[query.request()]
                     val answer = (state as? OperationState.Answered)?.text
                     when {
                         state?.inFlight == true -> CubacelResultUi(query, null, loading = true)
-                        // The balance itself shows above; its row only asks again.
-                        query == CubacelQuery.Balance || answer == null -> CubacelResultUi(query, null)
+                        answer == null -> CubacelResultUi(query, null)
                         else -> figure(query, answer)?.let { CubacelResultUi(query, it, date(answer)?.let { d -> "Vence el ${d.dayOfMonth} de ${month(d)}" }) }
                             ?: CubacelResultUi(query, null, answer.trim())
                     }

@@ -195,7 +195,7 @@ private fun Balance(wallet: WalletCardUi, ago: (java.time.Instant) -> String, re
                 RefreshPill(if (wallet.refreshing) "Consultando saldo" else "Actualizado ${ago(balance.updatedAt)}", wallet.refreshing, refresh)
             }
             BalanceUi.Unknown -> NeoButton(
-                "Consultar saldo", refresh, style = NeoButtonStyle.Tonal, icon = Ds.drawable.ic_refresh,
+                if (wallet.refreshing) "Consultando saldo" else "Consultar saldo", refresh, style = NeoButtonStyle.Tonal, icon = Ds.drawable.ic_refresh,
                 loading = wallet.refreshing, fill = false,
             )
         }
@@ -270,8 +270,9 @@ private fun RechargeSheet(targets: List<RechargeTargetUi>, actions: HomeActions)
                 val kind = if (target.kind == ServiceKind.MobileTopUp) "Móvil" else target.kind.label
                 NeoRow(target.name, supporting = "$kind · ${target.value}", leading = { IconAvatar(target.kind.icon) }, onClick = { actions.rechargeTo(target.id) })
             }
-            NeoRow("Otro móvil", leading = { IconAvatar(Ds.drawable.ic_add) }, onClick = { actions.rechargeNew(ServiceKind.MobileTopUp) })
-            NeoRow("Otra cuenta Nauta", leading = { IconAvatar(Ds.drawable.ic_add) }, onClick = { actions.rechargeNew(ServiceKind.NautaWifi) })
+            val saved = targets.isNotEmpty()
+            NeoRow(if (saved) "Otro móvil" else "Móvil", leading = { IconAvatar(Ds.drawable.ic_add) }, onClick = { actions.rechargeNew(ServiceKind.MobileTopUp) })
+            NeoRow(if (saved) "Otra cuenta Nauta" else "Cuenta Nauta", leading = { IconAvatar(Ds.drawable.ic_add) }, onClick = { actions.rechargeNew(ServiceKind.NautaWifi) })
         }
     }
 }

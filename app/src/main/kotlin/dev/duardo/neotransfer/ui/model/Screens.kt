@@ -179,7 +179,14 @@ enum class CubacelQuery(val label: String) { Balance("Saldo"), Data("Datos"), Vo
 data class CubacelResultUi(val query: CubacelQuery, val value: String?, val detail: String? = null, val loading: Boolean = false)
 
 @Immutable
-data class CubacelUi(val line: String, val balance: Money?, val expires: LocalDate?, val results: List<CubacelResultUi>)
+data class CubacelUi(
+    /** The line's number when the phone knows it. */
+    val line: String?,
+    val balance: Money?,
+    val expires: LocalDate?,
+    val results: List<CubacelResultUi>,
+    val balanceLoading: Boolean = false,
+)
 
 @Immutable
 data class PlanUi(val id: String, val name: String, val detail: String, val price: Money)
@@ -252,7 +259,8 @@ data class PayReviewUi(
 sealed interface PayQrUi {
     data object Scanning : PayQrUi
     data class Review(val review: PayReviewUi) : PayQrUi
-    data class Unsupported(val message: String) : PayQrUi
+    /** [addCard]: the code is fine, a card in its currency is missing. */
+    data class Unsupported(val message: String, val addCard: Boolean = false) : PayQrUi
 }
 
 @Immutable

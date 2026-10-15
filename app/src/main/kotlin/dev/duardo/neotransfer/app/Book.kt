@@ -151,7 +151,7 @@ class Book(val domain: Domain, private val now: Instant = Instant.now()) {
         val (state, reason) = when (val s = status.state) {
             OperationState.Queued, OperationState.Sending, is OperationState.Sent, is OperationState.Retrying -> OperationStatus.Sent to null
             is OperationState.Confirmed -> OperationStatus.Confirmed to null
-            is OperationState.Rejected -> OperationStatus.Rejected to s.reason
+            is OperationState.Rejected -> OperationStatus.Rejected to s.reason.trimEnd('.')
             is OperationState.NoResponse -> OperationStatus.NoResponse to null
             is OperationState.NotExecuted -> OperationStatus.NotExecuted to Notices.notExecuted(s).replaceFirstChar(Char::uppercase)
             is OperationState.Answered -> cubacelAnswer(s.text)
@@ -202,8 +202,8 @@ class Book(val domain: Domain, private val now: Instant = Instant.now()) {
         }
         val title = contact?.name ?: request?.let(::title) ?: when {
             m.kind == MovementKind.OTHER -> m.label?.replaceFirstChar(Char::uppercase) ?: kindLabel(kind)
-            sender != null -> formatPhone(sender)
-            destination != null -> formatCardNumber(destination)
+            sender != null -> wholePhone(sender)
+            destination != null -> wholeCard(destination)
             m.kind == MovementKind.SERVICE -> counterparty?.let { serviceName(it) ?: it } ?: kindLabel(kind)
             else -> counterparty ?: kindLabel(kind)
         }
@@ -229,14 +229,14 @@ class Book(val domain: Domain, private val now: Instant = Instant.now()) {
     }
 
     private fun title(request: UssdRequest): String = when (request) {
-        is Transfer -> formatCardNumber(request.destination)
+        is Transfer -> wholeCard(request.destination)
         is QrPay -> request.payment.title ?: "Pago con QR"
         is ElectricityBill -> serviceName(request.invoice) ?: request.invoice
         is PhoneBill -> serviceName(request.invoice) ?: request.invoice
         is WaterBill -> serviceName(request.account) ?: request.account
         is NautaPayment -> serviceName(request.account.address) ?: request.account.user
-        is MobileRecharge -> serviceName(request.phone) ?: formatPhone(request.phone)
-        is CubacelTransfer -> formatPhone(request.phone)
+        is MobileRecharge -> serviceName(request.phone) ?: wholePhone(request.phone)
+        is CubacelTransfer -> wholePhone(request.phone)
         else -> "Operación"
     }
 
@@ -275,7 +275,7 @@ class Book(val domain: Domain, private val now: Instant = Instant.now()) {
     private fun reference(service: ServiceReference): SavedReferenceUi {
         val kind = service.kind.ui()
         val name = service.label ?: (if (service.kind == CoreKind.MOBILE) contactName(phone = service.value)?.name else null)
-        val shown = if (service.kind == CoreKind.MOBILE) formatPhone(service.value) else service.value
+        val shown = if (service.kind == CoreKind.MOBILE) wholePhone(service.value) else service.value
         val paid = domain.movements.firstOrNull { it.kind == MovementKind.SERVICE && it.counterparty?.let { c -> sameAccount(c, service.value) } == true }
         return SavedReferenceUi(referenceId(service), kind, name ?: shown, if (name == null) "" else shown, paid?.amount?.ui())
     }
@@ -287,6 +287,10 @@ class Book(val domain: Domain, private val now: Instant = Instant.now()) {
 }
 
 fun referenceId(service: ServiceReference) = "${service.kind.name}|${service.value}"
+
+/** Grouped as printed, with spaces that never break the number across lines. */
+private fun wholeCard(digits: String) = formatCardNumber(digits).replace(' ', '\u00A0')
+private fun wholePhone(digits: String) = formatPhone(digits).replace(' ', '\u00A0')
 
 /** Same invoice, phone (with or without `53`) or Nauta account (with or without domain). */
 fun sameAccount(a: String, b: String): Boolean {

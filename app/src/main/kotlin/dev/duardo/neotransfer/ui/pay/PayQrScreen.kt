@@ -28,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.designsystem.R as Ds
@@ -36,8 +37,6 @@ import dev.duardo.neotransfer.designsystem.component.MoneyText
 import dev.duardo.neotransfer.designsystem.component.NeoButton
 import dev.duardo.neotransfer.designsystem.component.NeoButtonStyle
 import dev.duardo.neotransfer.designsystem.component.NeoTextField
-import dev.duardo.neotransfer.designsystem.component.SummaryLine
-import dev.duardo.neotransfer.designsystem.component.SummaryLines
 import dev.duardo.neotransfer.designsystem.format.formatMoney
 import dev.duardo.neotransfer.designsystem.theme.Neo
 import dev.duardo.neotransfer.designsystem.theme.NeoRadius
@@ -50,6 +49,7 @@ import java.math.BigDecimal
 
 interface PayQrActions {
     fun close()
+    fun addCard()
     fun amount(value: String)
     fun reference(value: String)
     fun source(index: Int)
@@ -76,7 +76,7 @@ fun PayQrScreen(state: PayQrUi, actions: PayQrActions, cameraContent: @Composabl
             ReviewPanel {
                 when (state) {
                     is PayQrUi.Review -> Review(state.review, actions)
-                    is PayQrUi.Unsupported -> Unsupported(state.message, actions)
+                    is PayQrUi.Unsupported -> Unsupported(state, actions)
                     is PayQrUi.Scanning -> Unit
                 }
             }
@@ -138,7 +138,10 @@ private fun Review(review: PayReviewUi, actions: PayQrActions) {
             MoneyText(amount, review.currency, Modifier.padding(vertical = NeoSpace.xs), style = MaterialTheme.typography.displaySmall, hero = true)
         }
         if (review.referenceEditable) NeoTextField(review.reference, actions::reference, review.referenceLabel)
-        else SummaryLines(listOf(SummaryLine(review.referenceLabel, review.reference)))
+        else Row(Modifier.fillMaxWidth().padding(vertical = NeoSpace.xs), horizontalArrangement = Arrangement.spacedBy(NeoSpace.m)) {
+            Text(review.referenceLabel, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(review.reference, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium))
+        }
         SourceCardPicker(review.sources, review.source, actions::source)
         val amount = review.amountInput.toBigDecimalOrNull()
         NeoButton(
@@ -152,14 +155,17 @@ private fun Review(review: PayReviewUi, actions: PayQrActions) {
 }
 
 @Composable
-private fun Unsupported(message: String, actions: PayQrActions) {
+private fun Unsupported(state: PayQrUi.Unsupported, actions: PayQrActions) {
     Column(Modifier.padding(vertical = NeoSpace.s), verticalArrangement = Arrangement.spacedBy(NeoSpace.l)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(NeoSpace.m)) {
             Box(Modifier.size(44.dp).background(Neo.colors.warningContainer, CircleShape), contentAlignment = Alignment.Center) {
                 Icon(painterResource(Ds.drawable.ic_error), null, tint = Neo.colors.warning)
             }
-            Text(message, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+            Text(state.message, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
         }
-        NeoButton("Escanear otro", actions::rescan, style = NeoButtonStyle.Tonal)
+        Column(verticalArrangement = Arrangement.spacedBy(NeoSpace.s)) {
+            if (state.addCard) NeoButton("Añadir tarjeta", actions::addCard, icon = Ds.drawable.ic_add_card)
+            NeoButton("Escanear otro", actions::rescan, style = NeoButtonStyle.Tonal)
+        }
     }
 }

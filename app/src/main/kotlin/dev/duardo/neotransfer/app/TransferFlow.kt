@@ -90,7 +90,10 @@ class RecipientDestination(private val flow: TransferFlow) : Destination(), Reci
     }
 
     override fun back() { app.navigator.remove(this) }
-    override fun query(value: String) { query = value }
+    /** A number keeps digits only; the field groups them as printed. */
+    override fun query(value: String) {
+        query = if (value.isNotEmpty() && value.all { it.isDigit() || it == ' ' || it == '-' }) value.filter(Char::isDigit) else value
+    }
 
     override fun scan() = app.navigator.push(ScanDestination(app, ScanMode.ANY, ::classify) { result ->
         when (result) {

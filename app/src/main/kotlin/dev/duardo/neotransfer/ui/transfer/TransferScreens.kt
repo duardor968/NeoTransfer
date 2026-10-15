@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.designsystem.R as Ds
@@ -68,6 +69,7 @@ import dev.duardo.neotransfer.designsystem.format.formatCardNumber
 import dev.duardo.neotransfer.designsystem.format.formatMoney
 import dev.duardo.neotransfer.designsystem.theme.Neo
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
+import dev.duardo.neotransfer.ui.common.CardNumberTransformation
 import dev.duardo.neotransfer.ui.common.ConfirmedMark
 import dev.duardo.neotransfer.ui.common.SourceCardPicker
 import dev.duardo.neotransfer.ui.common.SwitchRow
@@ -114,6 +116,7 @@ fun RecipientScreen(state: RecipientPickUi, actions: RecipientActions, modifier:
                     NeoSearchField(
                         state.query, actions::query, "Nombre o número de tarjeta",
                         emptyAction = { NeoIconButton(Ds.drawable.ic_photo_camera, "Escanear tarjeta o QR", actions::scan, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                        visualTransformation = if (state.query.isNotEmpty() && state.query.all(Char::isDigit)) CardNumberTransformation else VisualTransformation.None,
                     )
                     state.typedError?.let { Text(it, Modifier.padding(start = NeoSpace.l), style = MaterialTheme.typography.bodyMedium, color = Neo.colors.danger) }
                 }

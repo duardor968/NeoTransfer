@@ -121,7 +121,7 @@ private fun detailLines(operation: OperationUi): List<SummaryLine> {
         is CounterpartUi.Phone -> SummaryLine("Teléfono", formatPhone(c.number))
         is CounterpartUi.Reference -> SummaryLine(referenceLabel(operation.kind), c.value)
         null -> null
-    }?.takeIf { it.value != operation.title }
+    }?.takeIf { it.value != operation.title.replace(' ', ' ') } // titles keep numbers whole with no-break spaces
     return listOfNotNull(
         counterpart,
         operation.card?.let { SummaryLine(if (operation.kind.incoming) "A tu tarjeta" else "Desde", formatCardNumber(it.number), it.bank.shortName) },

@@ -44,6 +44,7 @@ fun NeoSearchField(
     placeholder: String,
     modifier: Modifier = Modifier,
     emptyAction: (@Composable () -> Unit)? = null,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
 ) {
     val scheme = MaterialTheme.colorScheme
     BasicTextField(
@@ -51,6 +52,7 @@ fun NeoSearchField(
         onValueChange = onQueryChange,
         modifier = modifier.fillMaxWidth(),
         singleLine = true,
+        visualTransformation = visualTransformation,
         textStyle = MaterialTheme.typography.bodyLarge.copy(color = scheme.onSurface),
         cursorBrush = SolidColor(Neo.colors.accentInk),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),

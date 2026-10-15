@@ -52,7 +52,6 @@ import dev.duardo.neotransfer.designsystem.component.NeoButton
 import dev.duardo.neotransfer.designsystem.component.NeoGroup
 import dev.duardo.neotransfer.designsystem.component.NeoIconButton
 import dev.duardo.neotransfer.designsystem.component.NeoRow
-import dev.duardo.neotransfer.designsystem.component.NeoSegmented
 import dev.duardo.neotransfer.designsystem.component.NeoTextField
 import dev.duardo.neotransfer.designsystem.component.NeoTopBar
 import dev.duardo.neotransfer.designsystem.component.SecureWindow
@@ -220,7 +219,9 @@ fun ServiceFormScreen(state: ServiceFormUi, actions: ServiceFormActions, modifie
                     }
                 }
                 Column(Modifier.padding(horizontal = NeoSpace.gutter), verticalArrangement = Arrangement.spacedBy(NeoSpace.m)) {
-                    if (state.choices.isNotEmpty()) NeoSegmented(state.choices.indices.toList(), state.choice, state.choices::get, actions::choice)
+                    if (state.choices.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(NeoSpace.s)) {
+                        state.choices.forEachIndexed { index, choice -> ReferenceChip(choice, index == state.choice) { actions.choice(index) } }
+                    }
                     state.fields.forEach { field ->
                         NeoTextField(
                             field.value, { actions.field(field.id, it) }, field.label,
@@ -301,12 +302,18 @@ fun CubacelScreen(state: CubacelUi, actions: CubacelActions, modifier: Modifier 
             verticalArrangement = Arrangement.spacedBy(NeoSpace.m),
         ) {
             NeoGroup {
-                Column(Modifier.padding(NeoSpace.xl), verticalArrangement = Arrangement.spacedBy(NeoSpace.xs)) {
-                    Text(state.line, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    val balance = state.balance
-                    if (balance != null) MoneyText(balance.amount, balance.currency, style = MaterialTheme.typography.displaySmall, hero = true)
-                    else Text("Sin consultar", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    state.expires?.let { Text("Vence el ${expiryFormat.format(it)}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                Row(Modifier.padding(start = NeoSpace.xl, top = NeoSpace.s, end = NeoSpace.s, bottom = NeoSpace.xl)) {
+                    Column(Modifier.weight(1f).padding(top = NeoSpace.m), verticalArrangement = Arrangement.spacedBy(NeoSpace.xs)) {
+                        state.line?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        val balance = state.balance
+                        if (balance != null) MoneyText(balance.amount, balance.currency, style = MaterialTheme.typography.displaySmall, hero = true)
+                        else Text("Sin consultar", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        state.expires?.let { Text("Vence el ${expiryFormat.format(it)}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    }
+                    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                        if (state.balanceLoading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        else NeoIconButton(Ds.drawable.ic_refresh, "Consultar saldo", { actions.query(CubacelQuery.Balance) })
+                    }
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(NeoSpace.s)) {

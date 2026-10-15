@@ -109,7 +109,7 @@ class AppJourneyTest(private val mode: String) {
         node(hasSetTextAction()).performTextInput(FRIEND)
         settle()
         shot("transfer-recipient-typed")
-        text("9205 8800 1234 5673").performClick()
+        text("Tarjeta nueva").performClick()
         settle()
         "300".forEach { key(it).performClick() }
         settle()
@@ -200,7 +200,7 @@ class AppJourneyTest(private val mode: String) {
         rig.modem.answer = { command -> if (command.service == null) UssdReply.Text("Saldo: 125.40 CUP. Linea activa hasta 03-12-2026.") else UssdReply.Text(ACK) }
         text("Saldo Cubacel").performClick()
         settle()
-        text("Saldo").performClick()
+        node(hasContentDescription("Consultar saldo")).performClick()
         settle(2_000)
         assertIs<CubacelQuery>(rig.controller.operations.value.first().operation.request)
         shot("cubacel")
@@ -243,7 +243,7 @@ class AppJourneyTest(private val mode: String) {
         text("Recargar").performClick()
         settle()
         shot("home-recharge")
-        text("Otro móvil").performClick()
+        text("Móvil").performClick()
         settle()
         shot("service-mobile")
         back()
