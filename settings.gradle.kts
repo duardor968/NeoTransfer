@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "NeoTransfer"
-include(":core", ":app")
+include(":core", ":designsystem", ":scanner", ":app")
