@@ -1,345 +1,348 @@
-# Protocolo de Transfermóvil (referencia para NeoTransfer)
+# Protocolo de pagos móviles por USSD y SMS
 
-Soporte activo: BPA, BANDEC, BANMET, MiTransfer personal, Clásica personal y servicios Cubacel. BFI, Clásica empresarial, el perfil Agente, Bulevar, MiBoleto, las reservas de visitas/recorridos OFA y Votomóvil se retiraron por decisión de alcance. Los aportes OFA94 de BANDEC, BANMET y MiTransfer personal permanecen. Sus identificadores históricos se conservan únicamente para lectura/importación; no habilitan formularios ni ejecución.
+Referencia del protocolo que NeoTransfer usa con BPA (agencia `01`) y BANDEC (`02`), y de los códigos Cubacel que ofrece. No es una especificación oficial: describe lo que hace el cliente Transfermóvil, lo que se observa en los SMS del banco y lo que envía NeoTransfer. Revisado el 2026-10-15.
 
-CUC no se ofrece para productos ni operaciones nuevas, conforme a su [retirada de circulación (Decreto-Ley 17/2020, artículo 2)](https://www.gacetaoficial.gob.cu/sites/default/files/goc-2020-ex68.pdf#page=4). Se conserva para interpretar datos históricos. Retirar una opción no renumera el contrato: CUP sigue siendo `1` y USD `3` en la codificación bancaria; el identificador histórico CUC sigue siendo `2`.
+## Procedencia
 
-Extraído el 2026-09-21 de fuentes públicas y, para lo que ninguna cuenta, del APK Transfermóvil 1.260416 (versionCode 162, paquete `cu.etecsa.cubacel.tr.tm`). Lo marcado **[no verificado]** se confirma con la SIM en la primera rebanada (autenticación → saldo → transferencia → pago QR).
+Cada apartado indica de dónde sale cada dato:
 
-Fuentes públicas: [rodnye/ussd-codes-cuba](https://github.com/rodnye/ussd-codes-cuba) · [Códigos USSD Transfermóvil, Portal de Holguín](https://www.holguin.gob.cu/es/codigos-ussd-transfermovil) · [Guía BANMET, Cubadebate](http://agendaeconomica.cubadebate.cu/guia-completa-asi-se-usan-los-codigos-de-marcacion-para-el-banco-metropolitano/) · [Códigos BANDEC, Directorio Cubano](https://www.directoriocubano.info/acontecer/asi-puedes-usar-transfermovil-sin-la-app-todos-los-codigos-de-bandec-paso-a-paso/) · [Registro, sesión y SMS, Cubatramite](https://cubatramite.com/pagar-en-linea-desde-la-aplicacion-transfermovil/) · [QR y deep link de comercio, roberticovinales/transfermovil](https://github.com/roberticovinales/transfermovil/blob/main/crearpago.php).
+- **[TM]**: Transfermóvil 1.260416 (versionCode 162, paquete `cu.etecsa.cubacel.tr.tm`), descompilado con JADX 1.5.6 sin desofuscar y contrastado con el bytecode donde JADX se equivoca. La sesión y el servicio 60 se cotejaron también con la 1.250620. Las citas `Clase:línea` usan los nombres ofuscados ([apéndice A](#apéndice-a-clases-de-transfermóvil-citadas)). El código de TM describe al cliente, no lo que acepta el servidor.
+- **[SMS]**: la bandeja de un teléfono con uso real de ambos bancos, leída sin modificarla el 2026-10-15: 251 SMS de `PAGOxMOVIL` entre el 2025-06-10 y el 2026-10-13 (123 de BANDEC, 97 de BPA y 31 sin banco en el texto). Aquí solo aparecen cifras agregadas y plantillas con marcadores; ningún dato real va al repositorio ni a las pruebas.
+- **[Pública]**: [rodnye/ussd-codes-cuba](https://github.com/rodnye/ussd-codes-cuba) · [Códigos USSD Transfermóvil, Portal de Holguín](https://www.holguin.gob.cu/es/codigos-ussd-transfermovil) · [Códigos BANDEC, Directorio Cubano](https://www.directoriocubano.info/acontecer/asi-puedes-usar-transfermovil-sin-la-app-todos-los-codigos-de-bandec-paso-a-paso/) · [Registro, sesión y SMS, Cubatramite](https://cubatramite.com/pagar-en-linea-desde-la-aplicacion-transfermovil/) · [Generador de QR de comercio, roberticovinales/transfermovil](https://github.com/roberticovinales/transfermovil/blob/main/crearpago.php).
+- **NeoTransfer**: ruta del código que lo implementa y prueba que lo fija. Las rutas de `core` cuelgan de `core/src/main/kotlin/dev/duardo/neotransfer/core/`.
+- **[no verificado]**: sin evidencia del servidor. Se marca una vez, donde aparece el hecho.
 
 ## 1. Transporte
 
-- Formato ordinario de una operación bancaria: `*444*<servicio>*<parámetros codificados>*<versión>#`. El modo parcial divide una operación en varios mensajes USSD (§1.3).
-  - `444` es el código de acceso a la plataforma (string `codigoAcceso`); `versión` es `1260416` (string `version_transfermovil`). Ambos viven en la tabla AppConfig (`codigo`, `number`) y la app puede actualizarlos desde el SMS de bienvenida ("Su número … tiene la versión X").
-  - Envío normal: `Intent.ACTION_CALL` con `tel:*444*…*1260416%23` (el `#` va codificado). El marcador del sistema muestra la respuesta USSD.
-  - Envío por API (Android 8+): `TelephonyManager.sendUssdRequest(código, callback, handler)`. La app lo usa para el modo "USSD parcial" (§1.3).
-- Respuesta: USSD inmediato "Su solicitud está siendo procesada, espere un SMS…"; el resultado real llega por **SMS del remitente `PAGOxMOVIL`** (§5). No hacen falta datos móviles, solo red celular.
-- Códigos "de menú" sin parámetros (`*444*46#`, `*444*45#`…): la red pregunta campo a campo por diálogos USSD. Son el catálogo público y el plan B manual desde cualquier teléfono; no se automatizan.
+### 1.1 Formato
 
-### 1.1 Sesión bancaria
+- Operación bancaria: `*444*<servicio>*<parámetros codificados>*1260416#`. `444` es el código de acceso y `1260416` la versión del cliente; TM los toma de su `strings.xml` al crear `AppConfig` (`S9ycHcoxAzy:754-758`, `IHVTCBmiLV:865-870`). La versión que trae el SMS de bienvenida solo sirve para validar códigos de activación (`g0xM9kQCsqu:1625-1649`); no actualiza nada.
+- Al primer arranque y tras actualizarse, TM envía `*444*100*<versión>#` (`S9ycHcoxAzy:754-776`, `IHVTCBmiLV:862-890`). NeoTransfer no lo envía.
+- Consultas sin parámetros: `*444*<servicio>#`, sin codificar y sin versión (`rDEl7rW1aN:676-691`). TM las usa como consultas directas, no como menús: 46 de BANDEC, 48 desde algunos accesos (`KmgeIVr5RG:297-304`; sus formularios llevan parámetros, §4.2), 58, 62 de BANDEC, 70, 72, 73, 78, 85, 103 y 117.
+- Monedas en el cable: `1` CUP, `2` CUC, `3` USD. CUC salió de circulación ([Decreto-Ley 17/2020, art. 2](https://www.gacetaoficial.gob.cu/sites/default/files/goc-2020-ex68.pdf#page=4)); su código sigue reservado, pero NeoTransfer no opera en CUC y rechaza un QR en esa moneda.
 
-- Autenticar: servicio `40`, parámetros `<banco>*<clave>`. Desconectar: `*444*70#` sin parámetros.
-- La app guarda banco activo y hora de autenticación y da la sesión por válida **1 hora**; hay **un solo banco activo** a la vez. Caducidad real en el servidor: **[no verificado]**.
-- Tras autenticar, las operaciones van **sin clave**, salvo el pago en línea (30/31), que la lleva siempre.
+NeoTransfer: `protocol/Requests.kt`, `protocol/UssdCommand.kt`.
 
-### 1.2 Bancos (`agencia`)
+### 1.2 Envío y acuse
 
-| Código | Entidad | Clave de autenticación |
-|---|---|---|
-| 01 | BPA | PIN de 4 dígitos |
-| 02 | BANDEC | clave de 5 dígitos (el "PIN de tarjeta" de 4 es otro dato) |
-| 03 | BANMET | 4 dígitos |
-| 04 | Monedero MiTransfer | — |
+- **[TM]** Todo el modo normal sale por `Intent.ACTION_CALL` con `tel:*444*…%23` (el `#` codificado), tras un diálogo «Confirmar» (`FBsQzP3Zfj:144-183`). El marcador del sistema muestra la respuesta USSD; TM no la lee y cierra el formulario (`FBsQzP3Zfj:166-171`).
+- **[TM]** `TelephonyManager.sendUssdRequest` solo se usa en el modo parcial (§1.3).
+- **NeoTransfer** envía las operaciones bancarias y las consultas Cubacel con `sendUssdRequest` por la SIM predeterminada para llamadas, y lee el acuse (`app/src/main/kotlin/dev/duardo/neotransfer/platform/AndroidUssdModem.kt`). Solo el menú de paquetes `*133#` sale por `ACTION_CALL`.
+- Acuses que distingue NeoTransfer (`protocol/BankResponse.kt`; compara sin tildes ni mayúsculas):
+  - `Su solicitud esta siendo procesada…`: la plataforma aceptó la solicitud. No confirma la operación ni dice qué banco atiende: el resultado llega por SMS.
+  - `Usted ya se encuentra autenticado en el sistema`: respuesta a un `40` con sesión abierta. Solo llega por USSD; no deja SMS **[SMS]**.
+  - Cualquier otro texto: la red no aceptó la solicitud y NeoTransfer la da por no ejecutada.
 
-### 1.3 USSD parcial (payloads largos)
+### 1.3 Modo parcial (servicio 110)
 
-Activado en el original por `activarussdparcial`. Se codifica la cadena completa una vez y se agrupan sus átomos separados por `*`; solo el primer átomo lleva la semilla. Cada grupo comienza por `*`. Se añade el siguiente átomo cuando `átomo.length + grupo.length + 32 <= 52`: la comparación omite el nuevo separador. El DEX confirma este comportamiento; **52 no es un límite real del paquete**, y un átomo individual nunca se divide.
+**[TM]** Con `AppConfig.activarussdparcial` (`Agg55uYctq:173`), una cadena larga se parte en paquetes:
 
 `*444*110*<pp><nn>*<idsecuencia>*<servicio>*<agencia><parte>*<versión>#`
 
-- `pp` = índice de la parte, `nn` = total de partes (2 dígitos cada uno); `idsecuencia` = minutos y segundos actuales (`m` o `mm` sin cero inicial + `ss`); `<parte>` empieza por `*`.
-- Se envía la siguiente parte solo si la respuesta contiene literalmente "siendo procesada,". En la ruta Android 8+ **no hay reintentos**; la constante `MAX_FALLAS=3` no se utiliza. El último acuse sigue sin confirmar el pago.
-- El argumento `MAX_PARAMETERS_PQUETE=4` tampoco participa en esta agrupación. NeoTransfer conserva los identificadores completos; usa paquetes para sobres de más de 130 caracteres y rechaza paquetes que todavía superen 130. Es una restricción conservadora del cliente, **no un máximo de red demostrado**. El original recorta identificadores antes del envío; NeoTransfer no reproduce ese cambio silencioso.
-- Referencia: `pAzq93vIl3/MX9gh9mLxd`, contrastada con DEX. Pruebas locales: 800 vectores QR de ocho payloads y 100 semillas; 4.020 paquetes de referencia. Fixtures sintéticos en `core/src/test/resources/qr-vectors.tsv`.
+- `pp` es el número de paquete y `nn` el total, con dos dígitos cada uno. `idsecuencia` son los minutos y segundos actuales (`m` o `mm` sin cero inicial, más `ss`). `<parte>` empieza por `*`.
+- Se codifica la cadena entera una vez y se agrupan sus átomos separados por `*`; solo el primero lleva la semilla. Un átomo abre paquete nuevo cuando `átomo.length + grupo.length + 32 > 52`; la comparación no cuenta el separador nuevo y un átomo nunca se divide. Ni `MAX_PARAMETERS_PQUETE=4` ni `MAX_FALLAS=3` intervienen.
+- En Android 8 o posterior, cada paquete sale con `sendUssdRequest` y el siguiente solo si la respuesta contiene `siendo procesada,`; si no, «Error Enviado - parte N» y no reintenta (`MX9gh9mLxd:52-104`, `pAzq93vIl3:94-128`). En versiones anteriores manda un `ACTION_CALL` por paquete y un servicio de accesibilidad pulsa «OK» para disparar el siguiente (`pAzq93vIl3:228-276`, `O7xyZJJBFWg:38-97`).
+- En modo parcial la transferencia **reordena** sus campos: `<destino>*<importe>*<monImporte>*<origen>*<enviarMiMóvil>*<monTarjeta>*<móvil>*<mensaje>*<enviarSaldo>` (`iN1lHDKE5h:648`, `ZDkigMAIBm:569`). Que el servidor acepte ese orden: **[no verificado]**.
 
-## 2. Codificación de parámetros
+**NeoTransfer** solo usa el modo parcial para un pago QR cuya llamada pase de 182 caracteres, el máximo de una solicitud USSD en GSM de 7 bits; nunca para la transferencia (`protocol/UssdCommand.kt`, `QrPay.commands`). Pruebas: `core/src/test/resources/partial-oracle.tsv` y el empaquetado de los 800 vectores de `qr-vectors.tsv` (`ProtocolContractTest`).
 
-La cadena `a*b*c` **no se envía en claro**. Método de referencia: `rDEl7rW1aN.code()`.
+## 2. Sesión bancaria
 
-1. Se separa por `*`. Si todos los trozos son numéricos (caso normal):
-   - Se genera un entero aleatorio 0–99 (`cod_ram`) que sale como prefijo de 2 dígitos.
-   - Cada trozo se transforma con una clave derivada de dos constantes embebidas (`code_version`, `crude_code`, apéndice A): `crude_code` se lee en bloques de 8 bits, desplazados por los dígitos de `code_version`, y da una lista de bytes; con ella se sustituye cada par de dígitos del trozo (si es impar, el último dígito aparte) y el resultado se combina por XOR (como `Long`) con una secuencia de esa lista rotada a partir de `cod_ram`.
-   - Salida: `<cod_ram><len1><t1>*<len2><t2>*…`, con `len` = longitud original del trozo en 2 dígitos.
-2. Si hay trozos no enteros (descripción, nombre, correo, importe decimal): los numéricos siguen el paso 1; los de texto se sustituyen carácter a carácter con el diccionario de 2 dígitos (apéndice B) y llevan longitud `00`, no su longitud original. Sin trozos numéricos, el prefijo aleatorio también se sustituye por `00`.
+- Autenticar: servicio `40` con `<agencia>*<clave>`: BPA `01*<clave de 4 dígitos>`, BANDEC `02*<clave de 5 dígitos>` (`lzGEfceoJu:45,56`; `TGFziPh3KJ:45,56`). Desconectar: `*444*70#` (`R7PmVxXLJZC:329-343`).
+- **[TM]**
+  - Marca la sesión al pulsar «Confirmar» del `40`, antes del `ACTION_CALL`: guarda banco y hora sin esperar acuse ni SMS (`FBsQzP3Zfj:563-587`).
+  - La da por válida 1 hora (`FBsQzP3Zfj:625-636`, `Calendar.add(HOUR,1)`; igual en 1.250620).
+  - Solo la usa para marcar el banco «actual» en el menú lateral (`menuControlBanks`, `FBsQzP3Zfj:674-733`). No bloquea operaciones, no reautentica y no encadena nada: tras el `40` vuelve atrás y la persona lanza la operación cuando quiere.
+  - Hay un solo banco activo: autenticar el otro lo sobrescribe sin enviar `70` por el anterior (`FBsQzP3Zfj:571-577`).
+- Llevan la clave siempre: el pago QR o en línea `30`/`31` (`r7Rinp9ooL:220-230`) y Caja Extra `32` (`UTk9UWZYxf:347-368`). La transferencia `45` tiene una variante con clave que solo activa `f6Y2Wmtg6jQ.enviarDatos:1054-1080`, una clase que nadie instancia: está inactiva.
+- **[SMS]**
+  - El servidor aceptó operaciones 72, 87,5 y 90,5 minutos después de la última autenticación. Es una cota inferior; la caducidad real de la sesión: **[no verificado]**. Ningún SMS anuncia una sesión caducada.
+  - En 21 de 64 pares autenticación→operación del mismo banco (33 %), el resultado de la operación salió del SMSC antes de que llegara el SMS de la autenticación: la operación se envía tras el acuse del `40`, sin esperar su SMS.
+  - Hubo 9 cambios BPA↔BANDEC, siempre con autenticación nueva, y nunca una operación del banco anterior después del cambio. Si autenticar un banco cierra la sesión del otro en el servidor: **[no verificado]**.
+  - De 5 pagos QR, 3 se aceptaron sin autenticación del mismo banco en las 11 a 63 horas anteriores, coherente con que `30`/`31` lleven la clave.
+- **NeoTransfer** (`ledger/Ledger.kt`, `Ledger.session`):
+  - Si una operación necesita sesión y no la hay para su banco, envía un `40` con la clave guardada y la operación sale justo tras el acuse de ese `40`.
+  - La sesión dura 60 minutos desde ese acuse (o desde `Usted ya se encuentra autenticado`), con un solo banco activo. Termina al enviar un `40` del otro banco, un `70` o al llegar un SMS de autenticación fallida de ese banco. Un SMS de autenticación correcta hecha desde otra app también abre sesión.
+  - La sesión sale de las operaciones guardadas: sobrevive a cerrar la app y al bloqueo con huella.
+  - `Clave incorrecta` en respuesta a un `40` propio bloquea ese banco hasta que se guarde la clave de nuevo.
 
-Comprobación local del 2026-09-22: 1.400 vectores sintéticos del código de referencia, 14 entradas con todas las semillas 0–99. El DEX confirma que el índice de `code_version` vuelve a cero al final; JADX había omitido esa rama. La secuencia XOR del original omite la última entrada al reiniciarse: conservar ese comportamiento. Los vectores viven en `core/src/test/resources/codec-vectors.tsv`; no demuestran todavía aceptación por la red bancaria.
+## 3. Codificación de parámetros
 
-Clases fuente en el descompilado: `rDEl7rW1aN.code`, `Tz34gww2TFwrsuT8ukpL`, `YzK9tTZsYVnC5kFxSie`, `ytpPfHi93O3gQEyZrT9r`, `hKRRh7lnIpNaVleqsuo`, `kR22DOzTiB`, `EKB7Plln4L`. Java puro, unas 250 líneas: el port cabe en un fichero Kotlin.
+Los parámetros `a*b*c` no viajan en claro. Es una codificación de compatibilidad, no un cifrado. Método de referencia: `rDEl7rW1aN.code()`, con `Tz34gww2TFwrsuT8ukpL`, `YzK9tTZsYVnC5kFxSie`, `ytpPfHi93O3gQEyZrT9r`, `hKRRh7lnIpNaVleqsuo`, `kR22DOzTiB` y `EKB7Plln4L`.
 
-Validación del port, en dos pasos:
+1. Se separa por `*`.
+2. Si algún trozo es numérico, se elige un entero aleatorio 0–99 (`cod_ram`) que sale como prefijo de dos dígitos; si ninguno lo es, el prefijo es `00`.
+3. Cada trozo numérico sale como `<longitud de 2 dígitos><valor>`:
+   - Una tabla de 100 valores se obtiene leyendo `crude_code` en bloques de 8 bits, desplazados por los dígitos de `code_version` ([apéndice B](#apéndice-b-constantes-de-codificación)). Al acabar `code_version`, el índice vuelve a cero; el bytecode lo confirma y JADX omitía esa rama.
+   - Cada par de dígitos se sustituye por su entrada de la tabla; si la longitud es impar, el último dígito se sustituye aparte.
+   - El resultado se combina por XOR, como `Long`, con la tabla recorrida desde `cod_ram`. Al reiniciarse, esa secuencia salta la última entrada: el original lo hace así y hay que conservarlo.
+4. Cada trozo de texto (descripción, usuario Nauta, importe decimal) sale como `00` seguido del código de dos dígitos de cada carácter ([apéndice C](#apéndice-c-diccionario-de-texto)). Un carácter fuera del diccionario no se puede enviar.
 
-1. En el PC: compilar esas clases tal cual (solo necesitan un stub de `Uri.encode` y de `BuildConfig.FLAVOR`) y generar vectores entrada → salida; el port debe reproducirlos fijando el mismo `cod_ram` (los 2 primeros dígitos de la salida).
-2. Con la SIM: la plataforma acepta la cadena y llega el SMS.
+NeoTransfer: `protocol/ParameterCodec.kt`. Prueba: `core/src/test/resources/codec-vectors.tsv`, 1.400 vectores (14 entradas con las 100 semillas) generados con el código de referencia de TM (`ProtocolContractTest`).
 
-## 3. Catálogo de operaciones (BPA y BANDEC)
+## 4. Operaciones en alcance
 
-Parámetros en orden, antes de codificar. Campos comunes:
+### 4.1 Origen y moneda
 
-- `cuentaOrigen`: `0000` = tarjeta por defecto del registro; o el número completo de otra tarjeta asociada, sin guiones.
-- `monedaTarjeta`: 1 CUP, 2 CUC, 3 USD; cuenta explícita → 0. En la transferencia moderna y QR BANDEC va 0; el banco deduce la moneda de la cuenta.
-- `movil`: en transferencia moderna el omitido es `0000`; la pantalla clásica usaba `00000000`. En QR el omitido puede ser `0` o `0000`, según la ruta descrita debajo.
-- Importes con punto decimal y hasta dos decimales, sin separador de miles; validación y codificación contrastadas con el APK.
+**[TM]** El origen viaja dentro de cada operación como `<monedaTarjeta>*<cuentaOrigen>`; TM nunca envía un servicio previo para «seleccionar» una tarjeta.
 
-| Servicio | Operación | Parámetros | Notas |
+- BPA (`Agg55uYctq:62-101`): CUP o USD → `1` o `3` con `0000`, la cuenta predeterminada de esa moneda. «Mis cuentas» o «Insertar cuenta» → `0` con los 16 dígitos.
+- BANDEC (`Agg55uYctq:150-166,205`): no hay selector de moneda. El interruptor «Tipo de cuenta a operar» apagado deja `0*0000`; encendido envía `0` con la tarjeta.
+
+**NeoTransfer** (`Source.forCard`): con una sola tarjeta de ese banco usa la cuenta predeterminada; con varias, envía la tarjeta explícita. `monedaTarjeta` es siempre `0` en BANDEC y con tarjeta explícita.
+
+### 4.2 Formatos
+
+Parámetros en orden, antes de codificar (§3). Importes con punto decimal, sin separador de miles y con dos decimales como máximo.
+
+| Operación | Servicio | BPA (`01`) | BANDEC (`02`) | Evidencia [TM] |
+|---|---|---|---|---|
+| Autenticar | 40 | `01*<clave4>` | `02*<clave5>` | `lzGEfceoJu:45,56`; `TGFziPh3KJ:45,56` |
+| Desconectar | 70 | `*444*70#` | igual | `R7PmVxXLJZC:338` |
+| Saldo | 46 | `<1\|3\|0>*<0000\|tarjeta>` | `*444*46#`, sin parámetros ni versión | `ix4mhKGJty:53-58`; `R7PmVxXLJZC:58-59,355-372` |
+| Últimas operaciones | 48 | `0*<1\|3\|0>*<0000\|tarjeta>` | `0*<1\|0>*<0000\|tarjeta>`; `1` = cuenta actual | `h3sd43nvje:53-58`; `gaJlF6dT3z:50-52`, `DQIrxODoMU:57-92` |
+| Transferencia | 45 | `<destino16>*<importe>*<monImporte>*<monTarjeta>*<origen>*<móvil\|0000>*<enviarMiMóvil>*<mensaje\|0000>*<enviarSaldo>` | igual, con `monImporte` y `monTarjeta` a `0` | `iN1lHDKE5h:612`; `ZDkigMAIBm:450-456,533` |
+| Pago QR dinámico | 30 | `01*<clave>*<id>*<importe>*<idMoneda>*<monTarjeta>*<proveedor>*<aux>*<origen>[*<móvil\|0>]` | igual con `02` | `r7Rinp9ooL:248-298` |
+| Pago QR estático | 31 | `…*<aux>*<descripción\|0000>*<origen>[*<móvil\|0>*<idQR>]` | igual | `r7Rinp9ooL:304-371` |
+| Electricidad | 41 | `<factura 11\|13>*0*<moneda>*<origen>` | `<factura>*0`, o `<factura>*0*<tarjeta>` | `xSwGh0MTOg:102,117`; `Q3Nvf439ab:102-105,120` |
+| Teléfono fijo | 42 | `<factura 14\|15>*<importe>*<moneda>*<origen>` | `<factura>*<importe\|0 = total>[*<tarjeta>]` | `u4QMc0S0ZHo:154-161,171`; `iQte15zdZs:162-173,189` |
+| Agua | 19 La Habana · 51 resto · 21 Varadero | `<región 1-3>*<cuenta>*<importe>*<tipo>*<monTarjeta>*<origen>` | 19 y 21: `<región>*<cuenta>*<importe>*<tipo>*0*<origen>`; 51 sin ese `0` (cinco campos) | `zOs55UzH6z:210-235`; `T4RQ5wDJDt:203-229` |
+| Recarga Nauta | 59 | `<usuario>*<tipo>*<importe>*<monTarjeta>*<móvil\|0000000>*<origen>*1` | igual, moneda `0` | `PqTzgaEYF6:68-72,216-240,351-366` |
+| Nauta Hogar: recarga / deuda | 84 / 86 | como 59, con sufijo `*2` / `*3` | igual | `PqTzgaEYF6:242-288` |
+| Recarga móvil | 54 | `<móvil 8\|10>*<importe>*<monTarjeta>*<origen>` | igual, moneda `0` | `SjZHfPJPwX:262-284,307` |
+
+Detalles:
+
+- **Transferencia.** `monImporte` es la moneda del importe. `móvil` es el «Móvil a confirmar» que recibe el aviso. `enviarMiMóvil = 1` hace que el destinatario reciba el número del ordenante («El destinatario recibe mi número de móvil»). `enviarSaldo = 1` *omite* el saldo restante en el SMS: la casilla de TM dice «Omitir saldo restante en el SMS» (`strings.xml`, `hint_no_enviar_saldo`). NeoTransfer envía `enviarMiMóvil = 0`, mensaje `0000` y `enviarSaldo = 0`, para que el comprobante traiga el saldo.
+- **Pago QR.** BPA filtra una clave de 4 dígitos; BANDEC admite 4 o 5 (`r7Rinp9ooL:94-97,612`). NeoTransfer envía la clave guardada. Con `aux` que contiene `11200301`, el `aux` sale como `0` y el móvil omitido como `0000` (`r7Rinp9ooL:224-238`). El móvil y el `idQR` solo se añaden con un móvil indicado o un `idQR` del `extra` (§6). Recorte del identificador en §6.
+- **Electricidad.** El `0` es el importe: el banco cobra la factura completa. En BANDEC, la tarjeta solo se añade con el interruptor de cuenta encendido en TM, o con tarjeta explícita en NeoTransfer; lo mismo en el teléfono fijo.
+- **Teléfono fijo.** El identificador es el de la factura (14 o 15 caracteres), no el número de teléfono. En BANDEC, importe `0` paga el total.
+- **Agua.** En BPA el quinto campo es `monedaTarjeta`, no un `0` fijo. `tipo` `1` es pago total y `3` parcial (`T4RQ5wDJDt:56-66`); el importe arranca en `0` (`:111`). NeoTransfer paga el total con los valores iniciales de los formularios de TM: importe `0.0` en BPA y `0` en BANDEC, `tipo` `1` en La Habana y Varadero y `0` en el resto del país.
+- **Nauta.** `tipo` es `1` para cuentas `@nauta.com.cu` y `2` para `@nauta.co.cu`. El usuario va sin dominio, sin espacios ni `@` y con 20 caracteres como máximo (`PqTzgaEYF6:320-335`). El importe sale como `float` de Java (`100.0`) y debe ser al menos 1 (`:361`). El móvil omitido es `0000000`.
+- **Recarga móvil.** El servicio `88` (en MLC) queda fuera de alcance.
+
+NeoTransfer: `protocol/Requests.kt`. Pruebas en `ProtocolContractTest`: orden de parámetros de cada operación, `core/src/test/resources/service-oracle.tsv` (41, 42, agua y 54 de ambos bancos con tres semillas) y los 800 vectores QR.
+
+### 4.3 Cubacel
+
+**[TM]** Sin `444` y sin codificar (`LALCrDPvhM:40-75`, `C8l2t8799rL:76-89`):
+
+| Uso | Código |
+|---|---|
+| Saldo | `*222#` |
+| Bonos | `*222*266#` |
+| Datos | `*222*328#` |
+| Voz | `*222*869#` |
+| SMS | `*222*767#` |
+| Transferir saldo | `*234*1*<móvil 8>*<clave de transferencia 4>*<monto entero>#` |
+| Planes y paquetes | `*133#` (menú interactivo) |
+
+La respuesta es el propio texto USSD; no hay SMS de `PAGOxMOVIL`. TM tiene además `*222*264#` (Plan Amigos), `*234*3#` (adelanto de saldo), `*111#` (pospago) y `*234*2*<nueva>*<repetida>#` (cambiar la clave de transferencia), que NeoTransfer no usa.
+
+NeoTransfer: `protocol/Cubacel.kt`. La clave de transferencia se escribe para cada envío y no se guarda.
+
+## 5. Servicios que NeoTransfer no envía
+
+Ninguna operación de NeoTransfer produce `60`, `49`, `58`, `68` ni `69`; lo fija la prueba `no request ever produces 60, 49, 58, 68 or 69`.
+
+- **60, asociar o cambiar tarjeta.** `60 <tarjeta16>` codificado. En TM es siempre una acción manual y nunca precede a `46`, `48` ni `45`:
+  - BANDEC, pestaña Sesión: «Cambio de tarjeta — Tarjeta RED a operar» (`rvxiiV3tYu:43-51,89-95`), con la confirmación «Desea utilizar la cuenta: X» (`o9swVUfDl4q:51,75-78,87`).
+  - BPA, Configuración: «Asociar Cuentas — Vincular otra cuenta bancaria» (`f5AFyaj0rtx:66,145-149`; `Ittht2aX4N:51,75-78`).
+  - **[SMS]** Con la tarjeta ya asociada, el banco responde `Error en la asociacion de tarjeta. Banco Bandec: Esta tarjeta ya esta asociada a un celular`. Qué hace con otra tarjeta: **[no verificado]**.
+- **58, todas las cuentas.** `*444*58#`, manual (`R7PmVxXLJZC:502-519`, `kmO9Md6JHr:517-524`).
+- **68, eliminar registro.** El camino activo es `*444*68*01#` o `*444*68*02#`, sin clave, sin codificar y sin versión (`f5AFyaj0rtx:334-351`; `X7obECfkKf:57,226-243`). El formulario con clave (`sxbhjZQZxo`) no se abre desde ningún sitio.
+- **69, cambiar la clave.** `69 <claveNueva>`, de 4 dígitos en BPA (`PQmKwgxZd1:51,60`) y 5 en BANDEC (`FtAKxvNjrD:53,62`). La repetición se valida en el teléfono; la clave actual no se envía.
+- **49, registro.** Lo hace Transfermóvil. Su SMS de respuesta trae la clave y el PIN de la tarjeta en claro; NeoTransfer nunca guarda ese texto.
+
+## 6. Códigos QR y enlaces
+
+**Pago en JSON** (`LgiFGRpiEl:279-390`):
+
+```json
+{"id_transaccion":"…","importe":123.45,"moneda":"CUP","numero_proveedor":"…","version":1}
+```
+
+- Claves opcionales: `titulo` (si tiene 40 caracteres o más, se recorta a 19), `descripcion` (si no está vacía, es de solo lectura) y `extra`.
+- `importe` admite notación científica. `moneda` se busca por contenido y en este orden: `CUP` o `1`, `CUC` o `2`, `USD` o `3`. `version`, si no está vacía, sustituye a `aux` (por defecto `1`); no es la versión del cliente.
+- Importe `0` → servicio 31 con importe editable. Importe positivo e `id_transaccion` que contiene `ESTATICO` → 31 con importe fijo. El resto → 30.
+- **[Pública]** El generador citado escribe el JSON con comillas simples; TM lo lee con `org.json`, que las admite.
+
+**`extra`** (`LgiFGRpiEl:130-260,423-450`):
+
+- Base64 de un AES/CBC/PKCS5. La clave son los 16 primeros caracteres hexadecimales en minúsculas del SHA-256 de `numero_proveedor`; el IV, lo mismo sobre `id_transaccion`.
+- Contenido: `descripcionHint,regex,fechas,idQR`. Las fechas son `ddMMyyyyddMMyyyy` inclusivas y `00000000` deja abierto ese extremo; fuera de rango el QR se descarta como vencido o no disponible (el bytecode compara `> 0 && == 16`, `fallback:568-572`). `regex` se lee y no se usa.
+- Un `extra` que no se puede descifrar o con menos de cuatro campos se **ignora**: la excepción se captura y el pago sigue (`fallback:520,531-551,689-703`).
+- Un `idQR` no vacío hace que el pago envíe también móvil e `idQR` (`r7Rinp9ooL:248-274,315-345`).
+
+**Pago en texto plano** (`r7Rinp9ooL:554-604`): exactamente cinco campos separados por coma, `<id>,<importe>,<moneda>,<proveedor>,<aux>`, y los marcadores `TRANSFERMOVIL_ETECSA` y `PAGO_EXTERNO` dentro de algún campo. Una muestra real: **[no verificado]**.
+
+**Tarjeta para transferir**: `TRANSFERMOVIL_ETECSA,TRANSFERENCIA,<tarjeta>,<móvil>,` (`ZDkigMAIBm:797-830`). TM hace `split(",")`: el campo 2 es la tarjeta, que solo usa si tiene 16 caracteres, y el 3 el móvil a confirmar. Acepta móviles de 8 o 10 dígitos y a los de 10 les quita los dos primeros sin mirarlos.
+
+**Enlaces** (`S9ycHcoxAzy:831-940`): `transfermovil://tm_compra_en_linea/action?…` y `https://transfermovil.app/action?…`, con `id_transaccion`, `importe` (la coma se convierte en punto), `moneda`, `numero_proveedor` (entero) y `descripcion` opcional. El código acepta también `http`, pero el manifiesto solo registra esos dos. El pago se convierte en JSON y pide el banco entre BPA, BANDEC, METROPOLITANO y MITRANSFER.
+
+**Recorte del identificador** (`r7Rinp9ooL:46,275-279,346-365`): si la llamada codificada llega a 130 caracteres, `id_transaccion` se reduce a sus últimos 15; en un 31 sin móvil ni `idQR`, a los últimos 8.
+
+**Lectores**: TM lee con ML Kit (`OJ3XxacXOT`), que no valida el contenido y lo pasa al formulario (`OJ3XxacXOT:737-760`). El lector ZXing (`f6Y2Wmtg6jQ`) sí valida, pero ninguna clase lo instancia.
+
+**NeoTransfer** (`qr/QrCode.kt`, `qr/QrPayment.kt`; prueba `QrCodeTest`):
+
+- Acepta JSON, texto plano y los dos enlaces (también con `http`), y rechaza un enlace con campos repetidos.
+- Ignora el `extra` ilegible como TM y aplica las fechas.
+- Lee el código de tarjeta tolerando mayúsculas, espacios y comas de más, y también una tarjeta de 16 dígitos sola. Un móvil de 10 dígitos solo vale si empieza por `53`.
+- Recorta el identificador como TM y, si la llamada sigue pasando de 182 caracteres, usa el modo parcial (§1.3).
+- El QR de cobro de una tarjeta propia (`CardQr.encode`) usa el mismo formato de tarjeta, legible por TM.
+
+## 7. SMS de resultado
+
+### 7.1 Qué hace Transfermóvil con ellos
+
+- **Tiempo real.** El receptor `SMS_RECEIVED` del manifiesto solo escribe en el log (`X9ZiE8XZNKy:17-21`). La versión general registra su receptor en `LocalBroadcastManager`, que nunca recibe SMS del sistema (`S9ycHcoxAzy:641-647`): no reacciona a ningún SMS. La versión de agente muestra el texto crudo de `PAGOxMOVIL` en un diálogo, sin interpretarlo (`IHVTCBmiLV:128-129`, `rDEl7rW1aN:120-143,1031-1042`).
+- **Comprobantes.** Bajo demanda lee toda la bandeja con `address='PAGOxMOVIL'` (`HzjedYqYeh:35-61`), la analiza con `g0xM9kQCsqu.parse` y deduplica por `idTransaccion` y tipo de servicio (`rDEl7rW1aN:501-528`). Los campos salen de la palabra que sigue a cada etiqueta (`g0xM9kQCsqu:1677-1689`) o de posiciones fijas.
+- **Puerta** (`g0xM9kQCsqu:117`): solo entra en la ruta bancaria un SMS que contiene «Banco» y alguna de estas frases: «El pago», «La Transferencia», «La recarga se», «La amortizacion de credito», «Id Transaccion:», «Giro Postal», «Id Compra:», «PIN de combustible», «caja extra» o «turno». El banco se deduce del nombre: «Popular de Ahorro(s)» es BPA y «Bandec» es BANDEC (`:226-246`).
+- **Bienvenida.** «Bienvenido al sistema TRANSFERMOVIL» no es un marcador de éxito: de ahí salen el teléfono y la versión (`:1625-1675`).
+- **Lo que TM no lee.** Saldos, autenticaciones, «solicitud en proceso», transferencias recibidas, avisos impersonales, «Fallo…», «Error…» y últimas operaciones devuelven `null` (`:223`). TM tampoco guarda saldos: su tabla `MCBank` solo tiene agencia, alias, cuenta, identificador, móvil y moneda. Todo lo que NeoTransfer hace con esos mensajes es lógica propia, apoyada en lo observado (§7.3).
+
+### 7.2 Recepción en NeoTransfer
+
+- `SmsReceiver` despierta la app, aunque esté cerrada, cuando llega un SMS de `PAGOxMOVIL`. El controlador lee la bandeja desde el último `_id` guardado, inclusive; mientras el proceso vive, un observador de `content://sms` cubre las escrituras tardías (`app/src/main/kotlin/dev/duardo/neotransfer/platform/SmsPlatform.kt`, `AppController.ingest`).
+- La primera vez importa toda la bandeja de `PAGOxMOVIL` sin notificar: la actividad se reconstruye al instalar.
+- Orden: `date_sent` (marca del SMSC). **[SMS]** `PAGOxMOVIL` llega siempre por el mismo SMSC, sin marcas anómalas en 251 mensajes (un solo valor negativo, −0,13 s). ETECSA, Cubacel, Nauta, BANDEC y ENZONA llegan por otros SMSC cuyo `date_sent` va unas 11 horas (≈39.600 s) por detrás de la recepción; NeoTransfer solo lee `PAGOxMOVIL`.
+- Los SMS son datos internos: la app no muestra su texto. Del SMS de registro no se guarda el cuerpo.
+
+### 7.3 Plantillas observadas
+
+**[SMS]**, n = 251. `<máscara>` es una tarjeta con dígitos ocultos (por ejemplo `9204XXXXXXXX1234`), `<ref>` la referencia alfanumérica. Espacios y saltos de línea varían; el lector tolera tildes, mayúsculas, espacios repetidos y etiquetas con o sin dos puntos (`sms/SmsParser.kt`; prueba `SmsTemplateTest`, con textos sintéticos).
+
+| Tipo | n | Plantilla | `SmsMessage` |
 |---|---|---|---|
-| 40 | Autenticar | `<banco>*<clave>` | Ambos bancos |
-| 70 | Desconectar | — | |
-| 68 | Eliminar registro | `<banco>*<clave>` | |
-| 49 | Registrarse | BPA `01*<tarjeta16>*<nombre>*<apellido1>*<apellido2>*<ci>` · BANDEC `02*<tarjeta16>*<nombreCompleto>*<vencimientoMMAA>` · BANMET `03*<telebanca10>*<nombre>*<apellido1>*<apellido2>*<ci>` | BANDEC renombra el campo interno `ci` a vencimiento: `wLHKkaC4Ha:68,94,129`. BANMET exige Telebanca de 10 dígitos iniciada en 95 (`RFBEnXW0Xr`). |
-| 46 | Saldo | BPA/BANMET `<monedaTarjeta>*<origen>`; BANDEC `*444*46#` consulta la cuenta actual | BANDEC selecciona otra cuenta mediante 60 y después consulta 46; el motor debe correlacionar la respuesta con esa selección. |
-| 48 | Últimas operaciones | BPA `0*<moneda>*<origen>`; BANDEC `0*<1 predeterminada/0 explícita>*<origen>`; BANMET `<filtro>*<moneda>*<origen>` | Contratos `BankCommands.recentOperations`, trazados en h3sd43nvje, gaJlF6dT3z y GhhAuUBVrI. |
-| 58 | Todas las cuentas | — | |
-| 62 | Consultar límites | `<monedaTarjeta>*<cuentaOrigen>` | |
-| 61 | Cambiar límites | `<atm>*<pos>*<total>[*<moneda>][*<cuentaOrigen>]` | |
-| 63 | Últimos pagos | `<tipoServicio>[*<cuentaOrigen>]` | |
-| 45 | Transferencia moderna | `<destino>*<importe>*<monedaImporte>*<monedaTarjeta>*<origen>*<movil>*<enviarMiMovil>*<mensaje>*<enviarSaldo>` | BANDEC: ambas monedas 0. Omitidos origen/móvil/mensaje: `0000`; flags desactivados: 0 |
-| 41 | Electricidad | BPA `<idFactura>*0*<moneda>*<origen>`; BANDEC `<idFactura>*0[*<origen>]` | Identificador de 11 o 13 dígitos; BANDEC omite origen cuando es el predeterminado |
-| 42 | Teléfono | BPA `<idFactura>*<importe>*<moneda>*<origen>`; BANDEC `<idFactura>*<importe>[*<origen>]` | Identificador de factura de 14 o 15 caracteres, no el teléfono. BANDEC admite importe 0 para pago total |
-| 51 (19/21) | Agua (BPA) | `<idRegionPago>*<cuenta>*<importe>*<idTipo>*0*<cuentaOrigen>` | |
-| 67 | Gas | BPA/BANMET `<cuenta>*0*<monedaTarjeta>*<tipoPago>*<origen>`; BANDEC `<cuenta>*0*<tipoPago>[*<origen>]` | `FgpBLXKm6t:128`, `yiqT29TYTb:128`, `aiwIHVBe0c:128`; BANDEC omite origen predeterminado. |
-| 43 | ONAT y sellos | ONAT `<modo>*<DPA>*<RC05/NIT>*<RC04/tributo>*<periodo>*<importe>*<monedaDébito>*<origen>`; sellos añade entidad antes de moneda | RC modo1 usa DPA/período0000; NIT modo2. Sellos admite denominación elegida o importe manual; su ruta parcial intercambia NIT/tributo. |
-| 94 | Aporte OFA / Oficina del Historiador | Bancos: `<carnet>*<contribuyente>*<codigo>*<mes/año>*<importe>*<obligacion>*<monedaTarjeta>*<origen>`; MiTransfer sustituye los dos últimos campos por `<bolsa>` | El modelo es `ObligacionesOFA`, no ONAT genérico: `SZARzeWeX5:121`, `lQox6tgMlH:97`, `C6ZYln3x19W:120`. |
-| 56 | Consulta ONAT | BANDEC completo `<rc05>*00000`; BANDEC/BANMET fiscal `<rc05>*<rc04a>` | RC05 de 11–16 dígitos; RC04A de 5. idsoBKS8L3:225–274 y hJhf3aumcr:210–256. |
-| 47 | Consultar factura de servicio | `<tipo>*<factura>` | Tipos por banco en ServiceQueryOperations: gas BPA4/BANDEC5/BANMET11; aguaHabana BPA11 por DEX, otros AGUAHABANA; resto AGUAPROVINCIAS; Varadero AGUAVARADERO. |
-| 54 | Recarga móvil | Pantalla compartida actual: `<movil>*<importe>*<monedaTarjeta>*<origen>`; BANDEC usa moneda 0 y conserva origen `0000` | `SjZHfPJPwX:269-283`, selector `GVEefrRz76`. La rama 88 no se publica: `array_tipo_recarga` solo ofrece un ítem. La pantalla BANDEC anterior `D6YZ7ruA6K` enviaba moneda 1 y omitía origen predeterminado; son rutas diferentes. |
-| 52 | Servicios contratados BANDEC | Agregar `1*<tipo>*<factura>`; consultar `3*<tipo>*000`; eliminar `2*<tipo>*<factura>`; pagar `4*<tipo>*000*0*<origen>` | Tipo1 telecomunicaciones,2 electricidad. Kgii4NH4Ce abre q9DNC6bnexm para gestiones y g7yG4Frdxy para pago. |
-| 55 | Amortizar crédito | `<cuenta>*<mensualidad>*<moneda>` · `<cuenta>*<monto>*<mensualidad>*<nombre>` | |
-| 64 | Giro postal | `<ciOrigen>*<ciDestino>*<monto>*<moneda>*<idTipoGiro>*<movilDestinatario>[*<cuentaOrigen>]` | |
-| 65 | Consultar giro | `<ci>` | `XvOK7VM4qL`, `gsthr0APCT`, `QGOIyTuo2a`, `jyBbMyVMOV`: formulario de giros pendientes. |
-| 60 | Asociar cuenta | `<cuenta>` | |
-| 69 | Cambiar clave | formulario propio | |
-| 74 | Reimpresión de tarjeta | BPA `<moneda>*<origen>`; BANDEC `<sucursal>*<cuenta>*<motivo>`; BANMET `<moneda>*<origen>*<cuentaComision>*<municipio2>*<sucursal>` | kWnV7nzNWl:53, vVF87n7MnK:168, tYCC0hiRcm:97–100. |
-| 79 | PIN digital | BPA `<moneda>*<origen>`; BANDEC `<tarjeta>*<coord1>*<valor1>*<coord2>*<valor2>`; BANMET `<tarjeta>*<coord1>*<valor1>` | Coordenadas A1–J10 y valores de 2 dígitos; datos sensibles. |
-| 81 | Depósito a plazo fijo | `<importe>*<plazo>*<interés o modalidad>*<moneda>[*<cuentaOrigen>]` | |
-| 89 | Estado de un pago | `<referencia>*<cuentaOrigen>` | |
-| 24 | Obtener cuenta estándar | `<cuentaOrigen>` | `MAvaCEUqwa:47`, también invocado desde BPA; no es consulta de crédito. |
-| 72 / 78 | Consultar crédito BPA / información de tarjeta Red | — | Rutas directas `kmO9Md6JHr:388-405` y `:291-308`, respectivamente. |
-| 26 | Extracto por correo | `<correo>*<fechaInicio>*<fechaFin>*<cuentaOrigen>` | |
-| 30 | QR dinámico | `<agencia>*<clave>*<id>*<importe>*<idMoneda>*<monedaTarjeta>*<proveedor>*<aux>*<origen>[*<movil>]` | Aux que contiene `11200301` se sustituye por 0; móvil vacío especial `0000`, ordinario `0` |
-| 31 | QR estático | `<agencia>*<clave>*<id>*<importe>*<idMoneda>*<monedaTarjeta>*<proveedor>*<aux>*<descripcion>*<origen>[*<movil>*<idQR>]` | Descripción vacía e idQR omitido: `0000`. La cola opcional se activa por móvil indicado o idQR del extra |
+| Autenticación BPA | 33 | `Usted se ha autenticado en la plataforma de pagos moviles, en el Banco Popular de Ahorro, puede comenzar a utilizar nuestros servicios de pagos a traves del movil` (a veces con un bloque `INFORMACION:` al final) | `Authenticated` |
+| Autenticación BANDEC | 40 | `… en el Banco Bandec con la cuenta <máscara>, puede comenzar …` (una vez con la cuenta vacía) | `Authenticated`, con la tarjeta de la sesión |
+| Autenticación fallida | 6 | `Banco Bandec: Clave incorrecta Error de autenticacion, intente nuevamente…`; `Banco Popular de Ahorro: LA AUTENTICACION HA FALLADO Error de autenticacion…`; sin banco: `vuelva a intentarlo, si persiste el problema, contacte con ETECSA Error de autenticacion…` | `AuthenticationFailed` |
+| Ocupado | 2 | `Usted tiene una solicitud en proceso, en breve recibira respuesta y podra realizar otra operacion.` | `Busy` |
+| Saldo BPA | 24 | `Banco Popular de Ahorro:  La consulta de saldo fue completada. Saldo Disponible: CR <importe> CUP` | `Balance` |
+| Saldo BPA en tabla | 7 | `Nombre Cuenta;Nro Cuenta; Saldo Disponible; Moneda` y filas `; <rótulo> ; <importe>; <moneda>` (rótulos como `Ahorro` o `Dep.USD`, no tarjetas) | `Balance`, sin tarjeta |
+| Saldo BANDEC | 45 | `Banco Bandec La consulta de saldo fue completada. Cuenta;Saldo Contable;Saldo Disponible;Moneda` y `<máscara>; CR <importe> ; CR <importe> ;CUP \|` (siempre una fila) | `Balance` |
+| Saldo fallido | 2 | `Fallo la consulta de saldo. vuelva a intentarlo, si persiste el problema, contacte con su proveedor de servicios.` | `Rejected` |
+| Últimas operaciones BANDEC | 5 | `Banco Bandec Ultimas operaciones. Fecha;Servicio;Operacion;Monto;Moneda;NoTransaccion` y hasta 10 filas `d/m/aaaa;<servicio> Ref: <ref>;Db\|Cr;<importe>;CUP;` separadas por `\|` (a veces con texto corrupto) | `History` |
+| Transferencia enviada | 8 | `Banco <banco>:  La Transferencia fue completada. Fecha: d/m/aaaa Beneficiario: <máscara> Ordenante: CUP\|<máscara> Monto: <importe> CUP Nro. Transaccion: <ref> [Saldo restante: CR <importe> CUP]` (`Ordenante: CUP` = cuenta predeterminada) | `TransferSent` |
+| Aviso impersonal de transferencia | 7 | `Se ha realizado una transferencia a la cuenta <16 dígitos> de <importe> CUP. Nro. Transaccion <ref>. Fecha: d/m/aaaa.` (5 copian un comprobante; 2 llegan solos) | `TransferNotice` |
+| Transferencia recibida | 22 | `El titular del telefono <móvil> le ha realizado una transferencia a la cuenta <16 dígitos> de <importe> CUP. Nro. Transaccion <ref>. Fecha: d/m/aaaa.` (sin banco ni saldo; importe sin separador de miles; 2 antiguos sin `Fecha`) | `TransferReceived` |
+| Transferencia fallida | 1 | `Fallo la transferencia. Banco Popular de Ahorro: LA CUENTA NO ESTA ASOCIADA A UNA TARJETA MAGNETICA` | `Rejected` |
+| Pago QR o compra | 5 | `Banco <banco>: Pago completado. Fecha: … Entidad: <comercio> Id Compra: <id> Importe: <importe> CUP Importe pagado: <importe> CUP No. Transaccion: <ref> Saldo disponible: CR\|DB <importe> CUP` (BPA usa `DB`) | `PaymentCompleted` |
+| Pago de servicio | 15 | Nauta Hogar: `La cuenta Nauta Hogar: <cuenta> ha sido pagada con <importe> CUP. Monto Pagado: <importe> CUP. Id Transaccion: <ref>. Saldo Restante: DB <importe> CUP.`; recarga Nauta: `La cuenta :<cuenta> ha sido recargada con …`; recarga móvil: `La recarga se realizo con exito. … Monto Pagado … Telefono … Id transaccion … Saldo Restante: DB <importe>.`; sello del timbre | `ServicePaid` |
+| Copia de pago de servicio | 7 | `Se ha pagado la cuenta nauta hogar <cuenta> con <importe> CUP. Nro. Transaccion <ref>` · `Se ha recargado la cuenta …` | `ServiceNotice` |
+| Pago de servicio fallido | 9 | `Fallo la recarga del movil <móvil> alcanzo el monto limite de recarga permitido en <n> dias (<límite> CUP), puede recargar posterior al dia dd-mm-aaaa.` · `Fallo el pago de la cuenta Nauta Hogar, la cuenta <cuenta> es incorrecta.` · `… El monto tiene que ser mayor que <mínimo>` · `… no tiene deuda` | `Rejected` |
+| Cierre de plazo fijo fallido | 3 | `Banco Popular de Ahorro Fallo el cierre del deposito a plazo fijo de la cuenta …` (fuera de alcance) | `Rejected` |
+| Recarga de saldo recibida | 4 | `Usted ha recibido una recarga de saldo movil por un monto de <importe> CUP del numero <móvil>…` (saldo del teléfono, no del banco) | `MobileBalanceReceived` |
+| Registro completado | 1 | `… La operacion de registro fue completada. Bienvenido a Transfermovil. Clave de Autenticacion: … El PIN asociado a su tarjeta … es …` | `Registration` |
+| Error de asociación | 5 | `Error en la asociacion de tarjeta. Banco Bandec: Esta tarjeta ya esta asociada a un celular` (4) · `Error en la asociacion de tarjeta. Banco Popular de Ahorro: LA CUENTA NO ESTA ASOCIADA A UNA TARJETA MAGNETICA` (1) | `Rejected` |
 
-Servicios Cubacel, no bancarios, se marcan tal cual y sin codificar: `*222#` saldo, `*222*266#` bonos, `*222*328#` datos, `*222*869#` voz, `*222*767#` SMS, `*222*264#` Plan Amigos, `*234*3#` adelanto de saldo, `*133#` compra de planes.
+Sin muestra real, el lector reconoce los pagos de electricidad (`El pago de la factura de electricidad fue completado`, `g0xM9kQCsqu:578-590`), teléfono fijo (`El pago de la factura telefonica fue completado`, `:539-577`) y agua (`El pago de la factura del agua fue completado.`, `:248-267`) con las plantillas del analizador de TM, y las últimas operaciones de BPA con el formato de BANDEC. Su forma real: **[no verificado]**.
 
-### 3.1 Variantes adicionales contrastadas en el APK (2026-09-23)
+Rechazos: «Fallo…», «Error…» y «vuelva a intentarlo…» cierran la operación como rechazada, con el motivo del banco en lenguaje normal. «Usted tiene una solicitud en proceso…» se interpreta como que la última solicitud enviada no se ejecutó; para dinero, esa lectura: **[no verificado]**.
 
-- Agua: servicios 19 (La Habana), 51 (resto del país), 21 (Varadero). BANDEC usa cinco campos en región 2 y seis en las otras, con moneda 0; BPA/BANMET siempre seis. La opción total es 1 en La Habana/Varadero; la pantalla inicia tipo 0 en resto del país. Fuentes: `zOs55UzH6z`, `T4RQ5wDJDt`, `BoMBck6OXT`.
-- ONAT actual (43): `<modo>*<DPA>*<RC05/NIT>*<RC04/tributo>*<periodo>*<importe>*<moneda>*<origen>`; modo RC=1 usa DPA/período `0000`, NIT=2 requiere municipio y mes/año (`ROgpLrCtHa:391-435`). Sellos añade entidad antes de moneda. `TGMSi5UDp7:261,267` cambia el orden NIT/tributo en su ruta parcial; el DEX `submitForm` 010a/0110/0116 confirma el intercambio. El encoder conserva una variante parcial con ese orden y la misma semilla, antes de agrupar los paquetes.
-- Nauta 59, Nauta Hogar 84 y deuda 86: `<usuarioSinDominio>*<tipoCuenta>*<importe>*<moneda>*<movil>*<origen>*<1/2/3>`. El móvil omitido es `0000000`. Propia 77, Joven Club 93, TFA 108, planes 6 y combustible 35 tienen campos específicos, recogidos en `ServiceOperations` con referencias al formulario.
-- MiTransfer usa bolsa USD=1/CUP=2, distintas de las monedas bancarias. Recarga móvil vigente:54 CUP. Nauta Plus34 y Extra USD33 conservan las rutas de MiTransfer personal. Fuentes: `zzyNbaqs1U`, `HZgbT8IXPf`, `f3Ttlx30sMT`.
-- Clásica 45 desde el menú usa `1*<tarjetaOrigen>*<destino>*<importe>*<compartirMovil>*<movilConfirmacion>*<compartirSaldo>*1`, bajo sesión MiTransfer. El prefijo `08*<PIN>*` solo aparece en la variante externa con argumento `R1sDOSqZ2z` (`l3GXbXAyUW:195-199,295-318`; entradas `OJ3XxacXOT`, `f6Y2Wmtg6jQ`, `KeTIEVSfVo`). El catálogo normal usa la primera ruta.
-- Extracción MiTransfer95 concatena DPA con bolsa0 en el último átomo, sin separador (`f9Reflqt3EZ.submitForm`, DEX00e9–00ee). Se conserva el wire observado, sin afirmar aceptación de red.
-- Consultar un extracto por correo (26) cobra comisión; no clasificarlo como lectura sin autorización. Los recibos de solicitudes no confirman un movimiento de dinero.
-- Opciones contrastadas con los assets del mismo APK: `compraplanescubacel.json` fija categorías 1–7 y versión 2; `obligacionesOFA.json` conserva códigos de dos dígitos; `tipoPrelacion.json` define tres órdenes de pago; `entidadesEfectivo.json` diferencia CADECA CUP 22001 de USD 22002. `ProviderOptions` usa esos identificadores, sin pedir al usuario versiones del protocolo.
+### 7.4 Saldos y duplicados
 
-Los constructores son propios y no ejecutan USSD. Los fixtures de contratos y el oráculo de codificación comprueban orden, valores omitidos y sobre; no prueban aceptación por la red.
+**[SMS]**
 
-### 3.2 Navegación vigente y credenciales
+| Mensaje | BPA | BANDEC | Forma |
+|---|---|---|---|
+| Transferencia enviada | 1 de 1 | 6 de 7 | `Saldo restante: CR x` |
+| Pago de servicio | 14 de 14 | 1 de 1 | `Saldo Restante: DB x` (el sello no lleva marcador) |
+| Pago QR | 1 de 1 (`DB`) | 4 de 4 (`CR`) | `Saldo disponible: …` |
+| Transferencia recibida | 0 de 10 | 0 de 12 | — |
 
-Las rutas bancarias parten de `S9ycHcoxAzy`: BPA → `kChOHNVmzz` (consultas `kmO9Md6JHr`, operaciones `voNSkP3P8q`, configuración `f5AFyaj0rtx`); BANDEC → `s684VE6Dm0` (`R7PmVxXLJZC`, `bLlRBTTLue`, servicios contratados `Kgii4NH4Ce`, configuración `X7obECfkKf`); BANMET → `Q7htFIAC0SE` (`PEi17BvMam`, `Vdv5nYP39d`, `RC71RyOpsk`). Los constructores del catálogo citan el formulario que selecciona el handler de estas pestañas.
+- En comprobantes de servicio y QR, `DB x` es el saldo `x`, no una deuda: seis comprobaciones contra el saldo siguiente cuadran.
+- 2 de los 12 comprobantes de BANDEC con saldo traían el saldo **anterior** al débito (una transferencia y un QR), confirmado con las últimas operaciones y el saldo siguiente.
+- En BANDEC el saldo contable va por detrás del disponible tras un abono (5 casos). NeoTransfer muestra el disponible.
+- Duplicados: un comprobante idéntico repetido a los 10 s, y 12 pares de comprobante y aviso impersonal con la misma referencia, separados por 0 a 5 s. NeoTransfer cuenta un movimiento por referencia y nunca atribuye un aviso impersonal que llega solo.
 
-La presencia de una rama `case` no basta: también se contrasta el `initData` o una entrada real. No se publican pagos sindicales122, FWA18/20, recarga monedero23 ni bancaria88 sin una ruta activa demostrada. Los códigos antiguos no se sustituyen por otros para simular cobertura.
+NeoTransfer: `ledger/Activity.kt` (movimientos y proyección de saldo; ver [arquitectura](arquitectura.md#saldo)).
 
-MiTransfer → `ofOuyCSKWI` usa sesión `H0kVHR7zuu`, consultas `UMVR3qrc3V`, operaciones `rR6oImkdEU` y configuración `hOQ4ESKEhm`. Clásica personal es una tarjeta asociada al acceso MiTransfer, con su misma autenticación. Asociación111 solicita tarjeta y códigos Aut/TML del recibo POS; desasociación68 usa el PIN del monedero. `authenticationIdentity` conserva ese registro padre, su línea y su SIM.
+## 8. Tiempos medidos
 
+**[SMS]** Retraso de entrega, recepción menos marca del SMSC, en segundos. Solo mide la red, no el procesamiento de la plataforma.
 
+| Grupo | n | Mediana | p90 | Máximo | Más de 30 s |
+|---|---|---|---|---|---|
+| Todos | 251 | 6,2 | 85,9 | 862,6 | 40 (16 %) |
+| Autenticación BPA | 33 | 4,1 | 63,3 | 413,7 | 4 |
+| Autenticación BANDEC | 40 | 14,1 | 85,9 | 342,6 | 8 |
+| Saldo BPA | 31 | 4,4 | 122,2 | 385,3 | 5 |
+| Saldo BANDEC | 45 | 6,9 | 83,9 | 547,5 | 9 |
+| Dinero saliente | 28 | 3,6 | 35,4 | 160,7 | 4 |
+| Transferencia recibida | 22 | 3,3 | 318,3 | 862,6 | 5 |
 
+- Hubo 15 llegadas fuera de orden en 251 (6 %). En 12, el resultado llegó antes que el SMS de la autenticación que lo precedía, con 4 a 115 s de adelanto.
+- Android no registra los USSD enviados, así que el tiempo envío→SMS no se puede medir. Las ráfagas de resultados consecutivos salen del SMSC cada 9 a 15 s: la plataforma procesa en serie, unos 10 s por operación.
+- «Ocupado» apareció 2 veces en 79 intentos de autenticación.
 
-### 3.3 Moneda y valores derivados por contrato
+Con esto, NeoTransfer (`ledger/Ledger.kt`) espera el acuse USSD hasta 45 s, deja una operación en «Sin respuesta» a los 15 minutos sin SMS (el máximo observado fue 14,4) y sigue aceptando un resultado tardío durante 2 horas.
 
-`request.currency` no tiene una semántica universal. En transferencia bancaria 45 representa moneda del importe; en pagos de `ServiceOperations` representa débito para origen predeterminado BPA/BANMET, mientras BANDEC o un origen explícito envían 0. Los campos `amountCurrency` pertenecen al importe de la operación y no deben usarse para cambiar el producto de origen. MiTransfer usa `request.currency` para elegir bolsa USD1/CUP2; Clásica usa su instrumento explícito. Los filtros de productos deben respetar estas diferencias.
+## Apéndice A: clases de Transfermóvil citadas
 
-- Caja Extra32: `UTk9UWZYxf:316–323` acepta únicamente QR estático. `CashExtraOperations.fromQr/validateOriginal` conserva el QR de origen y rechaza cambios de comercio, referencia, moneda, importe fijo o descripción fija. Móvil omitido `00`; descripción omitida `0000`. El motor debe conservar ese original desde lectura hasta envío.
-- BANMET asociación60 (tarjeta y matriz) es distinta de actualización53 (CI y Telebanca10 iniciada95). `banmet.associate-account` y `banmet.update-account` reflejan esas rutas; consultar créditos72 y localizar transferencias73 son directos. BANDEC información de tarjeta78 envía la tarjeta, a diferencia de la variante directa de BPA/BANMET.
-- Identificadores de los pickers: los trámites BANMET74/76 envían municipio de dos dígitos (`kD9wg15jwt:86–88`, `tYCC0hiRcm:97–100`); apertura fiscal5 envía DPA completo de cuatro (`EyKrF4UJ9B:158–164`). La validación comprueba sucursal/municipio/banco, sucursal/servicio MiTurno, artículo/inciso de tránsito y entidades de sellos. Importe manual de sellos sigue permitido por la opción original.
-- Los mensajes que contienen códigos o claves permanecen clasificados como sensibles, incluso cuando pertenecen a módulos retirados; la conservación histórica no habilita su ejecución.
+| Clase | Qué es |
+|---|---|
+| `S9ycHcoxAzy` / `IHVTCBmiLV` | Actividad principal general / de agente; ambas heredan de `rDEl7rW1aN` |
+| `rDEl7rW1aN` | Base: codificador `code()`, envíos USSD, lectura de la bandeja |
+| `FBsQzP3Zfj` | Utilidades: diálogo «Confirmar» y `ACTION_CALL`, sesión local, accesos directos |
+| `AppConfig` | Configuración: código 444, versión, banco activo, hora de autenticación, `activarussdparcial` |
+| `X9ZiE8XZNKy` | Receptor `SMS_RECEIVED` del manifiesto (vacío) |
+| `HzjedYqYeh` / `g0xM9kQCsqu` | Lectura de la bandeja de `PAGOxMOVIL` / analizador de SMS a comprobante |
+| `Agg55uYctq` / `DQIrxODoMU` | Bases de formulario con selector de origen (general / BANDEC «cuenta actual») |
+| `pAzq93vIl3` / `MX9gh9mLxd` / `O7xyZJJBFWg` | Modo parcial / envío con `sendUssdRequest` / accesibilidad que pulsa «OK» |
+| `s684VE6Dm0` | Pestañas BANDEC: Sesión `rvxiiV3tYu` (40, 70 y 60), Consultas `R7PmVxXLJZC`, Operaciones `bLlRBTTLue`, Servicios contratados `Kgii4NH4Ce`, Configuración `X7obECfkKf` |
+| `kChOHNVmzz` | Pestañas BPA: Sesión `p97uirGL7T` (40 y 70), Consultas `kmO9Md6JHr`, Operaciones `voNSkP3P8q`, Configuración `f5AFyaj0rtx` |
+| `TGFziPh3KJ` / `lzGEfceoJu` | Autenticar (40) BANDEC / BPA |
+| `ix4mhKGJty` | Saldo (46) BPA |
+| `gaJlF6dT3z` / `h3sd43nvje` | Últimas operaciones (48) BANDEC / BPA |
+| `o9swVUfDl4q` / `Ittht2aX4N` | Servicio 60: «Cambio de Cuenta» BANDEC / «Asociar cuentas» BPA |
+| `FtAKxvNjrD` / `PQmKwgxZd1` | Cambio de clave (69) BANDEC / BPA |
+| `ZDkigMAIBm` / `iN1lHDKE5h` | Transferencia (45) BANDEC / BPA |
+| `Q3Nvf439ab` / `xSwGh0MTOg` | Electricidad (41) BANDEC / BPA |
+| `iQte15zdZs` / `u4QMc0S0ZHo` | Teléfono fijo (42) BANDEC / BPA |
+| `T4RQ5wDJDt` / `zOs55UzH6z` | Agua (19, 51, 21) BANDEC / BPA |
+| `PqTzgaEYF6` | Recarga Nauta (59), Nauta Hogar (84) y su deuda (86) |
+| `SjZHfPJPwX` | Recarga móvil desde el banco (54) |
+| `r7Rinp9ooL` ← `LgiFGRpiEl` | Pago QR o en línea (30, 31) ← lector del JSON y del `extra` |
+| `UTk9UWZYxf` | Caja Extra (32) |
+| `OJ3XxacXOT` / `f6Y2Wmtg6jQ` | Lector QR con ML Kit (el que se usa) / con ZXing (sin uso) |
+| `LALCrDPvhM` / `C8l2t8799rL` | Consultas Cubacel / transferir saldo |
 
-### 3.4 Exclusiones por ruta activa y Nauta Plus
+## Apéndice B: constantes de codificación
 
-La conversión CUC→CUP87 no forma parte del catálogo normal: sus enums y handlers permanecen en el APK, pero `f5AFyaj0rtx.initData`, `X7obECfkKf.initData` y `RC71RyOpsk.initData` no añaden ese ítem. El registro de accesos directos `nljtDl5MIf` tampoco lo registra. La reflexión de `FBsQzP3Zfj.goToFragment` parte precisamente de ese registro. Se retiran las tres specs y sus fixtures; esto no afirma que el servidor haya eliminado87.
-
-OFA94 se conserva únicamente para BANDEC, BANMET y MiTransfer: menús, enums y accesos directos demuestran esas rutas. BPA no tiene formulario94 ni subopción OFA: su diálogo ONAT ofrece RC, NIT y sellos43. No se adapta el contrato BANDEC a BPA por semejanza.
-
-Nauta Plus34 tiene dos rutas activas en `rR6oImkdEU.showDialogNautaPlus` y el acceso directo equivalente de `FBsQzP3Zfj`: con cuenta `usuario*móvil*1`; sin cuenta `0000*móvil*1`. El móvil es obligatorio, de ocho dígitos y comienza por5/6. La cuenta se escribe sin espacios ni dominio y se conserva su capitalización; `toLowerCase()` no reasigna el campo. El layout no impone límite20 a la cuenta. La [FAQ oficial de ETECSA, pregunta43](https://www.etecsa.cu/es/preguntas-frecuentes?faq=4339) confirma la cuenta internacional y el móvil de notificación. El envío usa la ruta nativa `ACTION_CALL` de `FBsQzP3Zfj:144–171`, representada como `INTERACTIVE_USSD`; no se afirma haber inspeccionado la respuesta o aceptación de red.
-### 3.5 MiTurno: solicitud y gestión posterior
-
-- El envío102 solicita un turno: proveedor `1` BPA, `2` BANDEC, `3` BANMET o `4` MiTransfer, servicio, DPA de sucursal, CI/pasaporte, móvil de confirmación y débito según el contrato. No envía fecha ni hora.
-- Cambiar fecha105 envía proveedor, servicio, CI/pasaporte y la fecha nueva elegida. Cancelar106 envía proveedor, servicio y CI/pasaporte. Consultar107 envía proveedor y CI/pasaporte. No se requiere ni se transmite un identificador de reserva: `rGY5dubJYU:211`, `GPsckxvkPu:204`, `V0zQxQBN2i:136`, `Wwc5crW71D:163`, `QVPgkl8ZGC:156`, `x12rSjPY6pZ:100`.
-- El tipo de servicio viene del selector, no de un número escrito:1 compra de divisas CADECA,2 trámite comercial de gas,3 venta de gas. BPA/BANDEC publican esos tres. BANMET/MiTransfer añaden los once servicios bancarios4–14, desde `array_servicios_bancarios_miturno`; los handlers calculan posición+4. Solicitar exige además que la sucursal ofrezca ese servicio. La nueva fecha se elige entre hoy y seis meses después.
-- `g0xM9kQCsqu:727–741` sólo demuestra una respuesta de solicitud completada con `Carnet de Identidad`, `Comision Pagada` y `Nro. Transaccion de Banco`. `MiTurnoReceiptParser` modela esos campos como recibo de solicitud/comisión. No se encontró una plantilla demostrada de105/106/107 con fecha, hora, número o estado del turno; esos datos no se inventan.
-- Para gestión posterior se reutiliza la solicitud persistida en el diario por ID explícito, preservando proveedor, registro, SIM, beneficiario y servicio. La app debe validar procedencia y estado del registro: una operación preparada, cancelada antes de enviarse, rechazada o restaurada no prueba envío local. Incluso un recibo de comisión no prueba una cita asignada. `MiTurnoContracts.selectionFromRequest/prefill` prepara formularios desde los datos validados y deja vacía la nueva fecha hasta que la persona la elija.
-## 4. QR y enlaces
-
-- **Pago, JSON**: `{"id_transaccion":"…","importe":123.45,"moneda":"CUP","numero_proveedor":"…","version":1}`, opcional `descripcion`. El generador público usa comillas simples; `org.json` las acepta.
-- `version` no vacía sustituye `aux` (predeterminado 1); no es la versión del sobre USSD. Importe 0 → servicio 31 con importe editable. Importe positivo e ID que contiene `ESTATICO` → 31 con importe fijo; los demás → 30. Descripción JSON no vacía es de solo lectura.
-- JSON **sin `extra` es válido**. Si existe, `extra` es Base64 (admite espacios ASCII y saltos de línea), cifrado AES/CBC/PKCS5. Clave: primeros 16 caracteres hexadecimales minúsculos del SHA-256 del proveedor US-ASCII, convertidos a UTF-8. IV: mismo proceso sobre ID. Contenido: `descripcionHint,regex,fechas,idQR`. Fechas `ddMMyyyyddMMyyyy` inclusivas; `00000000` omite ese extremo. La regex se lee pero la ruta original no la aplica. Extra inválido se rechaza; no se ignora.
-- Referencia bancaria moderna: `VW6IL66KC6M/r7Rinp9ooL` y `LgiFGRpiEl`, con su padre `Agg55uYctq`.
-- MiTransfer QR usa agencia 04 y bolsa USD=1/CUP=2. Clásica usa bolsa 3 y añade la tarjeta tras la cola QR: en dinámico sin extras intercala un `0` antes de la tarjeta, mientras en estático la añade directamente. La variante especial `11200301` del original no añade tarjeta: su spec usa `SourcePolicy.NONE` y rechaza un origen explícito; no lo cambia silenciosamente.
-- **Pago, texto plano**: 5 campos separados por coma que contienen `TRANSFERMOVIL_ETECSA` y `PAGO_EXTERNO`: `<idTransaccion>,<importe>,<moneda>,<numeroProveedor>,<aux>` **[estructura exacta no verificada]**.
-- **Tarjeta, para transferir**: `TRANSFERMOVIL_ETECSA,TRANSFERENCIA,<tarjeta>,<movil>,` (coma final). Al escanear: campo 2 = tarjeta destino, campo 3 = móvil a confirmar.
-- El original elimina los dos primeros dígitos de móviles de longitud 10. NeoTransfer solo normaliza ese caso cuando comienza por `53`; otros prefijos se rechazan.
-- **Deep link**: `transfermovil://tm_compra_en_linea/action?id_transaccion=&importe=&moneda=&numero_proveedor=[&descripcion=]`; App Link `https://transfermovil.app/action?…` con los mismos parámetros. Las tiendas web lo abren para pagar.
-- Lectura: cualquier decodificador QR. La app original usa ML Kit para leer y ZXing para generar.
-
-## 5. SMS de resultado
-
-En la línea 1.0, el transporte y el diario conservan por separado recepción y marca temporal SMSC. A los 30 segundos se muestra «Tiempo de espera agotado» y se libera la espera; una respuesta posterior se procesa sin reactivar pagos ni exigir revisión. La interfaz habitual no expone los SMS originales. Los comportamientos de 0.2 descritos en los cotejos históricos no sustituyen esta política; véase [arquitectura](arquitectura.md).
-
-- Remitente `PAGOxMOVIL`. La app lo recibe por `SMS_RECEIVED` y además lee la bandeja (`content://sms/inbox` con `address = 'PAGOxMOVIL'`) para reconstruir el historial: nuestro historial puede nacer de la bandeja el primer día.
-- Texto libre en español sin tildes. La app extrae campos por marcadores `Etiqueta:` (`getElement("Id Transaccion:", sms)`); tras el importe viene la moneda en 3 letras.
-- Marcadores de éxito conocidos: "La Transferencia fue completada.", "El pago de la factura de electricidad fue completado", "El pago de la factura telefonica fue completado", "El pago de la factura del agua fue completado.", "El pago de la factura del Gas fue completado.", "El pago de la ONAT fue completado", "El pago de la multa fue completado.", "La recarga se realizo con exito", "Pago completado", "La compra fue completada.", "Giro Postal fue completado.", "Bienvenido al sistema TRANSFERMOVIL".
-- Campos conocidos: "Id Transaccion:", "Nro. Transaccion:", "Monto Pagado:", "Importe Factura:", "Id Compra:", "Nro. Factura Pagada:", "NIT:".
-- Registro de comprobante en la app original (RecordSMS): idTransaccion, fecha, cuenta, monto, moneda, servicio, tipo_servicio (BancoBPA / BancoBANDEC / BancoMetro).
-- Saldo, autenticación y comprobantes BANDEC/BPA observados por ADB (§5.1–5.2). No inferir formatos de otros bancos.
-
-### 5.1 Muestra real de BANDEC (2026-09-22)
-
-Lectura de los 12 SMS más recientes de `PAGOxMOVIL` mediante `adb shell content query`, filtrando `content://sms/inbox` por remitente y ordenando por fecha descendente. No se enviaron solicitudes bancarias. Se observaron 2 transferencias enviadas, 2 recibidas, 2 consultas de saldo, 4 autenticaciones y 2 rechazos de recarga. Los siguientes esquemas sustituyen los datos personales por marcadores; no son fixtures literales.
-
-- **Transferencia enviada:** `Banco Bandec: La Transferencia fue completada.`, seguido por `Fecha:`, `Beneficiario:`, `Ordenante: CUP`, `Monto: <importe> CUP`, `Nro. Transaccion: <referencia>` y `Saldo restante: CR <importe> CUP`. Beneficiario llega como tarjeta parcialmente enmascarada. En esta muestra `Ordenante` contiene la moneda, no una tarjeta: no usarlo para identificar la cuenta de origen.
-- **Saldo:** `Banco Bandec La consulta de saldo fue completada.`, cabecera `Cuenta;Saldo Contable;Saldo Disponible;Moneda` y fila `<tarjeta enmascarada>; CR <importe> ; CR <importe> ;CUP |`. Conservar ambos saldos separados. Las muestras solo contienen una cuenta y marcador `CR`; otros marcadores y respuestas multicuenta siguen sin comprobar.
-- **Transferencia recibida:** `El titular del telefono <movil> le ha realizado una transferencia a la cuenta <cuenta> de <importe> CUP. Nro. Transaccion <referencia>. Fecha: <fecha>.` No incluye saldo restante; `Nro. Transaccion` aparece sin dos puntos.
-- **Autenticación:** `Usted se ha autenticado en la plataforma de pagos moviles, en el Banco Bandec con la cuenta <tarjeta enmascarada>, puede comenzar a utilizar nuestros servicios de pagos a traves del movil`.
-- **Rechazo de recarga:** `Fallo la recarga del movil <movil> alcanzo el monto limite de recarga permitido en 30 dias (<limite> CUP), puede recargar posterior al dia <fecha>.` Este rechazo no demuestra un error de sesión.
-
-La muestra confirma saldo restante en transferencias **enviadas de BANDEC**, no en todos los pagos ni bancos. No contiene pagos QR. Las líneas en blanco y los espacios varían; las referencias de transacción son alfanuméricas.
-
-Una ampliación posterior a 200 mensajes encontró cinco pagos/compras (`Pago completado`, `Fecha`, `Id Compra`, `Importe pagado`) y dos recargas exitosas (`Monto Pagado`). No demuestra que esos pagos fueran QR ni que `Id Compra` sea el ID del QR. Por eso NeoTransfer no confirma automáticamente un QR solo por importe o por proximidad temporal: conserva el pendiente y permite revisar el SMS. Cerrar manualmente una transferencia incierta conserva su huella de correlación para no atribuir un comprobante tardío a otra operación compatible.
-
-Regla de producto ya acordada: tras mover dinero, aprovechar el saldo del SMS de confirmación; si falta o pasan 10 s sin confirmación, consultar saldo automáticamente cuando el canal USSD esté libre. Consultar saldo no equivale a confirmar la operación pendiente ni autoriza a repetirla; admitir una confirmación tardía sin duplicar el movimiento. Un SMS de autenticación tampoco confirma una transferencia.
-
-### 5.2 Variantes BPA y recibos de servicios (2026-09-22)
-
-Lectura de 225 SMS existentes, sin solicitudes bancarias. Fixtures de pruebas sintéticos; los cuerpos personales no se guardan en el proyecto.
-
-- BPA autentica sin número de cuenta; puede añadir un bloque `Informacion:`. BANDEC también puede omitir el valor tras `con la cuenta`. La ausencia se conserva como `null`.
-- BPA responde con `Saldo Disponible: CR <importe> <moneda>` o tabla `Nombre Cuenta;Nro Cuenta;Saldo Disponible;Moneda`. En las tablas observadas, `Nro Cuenta` contiene un rótulo, no una tarjeta. No inventar cuenta ni saldo contable. `DB` no está demostrado como saldo disponible y continúa sin interpretarse.
-- La respuesta plana BPA se observó de nuevo el 27-09-2026. Para una consulta 46 con origen explícito, el diario permite asociar el saldo únicamente si todos los orígenes candidatos coinciden en registro y número, con SIM y tiempos válidos. Se comprueba también la recepción canónica para que una relectura del mismo SMS no lo asigne a una consulta posterior. La selección visual no constituye evidencia; una respuesta sin identificador no resuelve consultas de distintos orígenes.
-- Hay transferencias recibidas sin el sufijo de fecha. La frase impersonal `Se ha realizado una transferencia a la cuenta...` no demuestra dirección ni propiedad; cinco avisos repiten comprobantes enviados existentes y dos quedan ambiguos.
-- Nauta Hogar y recarga Nauta separan importe del servicio e importe realmente pagado. Si falta `Monto Pagado`, el historial muestra el nominal identificado como tal, sin signo de débito ni descuento calculado. Sello del timbre separa `Valor del sello`, `Importe Pagado` y `Nro. Transaccion Banco`.
-- Movimientos incluye únicamente comprobantes tipados. Autenticaciones, saldos, fallos, resúmenes y avisos ambiguos permanecen en Mensajes. Duplicados con la misma proyección financiera, referencia y SIM dentro de cinco minutos se muestran una sola vez; ambos SMS siguen disponibles.
-- `Ya se encuentra autenticado` conduce a una consulta de saldo de solo lectura. Continuar exige acuse y SMS reciente del banco/SIM esperados. Fechas futuras o evidencia contemporánea de otro banco invalidan la prueba; ningún fallo reenvía dinero.
-
-### 5.3 Contraste ampliado de historial (2026-09-24)
-
-Lectura autorizada de 229 SMS existentes de `PAGOxMOVIL`, sin ejecutar solicitudes bancarias. Cuatro respuestas BANDEC de últimas operaciones contienen 33 filas en total y confirman la cabecera y las columnas que reconoce `BankHistory.kt:17-41`. La muestra no incluye respuestas de historial BPA/BANMET 48, últimos pagos BANDEC 63 ni MiTurno 105/106/107; sus formatos siguen sin demostrar. Los cuerpos, referencias, fechas, cuentas e identidades de esta lectura permanecen fuera del proyecto.
-
-El parser actual dejó 38 mensajes sin tipar. Una revisión agregada encontró 18 con indicios de rechazo/error, 12 sin marcador de resultado y ocho con lenguaje de operación completada. De estos últimos, siete son avisos impersonales de transferencia ya descritos en §5.2: cinco comparten referencia con comprobantes tipados y dos carecen de dirección demostrada. El octavo contiene datos de autenticación de una gestión bancaria, pero no es prueba de sesión autenticada según `SemanticAuthentication`; debe conservarse como mensaje sensible sin promoverlo a éxito de acceso. Entre los doce sin marcador hay avisos de pago o recarga con cuenta y transacción, pero la muestra no acredita banco, titularidad ni efecto financiero para proyectarlos como movimientos. El SMS original se conserva sin reinterpretar.
-
-## 6. Requisitos Android
-
-Cliente: **NeoTransfer**, paquete `dev.duardo.neotransfer`, Android nativo con Kotlin y Jetpack Compose. Mínimo decidido: **Android 15 (`minSdk 35`)**. El teléfono conectado el 2026-09-22 reporta Android 16 mediante `adb shell getprop ro.build.version.release`; esto comprueba la versión, no el funcionamiento de USSD o biometría de nuestra app.
-
-Permisos: `CALL_PHONE`, `READ_PHONE_STATE`, `RECEIVE_SMS`, `READ_SMS`, `CAMERA`. El selector de contactos usa `ACTION_PICK` y el acceso temporal a la fila elegida, sin solicitar lectura de toda la agenda. `sendUssdRequest` exige API 26; Keystore con autorización biométrica fuerte por uso exige API 30. Instalación fuera de Google Play, que restringe los permisos de SMS.
-
-La versión 0.2.0 guarda el PIN con AES-GCM en Android Keystore y pide biometría al abrir y al autorizar dinero. Las capturas están permitidas en saldos, movimientos y comprobantes; se protegen acceso/PIN, biometría y mensajes con credenciales, además de la miniatura de aplicaciones recientes. Los permisos necesarios se solicitan automáticamente en el inicio inicial; Android mantiene sus diálogos de consentimiento. La sesión bancaria local se invalida al pasar a segundo plano y ante evidencia nueva de otro banco en la misma SIM. El diario pendiente y la consulta de saldo se guardan antes del envío; una consulta de saldo nunca confirma una transferencia.
-
-Validación 0.2.0: 42 pruebas JVM (incluidos 1.400 vectores del codificador y 800 QR) y 30 casos ejecutados en Android con módem simulado sobre el APK release firmado. Cubren sesión ya autenticada, SIM/banco incorrectos, pérdida del broadcast, fechas futuras, reinicio, SMS adelantado/tardío/duplicado, valores ausentes, historial y lectura de QR. UI recorrida en el teléfono en ambos temas y con letra al 150 %. **No demuestran aceptación de los códigos por el banco ni autenticación biométrica física.** Esas pruebas requieren al titular en su teléfono; no se automatizan transferencias reales.
-
-Prueba real posterior: el titular abrió 0.2.0 con su huella, pulsó Consultar y confirmó «Actualizó el saldo». ADB comprobó un SMS de saldo reciente y la ventana normal sin `FLAG_SECURE`. Esta evidencia acredita la consulta probada, no el resto de operaciones monetarias.
-
-Build: `gradlew.bat :core:test :app:assembleRelease :app:lintRelease` con Java 21 y SDK 36. La firma privada está fuera del proyecto, en el perfil local `.neotransfer/signing.properties` y `release-signing.p12`; conservar ambos para futuras actualizaciones. El APK de revisión `preview` tiene otro paquete, datos ficticios y ningún permiso de llamadas o SMS; no se distribuye como app bancaria.
-
-### Cobertura de NeoTransfer 0.2.0
-
-El catálogo del apartado 3 describe el protocolo, no funciones terminadas. La app expone autenticación, saldo predeterminado, cierre de sesión bancaria, transferencia, recarga móvil, electricidad/teléfono, QR y apertura de enlaces de pago. La aceptación bancaria de cada operación necesita prueba real; no se deduce del build. HTTPS no se declara App Link verificado para un dominio ajeno.
-
-Siguen fuera de la interfaz: gestión completa de tarjetas y destinatarios, historial solicitado al banco (48/63), límites (61/62), consulta de estado del pago (89), QR de cobro propio, agua, gas, ONAT, créditos, giros y trámites de registro/tarjeta. Los contratos marcados sin verificar deben resolverse antes de habilitarlos. El historial SMS de servicios no significa que ya exista su formulario de pago.
-
-## 7. Catálogos y gestiones personales
-
-### Catálogos y gestiones activas completadas en core
-
-- `TerritoryCatalog` conserva16 provincias y168 municipios del catálogo DPA usado por los servicios personales. `ServiceCatalogData` conserva además sucursales, entidades y relaciones territoriales necesarias para los selectores.
-- BANDEC tiene cinco pestañas: `s684VE6Dm0.getItem(3) → Kgii4NH4Ce` expone servicios contratados; configuración está en `X7obECfkKf`. Agregar/consultar/eliminar abren `q9DNC6bnexm` y servicio **52** con tres parámetros: operación `1/3/2`, tipo `1` teléfono o `2` electricidad, factura o `000` al consultar. Pagar abre `g7yG4Frdxy`, operación `4`, y añade moneda `0` y origen. No anexar origen a las otras tres variantes.
-- Los tres bancos BPA/BANDEC/BANMET publican `showConsultaCombustible`: **36** operaciones por serie, **37** cupones por fecha `dd/MM/aaaa`, **38** estado por serie, **39** actualizar clave por serie. `UceJvUZMUO` exige serie de 13 dígitos. La operación 39 es de seguridad.
-- Consulta de multas **98**, ruta `showDialogMultasConsulta → ULFE6hmQU6`: tipo `1/2`, multa, CI o `0000`, licencia o `0000`. Su emisor parcial declara agencia `02` literalmente para todos los bancos; se conserva en el contrato.
-
-## Apéndice A: constantes de codificación (APK 1.260416)
+De TM 1.260416; las mismas están en `protocol/ParameterCodec.kt`.
 
 ```
 code_version = "372653282298718711"
 crude_code = "10000110101100011000100100100000110010001100000011100010100110010001010010100010111110001100010000011000010101100000000110001100101010100100011000000101110001100001100010001011110001100010100001000110000001101000101001001101001000001000010001100100011010010111001000110011110010001001100001000100000010000111001000110000101110100001111110011000001000110010000111110001100001111111000110011000101001100101000110001000111100011000101011101011111100111010100010111101000110000110011000110011100011000100111000101000011100010100111000011101100011000010101010000010101000100010100011001010101101000110001011101100011001001101101001111100011000000100010001100100010110101000110110000110000101000100011000000010100000010010001101011011100010110001110001001011100000110110001100001000011001011010100101100010001100100011110100011000011000110001100101010110101011110001100010000101000110001001101010010001001110001000010110110001100100111010001101101000110010010110001000110101000011110110000011101000110001001001100100010010000001111000110010011101110001100000001011000110000100011001111101000110000010010100011000110111100101100101011001100000010011000110000000001000100111100011000101101000100100000100010010101000100011100011000001101110001110011000101001"
 ```
 
-## Apéndice B: diccionario de texto (carácter → 2 dígitos), clase EKB7Plln4L
+## Apéndice C: diccionario de texto
 
-| Carácter | Código |
-|---|---|
-| `.` | 15 |
-| `-` | 85 |
-| `_` | 58 |
-| `0` | 37 |
-| `/` | 11 |
-| `,` | 29 |
-| `%` | 67 |
-| `&` | 20 |
-| `a` | 59 |
-| `b` | 00 |
-| `c` | 82 |
-| `1` | 89 |
-| `A` | 05 |
-| `B` | 54 |
-| `C` | 60 |
-| `á` | 88 |
-| `@` | 64 |
-| `d` | 51 |
-| `e` | 93 |
-| `h` | 50 |
-| `2` | 41 |
-| `D` | 57 |
-| `E` | 65 |
-| `F` | 61 |
-| `é` | 91 |
-| `#` | 08 |
-| `g` | 30 |
-| `f` | 46 |
-| `i` | 97 |
-| `3` | 80 |
-| `G` | 83 |
-| `H` | 13 |
-| `I` | 55 |
-| `í` | 53 |
-| `;` | 56 |
-| `j` | 76 |
-| `k` | 25 |
-| `l` | 42 |
-| `4` | 66 |
-| `J` | 73 |
-| `K` | 17 |
-| `L` | 38 |
-| `ó` | 32 |
-| `m` | 27 |
-| `n` | 92 |
-| `o` | 12 |
-| `ñ` | 03 |
-| `5` | 01 |
-| `M` | 06 |
-| `N` | 49 |
-| `O` | 18 |
-| `Ñ` | 33 |
-| `p` | 98 |
-| `q` | 23 |
-| `r` | 31 |
-| `6` | 94 |
-| `P` | 44 |
-| `Q` | 35 |
-| `R` | 34 |
-| `ú` | 87 |
-| `s` | 19 |
-| `t` | 45 |
-| `u` | 81 |
-| `7` | 62 |
-| `S` | 22 |
-| `T` | 40 |
-| `U` | 10 |
-| `v` | 96 |
-| `w` | 69 |
-| `x` | 75 |
-| `8` | 24 |
-| `V` | 14 |
-| `W` | 70 |
-| `X` | 74 |
-| `y` | 09 |
-| `z` | 90 |
-| ` ` | 78 |
-| `9` | 72 |
-| `Y` | 71 |
-| `Z` | 07 |
-| `Á` | 99 |
-| `É` | 86 |
-| `Í` | 47 |
-| `Ó` | 36 |
-| `Ú` | 39 |
-| `ü` | 77 |
-| `Ü` | 95 |
+Carácter → código de dos dígitos, de la clase `EKB7Plln4L`.
+
+| Car. | Código | Car. | Código | Car. | Código | Car. | Código |
+|---|---|---|---|---|---|---|---|
+| `.` | 15 | `-` | 85 | `_` | 58 | `0` | 37 |
+| `/` | 11 | `,` | 29 | `%` | 67 | `&` | 20 |
+| `a` | 59 | `b` | 00 | `c` | 82 | `1` | 89 |
+| `A` | 05 | `B` | 54 | `C` | 60 | `á` | 88 |
+| `@` | 64 | `d` | 51 | `e` | 93 | `h` | 50 |
+| `2` | 41 | `D` | 57 | `E` | 65 | `F` | 61 |
+| `é` | 91 | `#` | 08 | `g` | 30 | `f` | 46 |
+| `i` | 97 | `3` | 80 | `G` | 83 | `H` | 13 |
+| `I` | 55 | `í` | 53 | `;` | 56 | `j` | 76 |
+| `k` | 25 | `l` | 42 | `4` | 66 | `J` | 73 |
+| `K` | 17 | `L` | 38 | `ó` | 32 | `m` | 27 |
+| `n` | 92 | `o` | 12 | `ñ` | 03 | `5` | 01 |
+| `M` | 06 | `N` | 49 | `O` | 18 | `Ñ` | 33 |
+| `p` | 98 | `q` | 23 | `r` | 31 | `6` | 94 |
+| `P` | 44 | `Q` | 35 | `R` | 34 | `ú` | 87 |
+| `s` | 19 | `t` | 45 | `u` | 81 | `7` | 62 |
+| `S` | 22 | `T` | 40 | `U` | 10 | `v` | 96 |
+| `w` | 69 | `x` | 75 | `8` | 24 | `V` | 14 |
+| `W` | 70 | `X` | 74 | `y` | 09 | `z` | 90 |
+| espacio | 78 | `9` | 72 | `Y` | 71 | `Z` | 07 |
+| `Á` | 99 | `É` | 86 | `Í` | 47 | `Ó` | 36 |
+| `Ú` | 39 | `ü` | 77 | `Ü` | 95 |  |  |
