@@ -25,6 +25,8 @@ import dev.duardo.neotransfer.core.protocol.WaterBill
 import dev.duardo.neotransfer.core.protocol.WaterRegion
 import dev.duardo.neotransfer.designsystem.format.formatMoney
 import dev.duardo.neotransfer.designsystem.format.formatPhone
+import dev.duardo.neotransfer.scanner.ScanMode
+import dev.duardo.neotransfer.scanner.ScanResult
 import dev.duardo.neotransfer.ui.model.CubacelQuery
 import dev.duardo.neotransfer.ui.model.CubacelResultUi
 import dev.duardo.neotransfer.ui.model.CubacelUi
@@ -122,7 +124,7 @@ class ServiceDestination(
         val value = values[id].orEmpty()
         return when (id) {
             PHONE -> FieldUi(id, label, value, FieldInput.Phone,
-                error = if (value.length == 8 && !value.startsWith("5") && !value.startsWith("6")) "No es un móvil" else null)
+                error = if (value.length == 8 && !value.startsWith("5") && !value.startsWith("6")) "No es un móvil" else null, scannable = true)
             KEY -> FieldUi(id, label, value, FieldInput.Secret)
             USER -> FieldUi(id, label, value, FieldInput.Text, suffix = if ('@' in value) null else "@nauta.com.cu")
             else -> FieldUi(id, label, value, FieldInput.Number)
@@ -211,6 +213,10 @@ class ServiceDestination(
         }
         selected = null
     }
+
+    override fun scan(fieldId: String) = app.navigator.push(ScanDestination(app, ScanMode.NUMBERS) { result ->
+        if (result is ScanResult.PhoneNumber) field(fieldId, result.digits)
+    })
 
     override fun amount(value: String) { amount = value.filter { it.isDigit() || it == '.' || it == ',' }.take(12) }
     override fun source(index: Int) { source = app.book.value.wallet.filter { it.card.currency == "CUP" }.getOrNull(index)?.card?.id }

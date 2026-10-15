@@ -138,8 +138,6 @@ class Book(val domain: Domain, private val now: Instant = Instant.now()) {
     fun operationOf(itemId: String): CoreStatus? = operationsById[itemId]
         ?: domain.movements.firstOrNull { it.id == itemId }?.operationId?.let(operationsById::get)
 
-    fun movement(itemId: String): Movement? = domain.movements.firstOrNull { it.id == itemId }
-
     /** A card of someone else: its bank only when it shares the issuer prefix with one of the user's cards. */
     fun foreignCard(number: String, label: String? = null): ForeignCardUi =
         ForeignCardUi(number, number, ownCards.firstOrNull { it.number.take(6) == number.take(6) }?.bank?.name, label)

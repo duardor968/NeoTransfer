@@ -145,6 +145,8 @@ data class FieldUi(
     val input: FieldInput,
     val error: String? = null,
     val suffix: String? = null,
+    /** The camera can read it (a mobile number). */
+    val scannable: Boolean = false,
 )
 
 /**

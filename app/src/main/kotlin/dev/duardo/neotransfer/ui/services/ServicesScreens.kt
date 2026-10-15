@@ -50,6 +50,7 @@ import dev.duardo.neotransfer.designsystem.component.IconAvatar
 import dev.duardo.neotransfer.designsystem.component.MoneyText
 import dev.duardo.neotransfer.designsystem.component.NeoButton
 import dev.duardo.neotransfer.designsystem.component.NeoGroup
+import dev.duardo.neotransfer.designsystem.component.NeoIconButton
 import dev.duardo.neotransfer.designsystem.component.NeoRow
 import dev.duardo.neotransfer.designsystem.component.NeoSegmented
 import dev.duardo.neotransfer.designsystem.component.NeoTextField
@@ -185,6 +186,7 @@ interface ServiceFormActions {
     fun choice(index: Int)
     fun reference(id: String?)
     fun field(id: String, value: String)
+    fun scan(fieldId: String)
     fun amount(value: String)
     fun source(index: Int)
     fun saveReference(value: Boolean)
@@ -235,6 +237,7 @@ fun ServiceFormScreen(state: ServiceFormUi, actions: ServiceFormActions, modifie
                             },
                             error = field.error,
                             suffix = field.suffix,
+                            trailing = if (field.scannable) ({ NeoIconButton(Ds.drawable.ic_photo_camera, "Escanear móvil", { actions.scan(field.id) }) }) else null,
                         )
                     }
                     state.due?.let { due ->
