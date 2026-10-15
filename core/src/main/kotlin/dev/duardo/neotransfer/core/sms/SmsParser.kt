@@ -4,7 +4,6 @@ import dev.duardo.neotransfer.core.model.Bank
 import dev.duardo.neotransfer.core.model.Currency
 import dev.duardo.neotransfer.core.model.Money
 import dev.duardo.neotransfer.core.sms.SmsMessage.*
-import java.math.BigDecimal
 import java.text.Normalizer
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
