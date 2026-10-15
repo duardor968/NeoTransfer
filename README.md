@@ -2,56 +2,97 @@
   <img src="design/brand/approved/png/neotransfer-textured-256.png" width="112" alt="NeoTransfer">
 </p>
 
-# NeoTransfer
-
-NeoTransfer es una aplicación Android independiente para gestionar tarjetas, consultas, transferencias, pagos y servicios en Cuba. No está afiliada a ETECSA, Transfermóvil ni a las entidades financieras. Cada operación depende de los servicios disponibles para la línea y del registro de su titular.
-
-**Estado:** el repositorio tiene la [etiqueta v0.2.0](https://github.com/duardor968/NeoTransfer/tree/v0.2.0). Aún no hay publicaciones en GitHub Releases ni una versión pública 1.0.0. El trabajo hacia 1.0 está en este repositorio; el código en desarrollo no demuestra por sí solo que una operación haya sido aceptada por un banco o proveedor.
+<h1 align="center">NeoTransfer</h1>
 
 <p align="center">
-  <img src="docs/images/home.png" width="250" alt="Cartera con tarjeta, saldo y acciones">
-  <img src="docs/images/activity.png" width="250" alt="Actividad agrupada por fecha y filtros">
-  <img src="docs/images/contacts.png" width="250" alt="Contactos con tarjetas y teléfonos">
+  Tus tarjetas de BPA y BANDEC en el teléfono: saldo, transferencias, pagos con QR y servicios. Funciona sin datos móviles.
 </p>
 
-Capturas del desarrollo 1.0 con datos ficticios. Los diseños de tarjetas siguen en revisión.
+<p align="center">
+  <a href="https://github.com/duardor968/NeoTransfer/releases/latest"><b>Descargar el APK</b></a>
+</p>
 
-## Alcance
+<p align="center">
+  <img src="docs/images/home.png" width="250" alt="Inicio con la tarjeta y su saldo">
+  <img src="docs/images/transfer.png" width="250" alt="Transferencia">
+  <img src="docs/images/activity.png" width="250" alt="Actividad">
+</p>
 
-La base etiquetada v0.2.0 incluye acceso biométrico, consulta de saldo, formularios de transferencia y servicios, lectura QR e historial para BPA y BANDEC. La consulta de saldo se probó con una cuenta real; esa prueba no certifica las demás operaciones.
+NeoTransfer es una app Android independiente. No está afiliada a ETECSA, a Transfermóvil ni a los bancos.
 
-La línea de desarrollo amplía la cartera a BPA, BANDEC, BANMET, MiTransfer y Clásica personal; incorpora contactos, cámara, consultas y pagos, MiTurno, cupones de combustible y respaldo cifrado. Cada operación tiene sus propios campos, validaciones y límites de evidencia. Consulta el [resumen de cobertura](docs/cobertura.md) y el [protocolo](docs/protocolo.md) para conocer el alcance de cada contrato.
+## Qué hace
 
-Quedan fuera de esta etapa BFI, Bulevar, Clásica Empresarial, el perfil agente de MiTransfer, MiBoleto, las reservas OFA 8 y 9 y Votomóvil 215. El aporte OFA 94 y las operaciones personales restantes están dentro del alcance de desarrollo, sujetos a contratos y validación por operación.
+- **Cartera.** Tus tarjetas de BPA y BANDEC, en CUP o USD, tal como son, con el número completo y el saldo siempre a la vista.
+- **Saldo al día.** Se ajusta con cada comprobante del banco y con cada transferencia que recibes. Lo consultas cuando quieras.
+- **Transferir** a cualquier tarjeta: escribe el número, escanéalo o elige un contacto. Si ya enviaste lo mismo y no ha llegado la respuesta, te pregunta antes de repetirlo.
+- **Pagar con QR** de comercios y tiendas en línea, desde la cámara, una imagen de la galería o un enlace de pago.
+- **Cobrar.** El QR de tu tarjeta, que también lee Transfermóvil, para mostrarlo o compartirlo con el importe que pides.
+- **Servicios** desde tu tarjeta: electricidad, teléfono fijo, agua, Nauta Hogar (recarga y deuda), cuenta Nauta y recarga móvil. Con el saldo del teléfono: consultar saldo, datos, minutos, SMS y bonos, comprar paquetes y transferir saldo.
+- **Actividad.** Todos tus movimientos con su comprobante, también los que hagas desde Transfermóvil. Al instalar la app, la arma con los SMS del banco que ya tienes.
+- **Contactos.** Varias tarjetas y teléfonos por persona, importados del teléfono o de Transfermóvil. Cuando alguien te transfiere, la notificación dice quién y cuánto.
+- **Escáner.** Lee QR y números de tarjeta y de móvil, impresos o escritos a mano. Lo abres desde la app, con «Escanear» al mantener pulsado el icono o desde los Ajustes rápidos.
+- **Respaldo** cifrado con contraseña de tus tarjetas, contactos y servicios guardados, sin las claves del banco. También importa el respaldo `.trm` de Transfermóvil.
+
+## Cómo funciona
+
+NeoTransfer usa los mismos códigos USSD que Transfermóvil y lee los SMS que te manda el banco (remitente `PAGOxMOVIL`). Por eso funciona con 2G y sin datos móviles.
+
+Envías y sigues: la operación queda «Enviada» y la app queda libre para otra cosa. El resultado aparece cuando llega el SMS, aunque tarde unos minutos, y te avisa si no estás en la app. Si el banco pide autenticarte, NeoTransfer lo hace solo con tu clave guardada. El dinero nunca se reenvía solo.
+
+La 1.0 envía las operaciones con el mismo formato que Transfermóvil y pruebas automáticas lo comprueban, pero no todas se han hecho todavía con dinero real en los dos bancos. Si algo no sale como esperas, abre un [issue](https://github.com/duardor968/NeoTransfer/issues) sin datos personales.
 
 ## Requisitos
 
-- Android 15 o posterior y telefonía celular para operaciones USSD.
-- Biometría fuerte configurada para proteger los accesos bancarios.
-- Línea, registro y permisos compatibles con cada servicio. La cámara es opcional para las funciones que la usan.
+- Android 15 o más nuevo, de 64 bits.
+- Una línea cubana registrada en Transfermóvil con BPA o BANDEC. NeoTransfer usa esa misma clave; el registro no lo hace. Si el teléfono tiene dos SIM, usa la predeterminada para llamadas.
+- Una huella configurada en el teléfono.
+
+## Instalación
+
+NeoTransfer no está en Google Play: se instala desde GitHub.
+
+1. En el teléfono, abre la [última versión](https://github.com/duardor968/NeoTransfer/releases/latest) y descarga el archivo `.apk`.
+2. Ábrelo. Android te pedirá permiso para instalar apps desde el navegador o el administrador de archivos: concédelo y toca «Instalar».
+
+Las versiones nuevas se instalan igual, encima de la anterior, y conservan tus datos. Si tenías una versión anterior a la 1.0, la 1.0 empieza de cero: vuelve a guardar tus claves y tarjetas; la actividad se reconstruye sola.
 
 ## Primeros pasos
 
-Cuando exista una versión publicada, descarga su APK desde [GitHub Releases](https://github.com/duardor968/NeoTransfer/releases) e instálalo en un teléfono compatible. Por ahora, la línea 1.0 sigue en desarrollo.
+1. Al abrir la app, Android te pide todos los permisos de una vez: SMS y Teléfono, que son imprescindibles, y Cámara, Contactos y Notificaciones.
+2. Elige tu banco: BPA o BANDEC.
+3. Escribe la clave de autenticación del banco, la misma de Transfermóvil (4 dígitos en BPA, 5 en BANDEC), y confírmala con la huella.
+4. Añade tus tarjetas de ese banco: escribe el número o escanéalo, y elige CUP o USD. El titular y el vencimiento son opcionales.
+5. Toca «Consultar saldo» para ver el saldo por primera vez. La actividad ya aparece con los SMS del banco que tenías.
 
-1. Abre NeoTransfer, elige el banco o proveedor y la línea telefónica registrada. Guarda el acceso con tu clave y huella. Si aún no tienes registro, usa «Crear registro» para ese proveedor.
-2. En «Mi cartera», toca «Añadir tarjeta o cuenta», elige el acceso y guarda el producto con su nombre y moneda.
-3. Selecciona el producto de origen antes de consultar, pagar o transferir. Revisa los datos y el resultado de cada operación en la aplicación.
+El otro banco se añade en Ajustes › Bancos y claves. Desde entonces, la app pide la huella al abrirla y al volver después de un minuto fuera.
+
+## Privacidad
+
+- Sin servidores ni cuentas: NeoTransfer solo habla con tu banco, por USSD y SMS. Tarjetas, contactos y actividad se guardan en el teléfono y no entran en las copias de seguridad de Google.
+- La clave del banco se guarda cifrada y solo se abre con tu huella. No va en los respaldos.
+- La app lee los SMS del banco para saber resultados y saldos; no los muestra ni los manda a ningún sitio.
+- Sin analítica ni publicidad. El escáner usa ML Kit de Google dentro de la app: lee los códigos en el teléfono, pero esa biblioteca puede enviar a Google datos técnicos de su uso (modelo del teléfono, versión, rendimiento) cuando hay conexión.
+- En la pantalla de bloqueo, las notificaciones solo dicen «Transferencia recibida» u «Operación confirmada».
+
+## NeoTransfer+
+
+[NeoTransfer+](https://github.com/duardor968/NeoTransferPlus) es la app hermana para ENZONA: opera por Internet con tu cuenta ENZONA, en vez de por USSD. Son apps independientes; puedes tener las dos.
 
 ## Desarrollo
 
-El proyecto usa Kotlin y Jetpack Compose, con `core` para contratos y lógica y `app` para Android. Requiere JDK 21 y Android SDK 36. Las variantes `debug` y `preview` usan identificadores distintos del paquete principal; `preview` usa datos sintéticos. La firma de producción es local y no se necesita para estas variantes.
+Kotlin y Jetpack Compose, en cuatro módulos: `core` (protocolo y libro de operaciones, Kotlin puro), `designsystem`, `scanner` y `app`. Necesitas JDK 21 (sirve el de Android Studio) y Android SDK 36.
 
 ```powershell
-.\gradlew.bat :core:test :app:testDebugUnitTest :app:assembleDebug :app:assemblePreview :app:assembleDebugAndroidTest :app:lintDebug
+.\gradlew.bat :core:test :scanner:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug
 ```
 
-Este comando compila las pruebas instrumentadas, pero no las ejecuta en un dispositivo. [Desarrollo y pruebas](docs/desarrollo.md) explica cómo comprobarlas y qué evidencia falta antes de publicar. [Arquitectura](docs/arquitectura.md) describe las fronteras principales del código. [Protocolo](docs/protocolo.md) distingue los contratos extraídos de resultados bancarios comprobados.
-
-Consulta los [resultados de verificación](docs/verificacion.md) para distinguir las pruebas locales, las realizadas en el teléfono y la aceptación bancaria pendiente.
+- [Desarrollo y pruebas](docs/desarrollo.md): variantes, capturas, pruebas en el teléfono y firma.
+- [Arquitectura](docs/arquitectura.md): módulos, el flujo «enviar y seguir», datos y seguridad.
+- [Protocolo](docs/protocolo.md): formatos USSD y SMS, con su procedencia.
+- [Contribuir](CONTRIBUTING.md) · [Seguridad](SECURITY.md)
 
 ## Licencia
 
-El código se distribuye bajo [Apache 2.0](LICENSE). Las dependencias, fuentes y recursos de terceros conservan sus licencias y marcas respectivas.
+[Apache 2.0](LICENSE). Las fuentes Inter y Arimo (OFL) y los iconos Material Symbols (Apache 2.0) conservan sus licencias, incluidas en `app/src/main/assets/licenses/`.
 
-Los cuatro fondos de tarjetas (`card_bpa_red`, `card_bandec_red`, `card_banmet_red` y `card_clasica_personal`) son reconstrucciones gráficas generadas a partir de referencias, no archivos oficiales de las entidades. Sus marcas identifican los productos representados. Los fondos no contienen números, nombres ni vencimientos personales: la aplicación dibuja esos datos por separado. Su fidelidad visual sigue en revisión.
+Los fondos de las tarjetas BPA y BANDEC son reconstrucciones vectoriales hechas a partir de fotos de tarjetas, no archivos oficiales de los bancos; los logotipos y marcas que muestran pertenecen a sus dueños. No contienen datos personales: el número, el titular y el vencimiento los dibuja la app.

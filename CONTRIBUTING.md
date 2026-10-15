@@ -1,27 +1,29 @@
 # Contribuir a NeoTransfer
 
-Se aceptan correcciones de accesibilidad, pruebas, documentación y contratos respaldados por evidencia. Para una función nueva, abre un issue que describa el problema, el comportamiento esperado y la fuente del contrato. Consulta la [cobertura actual](docs/cobertura.md) y el [protocolo](docs/protocolo.md) antes de ampliar un servicio.
+Se aceptan correcciones, pruebas, accesibilidad, documentación y contratos respaldados por evidencia. Para una función nueva, abre antes un issue con el problema, el comportamiento esperado y la fuente del contrato. El alcance de la 1.0 es BPA, BANDEC y los servicios del [README](README.md#qué-hace); el [protocolo](docs/protocolo.md) dice de dónde sale cada formato.
 
 ## Preparar el proyecto
 
-Instala JDK 21 y Android SDK 36. Abre el repositorio en Android Studio o configura la ruta del SDK en `local.properties`. La firma de producción es privada y no se necesita para compilar `debug` o `preview`.
+Necesitas JDK 21 (sirve el de Android Studio) y Android SDK 36. Abre el repositorio en Android Studio o pon la ruta del SDK en `local.properties`. La firma de producción es privada y no hace falta para `debug` ni `preview`.
+
+Lo mismo que comprueba el CI:
 
 ```sh
 ./gradlew :core:test :app:testDebugUnitTest :app:assembleDebug :app:assemblePreview :app:assembleDebugAndroidTest :app:lintDebug
 ```
 
-En Windows, usa `gradlew.bat`. La tarea `assembleDebugAndroidTest` solo compila la suite instrumentada: para ejecutarla se necesita un dispositivo o emulador compatible. La [guía de desarrollo](docs/desarrollo.md) separa esas comprobaciones de las pruebas con proveedores.
+En Windows, `.\gradlew.bat`. Las pruebas del escáner, las capturas y las pruebas en el teléfono están en [desarrollo](docs/desarrollo.md#pruebas).
 
 ## Proponer un cambio
 
 - Mantén el cambio enfocado y conserva los avisos de licencia de terceros.
-- Acompaña un cambio de contrato con su fuente, casos positivos, rechazos y resultados inciertos. No conviertas un timeout ni la ausencia de comprobante en confirmación o reintento automático de dinero.
-- Usa fixtures inventados. No incluyas SMS reales, números personales, PIN, matrices, respaldos, APK ajenos ni material de firma.
-- Describe en el PR qué cambió, qué ejecutaste y qué quedó sin comprobar. Una prueba local de codificación no equivale a aceptación bancaria.
-- Si cambias una pantalla, revisa ambos temas, texto grande y el flujo en un dispositivo; comparte únicamente imágenes con datos ficticios.
+- Acompaña un cambio de contrato con su fuente y con casos de éxito, rechazo y sin respuesta. Ni un acuse USSD ni la falta de respuesta confirman una operación, y el dinero nunca se reenvía solo.
+- Usa datos inventados. No incluyas SMS reales, números personales, claves, respaldos, APK de terceros ni material de firma.
+- Describe en el PR qué cambió, qué ejecutaste y qué quedó sin comprobar. Una prueba local no equivale a que el banco acepte la operación.
+- Si cambias una pantalla, revisa las capturas en claro, oscuro y con letra al 150 % (`ScreenshotTest`) y el flujo en un teléfono; comparte solo imágenes con datos inventados.
 
-Los textos de producto y la documentación principal están en español. Las contribuciones al código se distribuyen bajo [Apache 2.0](LICENSE); cada dependencia conserva su licencia.
+Los textos de la app y la documentación están en español. Las contribuciones se distribuyen bajo [Apache 2.0](LICENSE); cada dependencia conserva su licencia.
 
-## Integrar desarrollo
+## Integrar en `main`
 
-El desarrollo se mantiene en `dev`. La integración en `main` se hace exclusivamente con `git merge --ff-only dev` desde `main`, seguido del push. El PR se usa para revisar el cambio; no se aplica squash, rebase ni se crea un commit de merge.
+El desarrollo va en `dev`. `main` solo avanza con `git merge --ff-only dev` desde `main`, seguido del push. El PR sirve para revisar; no se usa squash, rebase ni commit de merge.

@@ -1,11 +1,15 @@
 # Seguridad
 
-El repositorio tiene la etiqueta v0.2.0 y el desarrollo de 1.0 continúa. Aún no hay publicaciones en GitHub Releases. La presencia de un contrato o una prueba local no certifica una operación en la red bancaria.
+Se atienden reportes sobre la última versión publicada en [Releases](https://github.com/duardor968/NeoTransfer/releases) y sobre la rama `dev`.
 
 ## Reportar una vulnerabilidad
 
-Usa [Report a vulnerability](https://github.com/duardor968/NeoTransfer/security/advisories/new) para comunicar el hallazgo en privado. Si esa opción no está disponible, abre un issue sin detalles explotables para solicitar un canal privado. No publiques secretos ni datos bancarios en issues o PR.
+Usa [Report a vulnerability](https://github.com/duardor968/NeoTransfer/security/advisories/new) para comunicarla en privado. Si esa opción no está disponible, abre un issue sin detalles explotables y pide un canal privado. No publiques secretos ni datos bancarios en issues o PR.
 
-Indica versión o commit, pasos reproducibles con datos ficticios, comportamiento esperado e impacto observado. No envíes PIN, tarjetas completas reales, matrices, SMS personales, respaldos ni archivos de firma. La investigación y la respuesta se gestionarán por el canal privado; no se promete un plazo fijo.
+Indica la versión o el commit, los pasos para reproducirla con datos inventados, lo que esperabas y el impacto. No envíes claves, PIN, números de tarjeta reales, SMS personales, respaldos ni archivos de firma. La respuesta va por el canal privado; no hay un plazo fijo.
 
-Los futuros APK oficiales se identificarán en [Releases](https://github.com/duardor968/NeoTransfer/releases). Una publicación 1.0.0 deberá adjuntar la suma SHA-256. La firma de producción permanece fuera del repositorio y del CI público.
+## APK oficiales
+
+Los APK oficiales solo se publican en [Releases](https://github.com/duardor968/NeoTransfer/releases), siempre firmados con la misma clave, que vive fuera del repositorio y del CI. Cada publicación indica la suma SHA-256 del APK. Android no instala una actualización firmada con otra clave encima de la que tienes.
+
+Cómo protege la app las claves del banco, el bloqueo y las notificaciones: [arquitectura](docs/arquitectura.md#seguridad).
