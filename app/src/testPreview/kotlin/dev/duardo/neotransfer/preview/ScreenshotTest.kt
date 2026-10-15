@@ -8,6 +8,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.ParameterizedRobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
@@ -27,8 +28,8 @@ class ScreenshotTest(private val screen: String, private val mode: String) {
     @Test
     fun capture() {
         val appearance = if (mode == "dark") Appearance.Dark else Appearance.Light
-        val fontScale = if (mode == "font150") 1.5f else 1f
-        compose.setContent { PreviewHost(appearance, fontScale) { PreviewCatalog.content(screen) } }
+        if (mode == "font150") RuntimeEnvironment.setFontScale(1.5f)
+        compose.setContent { PreviewHost(appearance) { PreviewCatalog.content(screen) } }
         compose.waitForIdle()
         captureScreenRoboImage("build/screenshots/$screen--$mode.png")
     }

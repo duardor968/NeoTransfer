@@ -18,7 +18,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -33,6 +36,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -42,11 +46,15 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.duardo.neotransfer.designsystem.theme.Neo
 import dev.duardo.neotransfer.designsystem.theme.NeoRadius
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
@@ -64,8 +72,36 @@ fun QuickAction(@DrawableRes icon: Int, label: String, onClick: () -> Unit, modi
         Box(Modifier.size(56.dp).background(container, CircleShape), contentAlignment = Alignment.Center) {
             Icon(painterResource(icon), null, tint = content)
         }
-        Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+        FittedLabel(label)
     }
+}
+
+/**
+ * One line that steps its size down (to [minScale]) instead of cutting words when the user's font scale is large.
+ * For labels that must stay on one line: buttons, tabs, bar titles, placeholders.
+ */
+@Composable
+fun FittedText(
+    text: String,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+    color: Color = LocalContentColor.current,
+    textAlign: TextAlign? = null,
+    minScale: Float = 0.65f,
+) {
+    BasicText(
+        text,
+        modifier,
+        style = style.copy(color = color, textAlign = textAlign ?: style.textAlign),
+        overflow = TextOverflow.Ellipsis,
+        maxLines = 1,
+        autoSize = TextAutoSize.StepBased(minFontSize = style.fontSize * minScale, maxFontSize = style.fontSize, stepSize = 0.5.sp),
+    )
+}
+
+@Composable
+fun FittedLabel(text: String, modifier: Modifier = Modifier, color: Color = LocalContentColor.current) {
+    FittedText(text, MaterialTheme.typography.labelMedium, modifier, color, TextAlign.Center)
 }
 
 /** Modal sheet with the system's surface and handle. */
@@ -98,19 +134,33 @@ fun NeoBottomSheet(
 @Immutable
 data class SummaryLine(val label: String, val value: String, val detail: String? = null)
 
-/** Label / value pairs of a review or receipt; values align right and may carry a second line. */
+/**
+ * Label / value pairs of a review or receipt; values align right and may carry a second line. With large fonts the
+ * label goes above its value so numbers and IDs keep their full width.
+ */
 @Composable
 fun SummaryLines(lines: List<SummaryLine>, modifier: Modifier = Modifier) {
+    val stacked = LocalDensity.current.fontScale > 1.25f
     Column(modifier.fillMaxWidth().padding(vertical = NeoSpace.xs)) {
         lines.forEach { line ->
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = NeoSpace.l, vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(NeoSpace.l),
-            ) {
-                Text(line.label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
-                    Text(line.value, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium), textAlign = TextAlign.End)
-                    line.detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.End) }
+            val value = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium)
+            val muted = MaterialTheme.colorScheme.onSurfaceVariant
+            if (stacked) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = NeoSpace.l, vertical = 8.dp)) {
+                    Text(line.label, style = MaterialTheme.typography.bodySmall, color = muted)
+                    Text(line.value, style = value)
+                    line.detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = muted) }
+                }
+            } else {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = NeoSpace.l, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(NeoSpace.l),
+                ) {
+                    Text(line.label, style = MaterialTheme.typography.bodyMedium, color = muted)
+                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                        Text(line.value, style = value, textAlign = TextAlign.End)
+                        line.detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = muted, textAlign = TextAlign.End) }
+                    }
                 }
             }
         }

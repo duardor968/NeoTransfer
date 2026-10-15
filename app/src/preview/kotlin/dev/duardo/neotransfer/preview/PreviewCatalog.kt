@@ -214,7 +214,7 @@ object PreviewCatalog {
                 ServiceFormUi(
                     ServiceKind.Cubacel, "Transferir saldo", emptyList(), null,
                     listOf(
-                        FieldUi("to", "Móvil", "5441 7720", FieldInput.Phone),
+                        FieldUi("to", "Móvil", "54417720", FieldInput.Phone),
                         FieldUi("key", "Clave de transferencia", "1234", FieldInput.Secret),
                     ),
                     amount = "50", currency = "CUP", canContinue = true, action = "Transferir 50.00 CUP",

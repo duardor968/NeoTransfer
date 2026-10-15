@@ -5,6 +5,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,10 +20,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,16 +40,17 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.designsystem.R as Ds
-import dev.duardo.neotransfer.designsystem.component.AvatarBadge
+import dev.duardo.neotransfer.designsystem.component.FittedText
 import dev.duardo.neotransfer.designsystem.component.GroupDivider
+import dev.duardo.neotransfer.designsystem.component.dashedOutline
 import dev.duardo.neotransfer.designsystem.component.IconAvatar
 import dev.duardo.neotransfer.designsystem.component.MoneyText
 import dev.duardo.neotransfer.designsystem.component.NeoButton
 import dev.duardo.neotransfer.designsystem.component.NeoGroup
 import dev.duardo.neotransfer.designsystem.component.NeoRow
-import dev.duardo.neotransfer.designsystem.component.NeoSwitch
 import dev.duardo.neotransfer.designsystem.component.NeoTextField
 import dev.duardo.neotransfer.designsystem.component.NeoTopBar
 import dev.duardo.neotransfer.designsystem.component.SecureWindow
@@ -58,6 +60,7 @@ import dev.duardo.neotransfer.designsystem.format.formatMoney
 import dev.duardo.neotransfer.designsystem.theme.Neo
 import dev.duardo.neotransfer.designsystem.theme.NeoRadius
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
+import dev.duardo.neotransfer.ui.common.PhoneTransformation
 import dev.duardo.neotransfer.ui.common.SourceCardPicker
 import dev.duardo.neotransfer.ui.common.SwitchRow
 import dev.duardo.neotransfer.ui.common.icon
@@ -101,23 +104,20 @@ fun ServicesScreen(state: ServicesUi, actions: ServicesActions, modifier: Modifi
             item(key = utility.name) {
                 Column(Modifier.padding(top = NeoSpace.m)) {
                     SectionHeader(utility.label, Modifier.padding(horizontal = NeoSpace.gutter))
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = NeoSpace.gutter),
-                        horizontalArrangement = Arrangement.spacedBy(NeoSpace.s),
-                    ) {
-                        items(references, key = { it.id }) { reference ->
-                            ServiceTile(
-                                reference.name,
-                                listOfNotNull(reference.value, reference.lastPaid?.let { "Último ${formatMoney(it.amount, it.currency)}" }),
-                                { IconAvatar(reference.kind.icon, size = 40.dp) },
-                            ) { actions.pay(reference.id) }
-                        }
-                        items(kinds, key = { it.name }) { kind ->
-                            ServiceTile(
-                                kind.startLabel(single = kinds.size == 1),
-                                emptyList(),
-                                { IconAvatar(kind.icon, size = 40.dp, badge = AvatarBadge(Ds.drawable.ic_add, Neo.colors.accent, Neo.colors.onAccent)) },
-                            ) { actions.open(kind) }
+                    // Saved references first, then one dashed tile per way to start a new payment.
+                    val tiles: List<Any> = references + kinds
+                    Column(Modifier.padding(horizontal = NeoSpace.gutter), verticalArrangement = Arrangement.spacedBy(NeoSpace.s)) {
+                        tiles.chunked(2).forEach { pair ->
+                            Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(NeoSpace.s)) {
+                                pair.forEach { tile ->
+                                    val m = Modifier.weight(1f).fillMaxHeight()
+                                    when (tile) {
+                                        is SavedReferenceUi -> ServiceTile(tile, m) { actions.pay(tile.id) }
+                                        is ServiceKind -> NewPaymentTile(tile.startLabel(single = kinds.size == 1), tile.icon, m) { actions.open(tile) }
+                                    }
+                                }
+                                if (pair.size == 1) Spacer(Modifier.weight(1f))
+                            }
                         }
                     }
                 }
@@ -133,23 +133,46 @@ private fun ServiceKind.startLabel(single: Boolean): String = when {
     else -> label
 }
 
+/** Starts a payment: dashed like the wallet's add slot, the system's mark for "new". */
 @Composable
-private fun ServiceTile(title: String, details: List<String>, icon: @Composable () -> Unit, onClick: () -> Unit) {
+private fun NewPaymentTile(title: String, icon: Int, modifier: Modifier, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(NeoRadius.group)
     Column(
-        Modifier
-            .width(152.dp)
-            .heightIn(min = 124.dp)
+        modifier
+            .heightIn(min = 96.dp)
+            .clip(shape)
+            .dashedOutline(MaterialTheme.colorScheme.outline.copy(alpha = 0.6f), NeoRadius.group)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(NeoSpace.l),
+        verticalArrangement = Arrangement.spacedBy(NeoSpace.s),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(NeoSpace.xs)) {
+            Icon(painterResource(Ds.drawable.ic_add), null, Modifier.size(20.dp), tint = Neo.colors.accentInk)
+            Icon(painterResource(icon), null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Spacer(Modifier.weight(1f))
+        Text(title, style = MaterialTheme.typography.titleSmall)
+    }
+}
+
+@Composable
+private fun ServiceTile(reference: SavedReferenceUi, modifier: Modifier, onClick: () -> Unit) {
+    Column(
+        modifier
+            .heightIn(min = 96.dp)
             .clip(RoundedCornerShape(NeoRadius.group))
             .background(Neo.colors.group)
             .clickable(role = Role.Button, onClick = onClick)
             .padding(NeoSpace.l),
-        verticalArrangement = Arrangement.spacedBy(NeoSpace.xs),
+        verticalArrangement = Arrangement.spacedBy(NeoSpace.xxs),
     ) {
-        icon()
+        Icon(painterResource(reference.kind.icon), null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(NeoSpace.s))
-        Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 2)
-        details.forEach {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+        Text(reference.name, style = MaterialTheme.typography.titleSmall)
+        // References are identifiers: one line, never split mid-number.
+        FittedText(reference.value, MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, minScale = 0.5f)
+        reference.lastPaid?.let {
+            Text(formatMoney(it.amount, it.currency), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -167,6 +190,7 @@ interface ServiceFormActions {
 }
 
 /** One form for every service: saved references on top, the fields the bank asks for, the card and the total. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ServiceFormScreen(state: ServiceFormUi, actions: ServiceFormActions, modifier: Modifier = Modifier) {
     if (state.fields.any { it.input == FieldInput.Secret }) SecureWindow()
@@ -181,14 +205,12 @@ fun ServiceFormScreen(state: ServiceFormUi, actions: ServiceFormActions, modifie
                 verticalArrangement = Arrangement.spacedBy(NeoSpace.m),
             ) {
                 if (state.references.isNotEmpty()) {
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = NeoSpace.gutter),
+                    FlowRow(
+                        Modifier.padding(horizontal = NeoSpace.gutter),
                         horizontalArrangement = Arrangement.spacedBy(NeoSpace.s),
                     ) {
-                        item(key = "new") {
-                            ReferenceChip("Nueva", state.selectedReference == null) { actions.reference(null) }
-                        }
-                        items(state.references, key = { it.id }) { reference ->
+                        ReferenceChip("Nueva", state.selectedReference == null) { actions.reference(null) }
+                        state.references.forEach { reference ->
                             ReferenceChip(reference.name, state.selectedReference == reference.id) { actions.reference(reference.id) }
                         }
                     }
@@ -203,7 +225,11 @@ fun ServiceFormScreen(state: ServiceFormUi, actions: ServiceFormActions, modifie
                                 FieldInput.Secret -> KeyboardType.NumberPassword
                                 FieldInput.Text -> KeyboardType.Text
                             },
-                            visualTransformation = if (field.input == FieldInput.Secret) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
+                            visualTransformation = when (field.input) {
+                                FieldInput.Secret -> PasswordVisualTransformation()
+                                FieldInput.Phone -> PhoneTransformation
+                                else -> VisualTransformation.None
+                            },
                             error = field.error,
                             suffix = field.suffix,
                         )

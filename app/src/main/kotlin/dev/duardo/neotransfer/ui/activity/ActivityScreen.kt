@@ -65,15 +65,17 @@ interface ActivityActions {
 @Composable
 fun ActivityScreen(state: ActivityUi, actions: ActivityActions, modifier: Modifier = Modifier) {
     val labels = timeLabels
+    // Search and filters only where there is something to narrow down.
+    val searchable = state.content != ActivityContent.Empty && state.content != ActivityContent.NoAccess
     Column(modifier.fillMaxSize()) {
         Column(Modifier.statusBarsPadding().padding(horizontal = NeoSpace.gutter)) {
             Row(Modifier.fillMaxWidth().padding(top = NeoSpace.m, bottom = NeoSpace.s), verticalAlignment = Alignment.CenterVertically) {
                 Text("Actividad", Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium)
-                if (state.cards.size > 1) CardFilter(state, actions)
+                if (searchable && state.cards.size > 1) CardFilter(state, actions)
             }
-            NeoSearchField(state.query, actions::query, "Buscar nombre, tarjeta o importe")
+            if (searchable) NeoSearchField(state.query, actions::query, "Buscar nombre, tarjeta o importe")
         }
-        Filters(state, actions)
+        if (searchable) Filters(state, actions)
         when (val content = state.content) {
             ActivityContent.Loading -> LoadingList()
             ActivityContent.NoAccess -> EmptyState(

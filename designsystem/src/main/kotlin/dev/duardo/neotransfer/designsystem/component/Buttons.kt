@@ -15,13 +15,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.designsystem.theme.Neo
 
@@ -64,7 +62,7 @@ fun NeoButton(
             icon != null -> Icon(painterResource(icon), null, Modifier.size(20.dp))
         }
         if (loading || icon != null) Spacer(Modifier.width(10.dp))
-        Text(text, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        FittedText(text, MaterialTheme.typography.labelLarge)
     }
 }
 
@@ -72,7 +70,7 @@ fun NeoButton(
 @Composable
 fun NeoTextButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, color: Color = Neo.colors.accentInk, enabled: Boolean = true) {
     TextButton(onClick = onClick, modifier = modifier, enabled = enabled, colors = ButtonDefaults.textButtonColors(contentColor = color)) {
-        Text(text, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+        FittedText(text, MaterialTheme.typography.labelLarge)
     }
 }
 

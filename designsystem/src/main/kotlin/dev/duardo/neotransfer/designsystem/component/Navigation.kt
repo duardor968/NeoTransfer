@@ -6,11 +6,11 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -18,7 +18,6 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.designsystem.R
 import dev.duardo.neotransfer.designsystem.theme.Neo
@@ -36,25 +35,19 @@ fun NeoTopBar(
     large: Boolean = false,
     backIcon: Int = R.drawable.ic_arrow_back,
     backDescription: String = "Atrás",
-    navigation: (@Composable () -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
     containerColor: Color = MaterialTheme.colorScheme.background,
 ) {
     TopAppBar(
         title = {
-            if (title != null) Text(
+            if (title != null) FittedText(
                 title,
-                style = if (large) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.titleLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                if (large) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.titleLarge,
             )
         },
         modifier = modifier,
         navigationIcon = {
-            when {
-                navigation != null -> navigation()
-                onBack != null -> NeoIconButton(backIcon, backDescription, onBack)
-            }
+            if (onBack != null) NeoIconButton(backIcon, backDescription, onBack)
         },
         actions = actions,
         colors = TopAppBarDefaults.topAppBarColors(containerColor = containerColor, scrolledContainerColor = containerColor),
@@ -76,7 +69,7 @@ fun NeoNavigationBar(items: List<NeoNavItem>, selected: Int, onSelect: (Int) -> 
                     selected = isSelected,
                     onClick = { onSelect(index) },
                     icon = { Icon(painterResource(if (isSelected) item.selectedIcon else item.icon), null) },
-                    label = { Text(item.label, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    label = { FittedLabel(item.label, color = LocalContentColor.current) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = Neo.colors.onAccentContainer,
                         selectedTextColor = MaterialTheme.colorScheme.onSurface,

@@ -7,18 +7,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.Density
 import dev.duardo.neotransfer.designsystem.component.LocalCaptureAllowed
 import dev.duardo.neotransfer.ui.common.NeoTransferTheme
 import dev.duardo.neotransfer.ui.model.Appearance
 import java.lang.reflect.Proxy
 
-/** Theme, font scale and the preview clock around a screen. */
+/** Theme and the preview clock around a screen; secrets stay capturable for review. */
 @Composable
-fun PreviewHost(appearance: Appearance, fontScale: Float, content: @Composable () -> Unit) {
-    val density = LocalDensity.current
-    CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale), LocalCaptureAllowed provides true) {
+fun PreviewHost(appearance: Appearance, content: @Composable () -> Unit) {
+    CompositionLocalProvider(LocalCaptureAllowed provides true) {
         NeoTransferTheme(appearance, PreviewData.clock) {
             Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                 content()

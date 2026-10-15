@@ -115,7 +115,7 @@ private fun TicketHeader(operation: OperationUi) {
 @Composable
 private fun detailLines(operation: OperationUi): List<SummaryLine> {
     val labels = timeLabels
-    val own = operation.card?.let { "${it.bank.shortName} ${formatCardNumber(it.number)}" }
+
     val counterpart = when (val c = operation.counterpart) {
         is CounterpartUi.Card -> SummaryLine("Tarjeta destino", formatCardNumber(c.number), c.bankName)
         is CounterpartUi.Phone -> SummaryLine("Teléfono", formatPhone(c.number))
@@ -124,7 +124,7 @@ private fun detailLines(operation: OperationUi): List<SummaryLine> {
     }?.takeIf { it.value != operation.title }
     return listOfNotNull(
         counterpart,
-        own?.let { SummaryLine(if (operation.kind.incoming) "A tu tarjeta" else "Desde", it) },
+        operation.card?.let { SummaryLine(if (operation.kind.incoming) "A tu tarjeta" else "Desde", formatCardNumber(it.number), it.bank.shortName) },
         SummaryLine("Fecha", labels.stamp(operation.at)),
         operation.transactionId?.let { SummaryLine("Transacción", it) },
         operation.balanceAfter?.let { SummaryLine("Saldo restante", formatMoney(it.amount, it.currency)) },

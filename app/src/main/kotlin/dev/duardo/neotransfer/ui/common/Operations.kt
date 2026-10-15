@@ -154,10 +154,10 @@ fun OperationRow(operation: OperationUi, timeLabel: String, onClick: () -> Unit,
                 text,
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (status.tone == StatusTone.Danger || status.tone == StatusTone.Warning) status.tone.content() else MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
             )
         },
         trailing = { OperationAmount(operation) },
         onClick = onClick,
+        trailingBelowWhenLarge = true,
     )
 }

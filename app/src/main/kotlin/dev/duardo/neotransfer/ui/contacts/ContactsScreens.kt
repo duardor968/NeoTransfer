@@ -2,6 +2,8 @@ package dev.duardo.neotransfer.ui.contacts
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -49,7 +51,8 @@ import dev.duardo.neotransfer.ui.model.ContactEditUi
 import dev.duardo.neotransfer.ui.model.ContactUi
 import dev.duardo.neotransfer.ui.model.ContactsContent
 import dev.duardo.neotransfer.ui.model.ContactsUi
-import dev.duardo.neotransfer.ui.onboarding.CardNumberTransformation
+import dev.duardo.neotransfer.ui.common.CardNumberTransformation
+import dev.duardo.neotransfer.ui.common.PhoneTransformation
 
 // ---- List ---------------------------------------------------------------------------------------------------
 
@@ -219,6 +222,7 @@ interface ContactEditActions {
     fun addPhone()
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ContactEditScreen(state: ContactEditUi, actions: ContactEditActions, modifier: Modifier = Modifier) {
     Scaffold(
@@ -246,12 +250,12 @@ fun ContactEditScreen(state: ContactEditUi, actions: ContactEditActions, modifie
                     card.number, { actions.cardNumber(card.id, it) }, "Número de tarjeta",
                     keyboardType = KeyboardType.Number, error = card.error,
                     visualTransformation = CardNumberTransformation,
-                    suffix = card.bankName,
+                    supporting = card.bankName,
                     trailing = { NeoIconButton(Ds.drawable.ic_close, "Quitar tarjeta", { actions.removeCard(card.id) }) },
                 )
                 NeoTextField(card.label, { actions.cardLabel(card.id, it) }, "Nombre de la tarjeta (opcional)")
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(NeoSpace.s)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(NeoSpace.s), verticalArrangement = Arrangement.spacedBy(NeoSpace.s)) {
                 NeoButton("Añadir tarjeta", actions::addCard, style = NeoButtonStyle.Tonal, icon = Ds.drawable.ic_add, fill = false)
                 NeoButton("Escanear", actions::scanCard, style = NeoButtonStyle.Tonal, icon = Ds.drawable.ic_photo_camera, fill = false)
             }
@@ -260,6 +264,7 @@ fun ContactEditScreen(state: ContactEditUi, actions: ContactEditActions, modifie
                 NeoTextField(
                     phone.number, { actions.phone(phone.id, it) }, "Teléfono",
                     keyboardType = KeyboardType.Phone, error = phone.error,
+                    visualTransformation = PhoneTransformation,
                     trailing = { NeoIconButton(Ds.drawable.ic_close, "Quitar teléfono", { actions.removePhone(phone.id) }) },
                 )
             }

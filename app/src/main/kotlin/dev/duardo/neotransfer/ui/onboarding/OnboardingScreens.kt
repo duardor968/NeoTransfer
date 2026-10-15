@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,12 +21,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.OffsetMapping
-import androidx.compose.ui.text.input.TransformedText
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.designsystem.R as Ds
 import dev.duardo.neotransfer.designsystem.component.GroupDivider
@@ -52,6 +47,8 @@ import dev.duardo.neotransfer.designsystem.theme.NeoSpace
 import dev.duardo.neotransfer.ui.common.BankCard
 import dev.duardo.neotransfer.ui.common.BankCardArt
 import dev.duardo.neotransfer.ui.common.BankCardThumb
+import dev.duardo.neotransfer.ui.common.CardNumberTransformation
+import dev.duardo.neotransfer.ui.common.ExpiryTransformation
 import dev.duardo.neotransfer.ui.lock.BrandBackdrop
 import dev.duardo.neotransfer.ui.lock.BrandBlock
 import dev.duardo.neotransfer.ui.model.Bank
@@ -298,31 +295,5 @@ internal fun BottomAction(content: @Composable ColumnScope.() -> Unit) {
         Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = NeoSpace.gutter, vertical = NeoSpace.l),
         verticalArrangement = Arrangement.spacedBy(NeoSpace.s),
         content = content,
-    )
-}
-
-/** `9204123456789012` shown as `9204 1234 5678 9012` while the field keeps digits only. */
-val CardNumberTransformation = VisualTransformation { text ->
-    val digits = text.text
-    val out = formatCardNumber(digits)
-    TransformedText(
-        AnnotatedString(out),
-        object : OffsetMapping {
-            override fun originalToTransformed(offset: Int) = offset + (offset - 1).coerceAtLeast(0) / 4
-            override fun transformedToOriginal(offset: Int) = (offset - offset / 5).coerceIn(0, digits.length)
-        },
-    )
-}
-
-/** `0135` shown as `01/35`. */
-val ExpiryTransformation = VisualTransformation { text ->
-    val d = text.text
-    val out = if (d.length > 2) d.substring(0, 2) + "/" + d.substring(2) else d
-    TransformedText(
-        AnnotatedString(out),
-        object : OffsetMapping {
-            override fun originalToTransformed(offset: Int) = if (offset > 2) offset + 1 else offset
-            override fun transformedToOriginal(offset: Int) = (if (offset > 2) offset - 1 else offset).coerceIn(0, d.length)
-        },
     )
 }

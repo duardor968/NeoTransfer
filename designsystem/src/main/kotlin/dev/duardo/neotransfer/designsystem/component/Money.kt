@@ -16,7 +16,7 @@ import dev.duardo.neotransfer.designsystem.format.DecimalSeparator
 import dev.duardo.neotransfer.designsystem.format.formatAmount
 import java.math.BigDecimal
 
-enum class MoneySign { None, Plus, Minus }
+enum class MoneySign { None, Plus }
 
 /**
  * An amount with its currency. In [hero] mode cents and currency step down in size, the way a balance is read:
@@ -33,7 +33,7 @@ fun MoneyText(
     hero: Boolean = false,
 ) {
     val formatted = formatAmount(amount)
-    val prefix = when (sign) { MoneySign.Plus -> "+"; MoneySign.Minus -> "−"; MoneySign.None -> "" }
+    val prefix = if (sign == MoneySign.Plus) "+" else ""
     val muted = color.copy(alpha = if (hero) 0.55f else 0.7f)
     val text = buildAnnotatedString {
         if (hero) {

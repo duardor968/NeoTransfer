@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -102,12 +102,14 @@ fun AmountDisplay(input: String, currency: String, modifier: Modifier = Modifier
         withStyle(SpanStyle(color = if (empty) MaterialTheme.colorScheme.outline else color)) { append(shown) }
         withStyle(SpanStyle(fontSize = 0.45.em, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant)) { append(" $currency") }
     }
+    // Already display size: sized in dp so large font scales leave the keypad its room.
+    val (size, line, min) = with(LocalDensity.current) { Triple(64.dp.toSp(), 72.dp.toSp(), 28.dp.toSp()) }
     BasicText(
         text,
         modifier.fillMaxWidth().semantics { contentDescription = "$shown $currency" },
-        style = MaterialTheme.typography.displayLarge.copy(fontSize = 64.sp, lineHeight = 72.sp, textAlign = TextAlign.Center, color = color),
+        style = MaterialTheme.typography.displayLarge.copy(fontSize = size, lineHeight = line, textAlign = TextAlign.Center, color = color),
         maxLines = 1,
-        autoSize = TextAutoSize.StepBased(minFontSize = 28.sp, maxFontSize = 64.sp, stepSize = 2.sp),
+        autoSize = TextAutoSize.StepBased(minFontSize = min, maxFontSize = size, stepSize = 1.sp),
     )
 }
 

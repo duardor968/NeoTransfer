@@ -8,6 +8,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -28,18 +29,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.designsystem.R
+import dev.duardo.neotransfer.designsystem.component.dashedOutline
 import dev.duardo.neotransfer.designsystem.theme.NeoMotion
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
 import kotlin.math.absoluteValue
@@ -97,30 +93,23 @@ fun PagerDots(count: Int, current: Int, modifier: Modifier = Modifier) {
 /** Last slot of the wallet: same footprint as a card, dashed, to add another one. */
 @Composable
 fun AddCardSlot(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val outline = MaterialTheme.colorScheme.outline
-    Column(
-        modifier
-            .fillMaxWidth()
-            .aspectRatio(CardAspectRatio)
-            .clip(CardShape)
-            .drawBehind {
-                val stroke = 1.5.dp.toPx()
-                drawRoundRect(
-                    outline.copy(alpha = 0.6f),
-                    topLeft = Offset(stroke / 2, stroke / 2),
-                    size = Size(size.width - stroke, size.height - stroke),
-                    cornerRadius = CornerRadius(size.height * 0.06f - stroke / 2),
-                    style = Stroke(width = stroke, pathEffect = PathEffect.dashPathEffect(floatArrayOf(10.dp.toPx(), 7.dp.toPx()))),
-                )
+    val outline = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val radius = maxWidth / CardAspectRatio * 0.06f
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(CardAspectRatio)
+                .clip(CardShape)
+                .dashedOutline(outline, radius)
+                .clickable(role = Role.Button, onClick = onClick),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(Modifier.size(48.dp).border(1.5.dp, outline, CircleShape), contentAlignment = Alignment.Center) {
+                Icon(painterResource(R.drawable.ic_add), null, tint = MaterialTheme.colorScheme.onSurface)
             }
-            .clickable(role = Role.Button, onClick = onClick),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(
-            Modifier.size(48.dp).border(1.5.dp, outline.copy(alpha = 0.6f), CircleShape),
-            contentAlignment = Alignment.Center,
-        ) { Icon(painterResource(R.drawable.ic_add), null, tint = MaterialTheme.colorScheme.onSurface) }
-        Text(label, Modifier.padding(top = NeoSpace.m), style = MaterialTheme.typography.titleSmall)
+            Text(label, Modifier.padding(top = NeoSpace.m), style = MaterialTheme.typography.titleSmall)
+        }
     }
 }

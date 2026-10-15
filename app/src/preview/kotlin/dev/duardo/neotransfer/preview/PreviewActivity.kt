@@ -1,5 +1,6 @@
 package dev.duardo.neotransfer.preview
 
+import android.content.res.Configuration
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -31,12 +32,18 @@ class PreviewActivity : ComponentActivity() {
             "DARK" -> Appearance.Dark
             else -> Appearance.System
         }
-        val fontScale = intent.getFloatExtra("fontScale", resources.configuration.fontScale)
+        // Scale the activity's own configuration so sheets and dialogs (separate windows) follow it too.
+        val fontScale = intent.getFloatExtra("fontScale", 0f)
+        if (fontScale > 0f) {
+            val configuration = Configuration(resources.configuration).apply { this.fontScale = fontScale }
+            @Suppress("DEPRECATION")
+            resources.updateConfiguration(configuration, resources.displayMetrics)
+        }
         val initial = intent.getStringExtra("screen")
         setContent {
             var screen by rememberSaveable { mutableStateOf(initial) }
             val shown = screen
-            PreviewHost(appearance, fontScale) {
+            PreviewHost(appearance) {
                 if (shown != null && shown in PreviewCatalog.ids) {
                     BackHandler(enabled = initial == null) { screen = null }
                     PreviewCatalog.content(shown)

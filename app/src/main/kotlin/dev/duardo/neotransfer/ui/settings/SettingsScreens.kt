@@ -33,7 +33,6 @@ import dev.duardo.neotransfer.designsystem.component.EmptyState
 import dev.duardo.neotransfer.designsystem.component.GroupDivider
 import dev.duardo.neotransfer.designsystem.component.IconAvatar
 import dev.duardo.neotransfer.designsystem.component.NeoButton
-import dev.duardo.neotransfer.designsystem.component.NeoButtonStyle
 import dev.duardo.neotransfer.designsystem.component.NeoConfirmDialog
 import dev.duardo.neotransfer.designsystem.component.NeoGroup
 import dev.duardo.neotransfer.designsystem.component.NeoIconButton
@@ -256,8 +255,8 @@ fun BackupScreen(state: BackupUi, actions: BackupActions, modifier: Modifier = M
             is BackupUi.Import -> Column(verticalArrangement = Arrangement.spacedBy(NeoSpace.m)) {
                 NeoGroup {
                     NeoRow(
-                        state.fileName ?: "Elegir archivo",
-                        supporting = if (state.fileName != null) "Cambiar archivo" else null,
+                        if (state.fileName != null) "Archivo" else "Elegir archivo",
+                        supporting = state.fileName,
                         leading = { IconAvatar(Ds.drawable.ic_file_open) },
                         trailing = { Chevron() },
                         onClick = actions::pickFile,
@@ -316,7 +315,7 @@ fun TransfermovilImportScreen(state: TransfermovilImportUi, actions: Transfermov
             )
             is TransfermovilImportUi.Preview -> {
                 NeoGroup {
-                    NeoRow(state.fileName, supporting = "Cambiar archivo", leading = { IconAvatar(Ds.drawable.ic_file_open) }, trailing = { Chevron() }, onClick = actions::pickFile)
+                    NeoRow("Archivo", supporting = state.fileName, leading = { IconAvatar(Ds.drawable.ic_file_open) }, trailing = { Chevron() }, onClick = actions::pickFile)
                 }
                 SectionHeader("Se importará", Modifier.padding(top = NeoSpace.l))
                 Counts(state.contacts, state.cards, state.references)

@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -66,7 +65,7 @@ fun NeoSearchField(
             ) {
                 Icon(painterResource(R.drawable.ic_search), null, Modifier.size(20.dp), tint = scheme.onSurfaceVariant)
                 Box(Modifier.weight(1f)) {
-                    if (query.isEmpty()) Text(placeholder, style = MaterialTheme.typography.bodyLarge, color = scheme.onSurfaceVariant, maxLines = 1)
+                    if (query.isEmpty()) FittedText(placeholder, MaterialTheme.typography.bodyLarge, color = scheme.onSurfaceVariant)
                     field()
                 }
                 when {
@@ -79,7 +78,7 @@ fun NeoSearchField(
     )
 }
 
-/** Labeled field. [error] replaces nothing: it appears only when the value cannot be used. */
+/** Labeled field. [error] shows only when the value cannot be used and takes the place of [supporting]. */
 @Composable
 fun NeoTextField(
     value: String,
@@ -89,12 +88,10 @@ fun NeoTextField(
     keyboardType: KeyboardType = KeyboardType.Text,
     imeAction: ImeAction = ImeAction.Next,
     error: String? = null,
-    prefix: String? = null,
+    supporting: String? = null,
     suffix: String? = null,
     trailing: (@Composable () -> Unit)? = null,
     visualTransformation: VisualTransformation = VisualTransformation.None,
-    readOnly: Boolean = false,
-    onImeAction: (() -> Unit)? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
     OutlinedTextField(
@@ -103,15 +100,12 @@ fun NeoTextField(
         modifier = modifier.fillMaxWidth(),
         label = { Text(label, maxLines = 1) },
         isError = error != null,
-        supportingText = error?.let { { Text(it) } },
-        prefix = prefix?.let { { Text(it) } },
+        supportingText = (error ?: supporting)?.let { { Text(it) } },
         suffix = suffix?.let { { Text(it, color = scheme.onSurfaceVariant) } },
         trailingIcon = trailing,
         singleLine = true,
-        readOnly = readOnly,
         visualTransformation = visualTransformation,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction),
-        keyboardActions = KeyboardActions(onAny = { onImeAction?.invoke() }),
         textStyle = MaterialTheme.typography.bodyLarge,
         shape = RoundedCornerShape(NeoRadius.field),
         colors = OutlinedTextFieldDefaults.colors(

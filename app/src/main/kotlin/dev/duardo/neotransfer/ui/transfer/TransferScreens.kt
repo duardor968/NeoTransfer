@@ -44,28 +44,24 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.designsystem.R as Ds
 import dev.duardo.neotransfer.designsystem.component.AmountDisplay
 import dev.duardo.neotransfer.designsystem.component.GroupDivider
 import dev.duardo.neotransfer.designsystem.component.IconAvatar
 import dev.duardo.neotransfer.designsystem.component.KeypadKey
-import dev.duardo.neotransfer.designsystem.component.MoneyText
 import dev.duardo.neotransfer.designsystem.component.NameAvatar
 import dev.duardo.neotransfer.designsystem.component.NeoBottomSheet
 import dev.duardo.neotransfer.designsystem.component.NeoButton
 import dev.duardo.neotransfer.designsystem.component.NeoButtonStyle
 import dev.duardo.neotransfer.designsystem.component.NeoConfirmDialog
-import dev.duardo.neotransfer.designsystem.component.NeoGroup
 import dev.duardo.neotransfer.designsystem.component.NeoKeypad
 import dev.duardo.neotransfer.designsystem.component.NeoRow
 import dev.duardo.neotransfer.designsystem.component.NeoSearchField
-import dev.duardo.neotransfer.designsystem.component.NeoSwitch
 import dev.duardo.neotransfer.designsystem.component.NeoTopBar
+import dev.duardo.neotransfer.designsystem.component.ReviewLayout
 import dev.duardo.neotransfer.designsystem.component.SectionHeader
 import dev.duardo.neotransfer.designsystem.component.SummaryLine
-import dev.duardo.neotransfer.designsystem.component.SummaryLines
 import dev.duardo.neotransfer.designsystem.component.groupItem
 import dev.duardo.neotransfer.designsystem.format.formatAmount
 import dev.duardo.neotransfer.designsystem.format.formatCardNumber
@@ -78,7 +74,6 @@ import dev.duardo.neotransfer.ui.common.SwitchRow
 import dev.duardo.neotransfer.designsystem.component.NeoIconButton
 import dev.duardo.neotransfer.ui.common.label
 import dev.duardo.neotransfer.ui.common.timeLabels
-import dev.duardo.neotransfer.ui.model.BalanceUi
 import dev.duardo.neotransfer.ui.model.ContactUi
 import dev.duardo.neotransfer.ui.model.DuplicateUi
 import dev.duardo.neotransfer.ui.model.OperationStatus
@@ -137,7 +132,10 @@ fun RecipientScreen(state: RecipientPickUi, actions: RecipientActions, modifier:
             val typed = state.typed
             val count = state.contacts.size + if (typed != null) 1 else 0
             if (count > 0) {
-                item(key = "contacts-title") { SectionHeader("Contactos", Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.l)) }
+                item(key = "contacts-title") {
+                    if (state.contacts.isNotEmpty()) SectionHeader("Contactos", Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.l))
+                    else Spacer(Modifier.height(NeoSpace.l))
+                }
                 if (typed != null) item(key = "typed") {
                     Column(Modifier.padding(horizontal = NeoSpace.gutter).groupItem(0, count, Neo.colors.group)) {
                         NeoRow(
@@ -180,8 +178,6 @@ private fun RecentChip(recipient: RecipientUi, onClick: () -> Unit) {
         Text(
             name?.substringBefore(' ') ?: formatCardNumber(recipient.card.number),
             style = MaterialTheme.typography.labelMedium,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
         )
     }
@@ -215,7 +211,6 @@ interface AmountActions {
 /** How much and from which card. Keypad on screen; the balance warns, it does not block: the bank decides. */
 @Composable
 fun TransferAmountScreen(state: TransferAmountUi, actions: AmountActions, modifier: Modifier = Modifier) {
-    val source = state.sources[state.source]
     Scaffold(
         modifier,
         containerColor = MaterialTheme.colorScheme.background,
@@ -226,19 +221,19 @@ fun TransferAmountScreen(state: TransferAmountUi, actions: AmountActions, modifi
                 Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = NeoSpace.gutter),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                RecipientHeader(state.recipient)
-                Spacer(Modifier.height(NeoSpace.xxl))
+                val name = state.recipient.name
+                NeoRow(
+                    name ?: formatCardNumber(state.recipient.card.number),
+                    supporting = listOfNotNull(if (name != null) formatCardNumber(state.recipient.card.number) else null, state.recipient.card.bankName).joinToString(" · "),
+                    leading = { if (name != null) NameAvatar(name) else IconAvatar(Ds.drawable.ic_credit_card) },
+                )
+                Spacer(Modifier.height(NeoSpace.xl))
                 AmountDisplay(state.input, state.currency)
-                val balance = source.balance
-                Text(
-                    when {
-                        state.overBalance -> "Más que el saldo de esta tarjeta"
-                        balance is BalanceUi.Known -> "Saldo ${formatMoney(balance.money.amount, balance.money.currency)}"
-                        else -> ""
-                    },
+                if (state.overBalance) Text(
+                    "Más que el saldo de esta tarjeta",
                     Modifier.padding(top = NeoSpace.xs),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = if (state.overBalance) Neo.colors.warning else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = Neo.colors.warning,
                 )
                 Spacer(Modifier.height(NeoSpace.xl))
                 SourceCardPicker(state.sources, state.source, actions::source)
@@ -250,19 +245,15 @@ fun TransferAmountScreen(state: TransferAmountUi, actions: AmountActions, modifi
 }
 
 @Composable
-private fun RecipientHeader(recipient: RecipientUi, showNumber: Boolean = true) {
+private fun RecipientHeader(recipient: RecipientUi) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(NeoSpace.xs)) {
         val name = recipient.name
         if (name != null) NameAvatar(name, size = 56.dp) else IconAvatar(Ds.drawable.ic_credit_card, size = 56.dp)
         Spacer(Modifier.height(NeoSpace.xs))
         Text(name ?: formatCardNumber(recipient.card.number), style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
-        val detail = listOfNotNull(if (name != null && showNumber) formatCardNumber(recipient.card.number) else null, recipient.card.bankName.takeIf { name == null || showNumber })
-        if (detail.isNotEmpty()) Text(
-            detail.joinToString(" · "),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-        )
+        if (name == null) recipient.card.bankName?.let {
+            Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+        }
     }
 }
 
@@ -284,35 +275,23 @@ fun TransferReviewScreen(state: TransferReviewUi, actions: ReviewActions, modifi
         containerColor = MaterialTheme.colorScheme.background,
         topBar = { NeoTopBar("Revisar", onBack = actions::back) },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            Column(
-                Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = NeoSpace.gutter),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Spacer(Modifier.height(NeoSpace.l))
-                RecipientHeader(state.recipient, showNumber = false)
-                Spacer(Modifier.height(NeoSpace.xl))
-                MoneyText(state.amount.amount, state.amount.currency, style = MaterialTheme.typography.displayMedium, hero = true)
-                Spacer(Modifier.height(NeoSpace.xxl))
-                NeoGroup {
-                    SummaryLines(
-                        listOfNotNull(
-                            state.recipient.name?.let { SummaryLine("Tarjeta destino", formatCardNumber(state.recipient.card.number), state.recipient.card.bankName) },
-                            SummaryLine("Desde", formatCardNumber(state.source.number), state.source.bank.shortName),
-                        ),
-                    )
-                }
+        ReviewLayout(
+            amount = state.amount.amount,
+            currency = state.amount.currency,
+            lines = listOfNotNull(
+                state.recipient.name?.let { SummaryLine("Tarjeta destino", formatCardNumber(state.recipient.card.number), state.recipient.card.bankName) },
+                SummaryLine("Desde", formatCardNumber(state.source.number), state.source.bank.shortName),
+            ),
+            confirm = "Transferir ${formatMoney(state.amount.amount, state.amount.currency)}",
+            onConfirm = actions::confirm,
+            modifier = Modifier.padding(padding),
+            confirmIcon = Ds.drawable.ic_fingerprint,
+            confirming = state.sending,
+            lead = { RecipientHeader(state.recipient) },
+            extra = {
                 state.saveContact?.let { save -> SwitchRow("Guardar como contacto", save, actions::saveContact, Modifier.padding(top = NeoSpace.s)) }
-            }
-            BottomAction {
-                NeoButton(
-                    "Transferir ${formatMoney(state.amount.amount, state.amount.currency)}",
-                    actions::confirm,
-                    icon = Ds.drawable.ic_fingerprint,
-                    loading = state.sending,
-                )
-            }
-        }
+            },
+        )
     }
     state.duplicate?.let { DuplicateDialog(it, actions::confirmDuplicate, actions::cancelDuplicate) }
 }
@@ -372,7 +351,7 @@ fun TransferResultScreen(state: TransferResultUi, actions: ResultActions, modifi
                     )
                 }
                 val note = when (operation.status) {
-                    OperationStatus.Sent -> "Te avisamos cuando el banco responda."
+                    OperationStatus.Sent -> null
                     OperationStatus.Rejected -> operation.reason
                     else -> operation.transactionId?.let { "Transacción $it" }
                 }

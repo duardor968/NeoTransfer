@@ -19,10 +19,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.designsystem.theme.Neo
@@ -67,7 +67,8 @@ fun Modifier.groupItem(index: Int, count: Int, color: Color): Modifier =
 
 /**
  * The single row of the system: leading slot (44 dp), title, optional supporting line, trailing slot.
- * Used by every list so spacing, ripple and alignment are identical everywhere.
+ * Used by every list so spacing, ripple and alignment are identical everywhere. With [trailingBelowWhenLarge],
+ * large font scales move the trailing element under the text so names keep the width.
  */
 @Composable
 fun NeoRow(
@@ -79,7 +80,9 @@ fun NeoRow(
     onClick: (() -> Unit)? = null,
     titleColor: Color = Color.Unspecified,
     supportingContent: (@Composable () -> Unit)? = null,
+    trailingBelowWhenLarge: Boolean = false,
 ) {
+    val trailingBelow = trailingBelowWhenLarge && LocalDensity.current.fontScale >= 1.3f
     Row(
         modifier
             .fillMaxWidth()
@@ -91,19 +94,14 @@ fun NeoRow(
     ) {
         leading?.invoke()
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium), color = titleColor, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(title, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium), color = titleColor)
             when {
                 supportingContent != null -> supportingContent()
-                supporting != null -> Text(
-                    supporting,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                supporting != null -> Text(supporting, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            if (trailingBelow) trailing?.invoke()
         }
-        trailing?.invoke()
+        if (!trailingBelow) trailing?.invoke()
     }
 }
 
@@ -118,8 +116,6 @@ fun SectionHeader(title: String, modifier: Modifier = Modifier, action: String? 
             title,
             Modifier.weight(1f).semantics { heading() },
             style = MaterialTheme.typography.titleMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
         )
         if (action != null && onAction != null) NeoTextButton(action, onAction)
     }

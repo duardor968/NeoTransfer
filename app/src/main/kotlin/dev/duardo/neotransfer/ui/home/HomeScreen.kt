@@ -237,11 +237,11 @@ private fun InProgressRow(operation: OperationUi, ago: (java.time.Instant) -> St
                 text,
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (notExecuted) Neo.colors.warning else MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
             )
         },
         trailing = { if (notExecuted) NeoTextButton("Reintentar", retry) else OperationAmount(operation) },
         onClick = open,
+        trailingBelowWhenLarge = true,
     )
 }
 

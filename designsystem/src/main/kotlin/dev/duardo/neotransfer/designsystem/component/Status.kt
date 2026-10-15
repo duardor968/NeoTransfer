@@ -59,9 +59,3 @@ fun StatusChip(label: String, tone: StatusTone, @DrawableRes icon: Int?, modifie
         Text(label, style = MaterialTheme.typography.labelMedium, color = content, maxLines = 1)
     }
 }
-
-/** Status as a short line of text, for dense rows: "Enviada · 14:32". */
-@Composable
-fun StatusText(text: String, tone: StatusTone, modifier: Modifier = Modifier) {
-    Text(text, modifier, style = MaterialTheme.typography.bodyMedium, color = if (tone == StatusTone.Neutral) MaterialTheme.colorScheme.onSurfaceVariant else tone.content(), maxLines = 1)
-}
