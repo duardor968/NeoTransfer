@@ -23,14 +23,7 @@ enum class Currency(val wireCode: String) { CUP("1"), USD("3") }
 class Money(@Serializable(BigDecimalText::class) val amount: BigDecimal, val currency: Currency = Currency.CUP) {
     init { require(amount.signum() >= 0 && amount.scale() <= 2) { "Importe no válido" } }
 
-    operator fun plus(other: Money): Money = same(other).let { Money(amount + other.amount, currency) }
-
-    /** Signed difference; a negative result is reported as null rather than a negative balance. */
-    fun minusOrNull(other: Money): Money? = same(other).let { (amount - other.amount).takeIf { it.signum() >= 0 }?.let { Money(it, currency) } }
-
     fun plain(): String = amount.toPlainString()
-
-    private fun same(other: Money) = require(other.currency == currency) { "Monedas distintas" }
 
     override fun equals(other: Any?): Boolean = other is Money && other.currency == currency && other.amount.compareTo(amount) == 0
     override fun hashCode(): Int = 31 * amount.stripTrailingZeros().hashCode() + currency.hashCode()
