@@ -111,7 +111,7 @@ La 1.0 empieza limpia: al primer arranque, `LegacyData` borra lo que dejaron las
 - **Clave de transferencia Cubacel**: se escribe en cada envío y solo vive en memoria hasta que sale.
 - **Capturas**: permitidas, salvo en las pantallas con secretos (clave del banco, respaldo y clave de transferencia), que usan `FLAG_SECURE`.
 - **Notificaciones**: privadas, con una versión pública genérica para la pantalla de bloqueo («Transferencia recibida», «Operación confirmada»).
-- **Permisos**: `CALL_PHONE`, `READ_SMS`, `RECEIVE_SMS`, `USE_BIOMETRIC`, `CAMERA`, `READ_CONTACTS` y `POST_NOTIFICATIONS`. El código de NeoTransfer no hace llamadas de red. ML Kit, la biblioteca del escáner, declara `INTERNET` y puede enviar a Google datos técnicos de su uso ([divulgación de Google](https://developers.google.com/ml-kit/android-data-disclosure)).
+- **Permisos**: `CALL_PHONE`, `READ_SMS`, `RECEIVE_SMS`, `USE_BIOMETRIC`, `CAMERA`, `READ_CONTACTS` y `POST_NOTIFICATIONS`. Sin `INTERNET`: el manifiesto retira el que declara ML Kit para sus informes de uso (`app/src/main/AndroidManifest.xml`), así que nada sale del teléfono.
 
 ## Escáner
 

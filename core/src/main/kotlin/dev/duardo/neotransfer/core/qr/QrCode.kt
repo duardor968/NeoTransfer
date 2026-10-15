@@ -56,8 +56,11 @@ object QrCode {
         return mapOf("id_transaccion" to parts[0], "importe" to amount, "moneda" to parts[2], "numero_proveedor" to parts[3], "version" to parts[4])
     }
 
+    /** Transfermóvil reads with org.json, so generators that emit single-quoted or unquoted JSON work there too. */
+    private val lenient = Json { isLenient = true }
+
     private fun json(value: String): Map<String, String> {
-        val root = try { Json.parseToJsonElement(value) } catch (_: Exception) { throw IllegalArgumentException("Código de pago no compatible") }
+        val root = try { lenient.parseToJsonElement(doubleQuoted(value)) } catch (_: Exception) { throw IllegalArgumentException("Código de pago no compatible") }
         require(root is JsonObject) { "Código de pago no compatible" }
         return root.mapNotNull { (key, element) ->
             when (element) {
@@ -66,6 +69,26 @@ object QrCode {
                 else -> throw IllegalArgumentException("Código de pago no compatible")
             }
         }.toMap()
+    }
+
+    /** Rewrites single-quoted strings as double-quoted ones; double-quoted strings pass through untouched. */
+    private fun doubleQuoted(value: String): String = buildString(value.length) {
+        var quote: Char? = null
+        var i = 0
+        while (i < value.length) {
+            val c = value[i]
+            when {
+                quote == null && (c == '"' || c == '\'') -> { quote = c; append('"') }
+                quote != null && c == '\\' && i + 1 < value.length -> {
+                    val next = value[++i]
+                    if (quote == '\'' && next == '\'') append('\'') else append(c).append(next)
+                }
+                quote != null && c == quote -> { quote = null; append('"') }
+                quote == '\'' && c == '"' -> append("\\\"")
+                else -> append(c)
+            }
+            i++
+        }
     }
 
     private fun link(value: String): Map<String, String> {

@@ -45,6 +45,18 @@ class QrCodeTest {
         assertEquals(19, payment("""{"id_transaccion":"T","importe":"1","moneda":"CUP","numero_proveedor":"1","titulo":"${"x".repeat(45)}"}""").title!!.length)
     }
 
+    @Test fun `single-quoted and unquoted JSON from public generators reads like in Transfermovil`() {
+        val single = payment("""{'id_transaccion':'TEST125','importe':'15.00','moneda':'CUP','numero_proveedor':'456','descripcion':'Pan de flauta','titulo':'Pan "de flauta"'}""")
+        assertEquals("TEST125", single.transactionId)
+        assertEquals("15.00", single.amount.plain())
+        assertEquals("456", single.provider)
+        assertEquals("Pan de flauta", single.description)
+        assertEquals("Pan \"de flauta\"", single.title)
+        assertEquals("O'Reilly", payment("""{'id_transaccion':'T','importe':'1','moneda':'CUP','numero_proveedor':'1','titulo':'O\'Reilly'}""").title)
+        assertEquals("456", payment("""{id_transaccion:TEST126,importe:3,moneda:CUP,numero_proveedor:456}""").provider)
+        assertEquals("Cafe 'La Esquina'", payment("""{"id_transaccion":"T","importe":"1","moneda":"CUP","numero_proveedor":"1","titulo":"Cafe 'La Esquina'"}""").title)
+    }
+
     @Test fun `extra gives the QR id and validity, and an unreadable extra is ignored like Transfermovil`() {
         val ok = payment("""{"id_transaccion":"TEST1","importe":"5","moneda":"CUP","numero_proveedor":"77","extra":"${extra("77", "TEST1", "pista,.*,0110202631122026,QR001")}"}""")
         assertEquals("QR001", ok.qrId)

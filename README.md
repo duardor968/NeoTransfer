@@ -71,7 +71,7 @@ El otro banco se añade en Ajustes › Bancos y claves. Desde entonces, la app p
 - Sin servidores ni cuentas: NeoTransfer solo habla con tu banco, por USSD y SMS. Tarjetas, contactos y actividad se guardan en el teléfono y no entran en las copias de seguridad de Google.
 - La clave del banco se guarda cifrada y solo se abre con tu huella. No va en los respaldos.
 - La app lee los SMS del banco para saber resultados y saldos; no los muestra ni los manda a ningún sitio.
-- Sin analítica ni publicidad. El escáner usa ML Kit de Google dentro de la app: lee los códigos en el teléfono, pero esa biblioteca puede enviar a Google datos técnicos de su uso (modelo del teléfono, versión, rendimiento) cuando hay conexión.
+- Sin analítica ni publicidad, y sin permiso de Internet: la app no puede conectarse a nada. El escáner lee los códigos en el propio teléfono.
 - En la pantalla de bloqueo, las notificaciones solo dicen «Transferencia recibida» u «Operación confirmada».
 
 ## NeoTransfer+
