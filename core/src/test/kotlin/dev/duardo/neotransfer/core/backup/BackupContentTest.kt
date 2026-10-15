@@ -18,8 +18,8 @@ import kotlin.test.assertTrue
 class BackupContentTest {
     private val password = "contraseña de prueba".toCharArray()
     private val content = BackupContent(
-        cards = listOf(OwnCard("9204000000000001", Bank.BANDEC, alias = "Nómina"), OwnCard("9205000000000001", Bank.BPA)),
-        contacts = listOf(Contact("c1", "Ana Prueba", listOf("50000001"), listOf("9204990000000007"))),
+        cards = listOf(BackupCard(OwnCard("9204000000000001", Bank.BANDEC, alias = "Nómina"), "ANA PRUEBA", "03/29"), BackupCard(OwnCard("9205000000000001", Bank.BPA))),
+        contacts = listOf(Contact("c1", "Ana Prueba", listOf("50000001"), listOf("9204990000000007"), mapOf("9204990000000007" to "Salario"))),
         services = listOf(ServiceReference(ServiceKind.NAUTA_HOME, "usuario@nauta.com.cu", "Casa"), ServiceReference(ServiceKind.ELECTRICITY, "0000000000001")),
     )
 
@@ -61,7 +61,7 @@ class BackupContentTest {
             {"tabla":"Pin","dataJSON":[{"id":1,"pin":"000000000001"}]}
         ]}"""
         val result = TrmImporter.import(trm(json))
-        assertEquals(listOf(OwnCard("9204000000000001", Bank.BANDEC, Currency.CUP, "Principal")), result.content.cards)
+        assertEquals(listOf(BackupCard(OwnCard("9204000000000001", Bank.BANDEC, Currency.CUP, "Principal"))), result.content.cards)
         assertEquals(listOf(Contact("trm-7", "Ana Prueba", listOf("50000001", "50000002"), listOf("9205990000000007"))), result.content.contacts)
         assertEquals(listOf(ServiceKind.NAUTA, ServiceKind.ELECTRICITY, ServiceKind.PHONE), result.content.services.map { it.kind })
         assertEquals("usuario@nauta.co.cu", result.content.services.first().value)

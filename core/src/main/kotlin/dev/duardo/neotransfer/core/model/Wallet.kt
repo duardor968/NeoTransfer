@@ -8,9 +8,15 @@ data class OwnCard(val number: String, val bank: Bank, val currency: Currency = 
     init { require(Cards.isNumber(number)) { "La tarjeta debe tener 16 dígitos" } }
 }
 
-/** A person in the user's own directory. A contact may have several phones and cards. */
+/** A person in the user's own directory: several phones and cards; [labels] names some cards ("Salario"), by number. */
 @Serializable
-data class Contact(val id: String, val name: String, val phones: List<String> = emptyList(), val cards: List<String> = emptyList())
+data class Contact(
+    val id: String,
+    val name: String,
+    val phones: List<String> = emptyList(),
+    val cards: List<String> = emptyList(),
+    val labels: Map<String, String> = emptyMap(),
+)
 
 enum class ServiceKind { ELECTRICITY, PHONE, WATER_HAVANA, WATER_OTHER, WATER_VARADERO, NAUTA, NAUTA_HOME, MOBILE }
 

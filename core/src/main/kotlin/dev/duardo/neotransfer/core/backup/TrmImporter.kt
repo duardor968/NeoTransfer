@@ -153,7 +153,7 @@ object TrmImporter {
         rows.filter { it.table !in setOf("MCBank", "Client", "TeflMovil", "TelfFijo", "CuentaBanco", "Nauta", "Factura") }.forEach { count(skipped, it) }
 
         val content = BackupContent(
-            cards = cards.values.toList(),
+            cards = cards.values.map { BackupCard(it) },
             contacts = contacts.map { (id, draft) -> Contact("trm-$id", draft.name, draft.phones.distinct(), draft.cards.distinct()) },
             services = services.distinctBy { it.kind to it.value },
         )
