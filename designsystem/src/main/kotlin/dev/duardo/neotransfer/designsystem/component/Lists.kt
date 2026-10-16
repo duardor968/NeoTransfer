@@ -125,6 +125,9 @@ fun NeoRow(
  */
 fun Modifier.flushEnd(): Modifier = offset(x = 12.dp)
 
+/** The same for text buttons that open a block: their glyph lines up with the fields above them. */
+fun Modifier.flushStart(): Modifier = offset(x = (-12).dp)
+
 /** Title above a group, aligned with the group's edge; optional action on the right. */
 @Composable
 fun SectionHeader(title: String, modifier: Modifier = Modifier, action: String? = null, onAction: (() -> Unit)? = null) {

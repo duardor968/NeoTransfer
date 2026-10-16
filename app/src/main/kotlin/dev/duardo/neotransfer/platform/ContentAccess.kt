@@ -1,13 +1,11 @@
 package dev.duardo.neotransfer.platform
 
-import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
 import android.net.Uri
-import android.provider.ContactsContract
+import android.provider.ContactsContract.CommonDataKinds.Phone
 import dev.duardo.neotransfer.engine.Documents
+import dev.duardo.neotransfer.engine.PhoneBook
 import dev.duardo.neotransfer.engine.PhoneContact
-import dev.duardo.neotransfer.engine.PhoneContacts
 
 /** Documents from `ACTION_CREATE_DOCUMENT` / `ACTION_OPEN_DOCUMENT`; call off the main thread. */
 class ContentDocuments(context: Context) : Documents {
@@ -29,32 +27,24 @@ class ContentDocuments(context: Context) : Documents {
     }
 }
 
-/** Reads only the contact the user picked (`ACTION_PICK` on Contacts); needs READ_CONTACTS for its phones. */
-class AndroidPhoneContacts(context: Context) : PhoneContacts {
-    private val context = context.applicationContext
+/** The address book through the phones table: one query, grouped by contact; call off the main thread. */
+class AndroidPhoneBook(context: Context) : PhoneBook {
+    private val resolver = context.applicationContext.contentResolver
 
-    override fun read(uri: String): PhoneContact {
-        check(context.checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED) {
-            "Permite leer contactos para importar los móviles del contacto"
+    override fun read(): List<PhoneContact> {
+        val rows = resolver.query(Phone.CONTENT_URI, arrayOf(Phone.LOOKUP_KEY, Phone.CONTACT_ID, Phone.DISPLAY_NAME_PRIMARY, Phone.NUMBER),
+            null, null, null) ?: return emptyList()
+        val people = linkedMapOf<String, PhoneContact>()
+        rows.use { cursor ->
+            while (cursor.moveToNext()) {
+                val phone = cursor.getString(3)?.let(::cubanMobile) ?: continue
+                val name = cursor.getString(2)?.trim()?.takeIf(String::isNotEmpty) ?: continue
+                val key = cursor.getString(0)?.takeIf(String::isNotBlank) ?: "id-${cursor.getLong(1)}"
+                val known = people[key]
+                people[key] = if (known == null) PhoneContact(key, name, listOf(phone)) else known.copy(phones = (known.phones + phone).distinct())
+            }
         }
-        val contactUri = Uri.parse(uri)
-        require(contactUri.scheme == "content" && contactUri.authority == ContactsContract.AUTHORITY) { "El contacto elegido no es válido" }
-        val resolver = context.contentResolver
-        val (id, key, name) = checkNotNull(resolver.query(contactUri, arrayOf(
-            ContactsContract.Contacts._ID, ContactsContract.Contacts.LOOKUP_KEY, ContactsContract.Contacts.DISPLAY_NAME_PRIMARY,
-        ), null, null, null)) { "No se pudo leer el contacto" }.use { cursor ->
-            require(cursor.moveToFirst()) { "El contacto ya no está disponible" }
-            Triple(cursor.getLong(0), cursor.getString(1), cursor.getString(2)?.trim().orEmpty())
-        }
-        require(name.isNotEmpty()) { "El contacto no tiene nombre" }
-        val numbers = checkNotNull(resolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-            arrayOf(ContactsContract.CommonDataKinds.Phone.NUMBER), "${ContactsContract.CommonDataKinds.Phone.CONTACT_ID} = ?",
-            arrayOf(id.toString()), null)) { "No se pudieron leer los móviles del contacto" }.use { cursor ->
-            buildList { while (cursor.moveToNext()) cursor.getString(0)?.let(::add) }
-        }
-        val phones = numbers.mapNotNull(::cubanMobile).distinct()
-        require(phones.isNotEmpty()) { "El contacto no tiene móviles cubanos" }
-        return PhoneContact(key?.takeIf(String::isNotBlank) ?: "id-$id", name, phones)
+        return people.values.toList()
     }
 }
 

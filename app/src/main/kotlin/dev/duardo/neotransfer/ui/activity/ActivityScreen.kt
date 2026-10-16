@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,12 +37,15 @@ import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.designsystem.R as Ds
 import dev.duardo.neotransfer.designsystem.component.EmptyState
 import dev.duardo.neotransfer.designsystem.component.GroupDivider
+import dev.duardo.neotransfer.designsystem.component.NeoBottomSheet
 import dev.duardo.neotransfer.designsystem.component.NeoChip
+import dev.duardo.neotransfer.designsystem.component.NeoRow
 import dev.duardo.neotransfer.designsystem.component.NeoSearchField
 import dev.duardo.neotransfer.designsystem.component.TabHeader
 import dev.duardo.neotransfer.designsystem.component.groupItem
 import dev.duardo.neotransfer.designsystem.component.rim
 import dev.duardo.neotransfer.designsystem.component.skeleton
+import dev.duardo.neotransfer.designsystem.component.spinning
 import dev.duardo.neotransfer.designsystem.format.formatCardNumber
 import dev.duardo.neotransfer.designsystem.theme.Neo
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
@@ -58,7 +62,10 @@ interface ActivityActions {
     fun card(cardId: String?)
     fun open(id: String)
     fun allowSms()
+    /** Last operations of the filtered card, the only one, or one to pick. */
     fun checkWithBank()
+    fun checkCard(cardId: String)
+    fun closeCheck()
 }
 
 /** Every movement, newest first, grouped by day; search and filters stay on top. */
@@ -69,7 +76,12 @@ fun ActivityScreen(state: ActivityUi, actions: ActivityActions, modifier: Modifi
     val searchable = state.content != ActivityContent.Empty && state.content != ActivityContent.NoAccess
     Column(modifier.fillMaxSize()) {
         TabHeader("Actividad") {
-            if (searchable && state.cards.size > 1) CardFilter(state, actions, Modifier.padding(end = NeoSpace.l))
+            if (state.cards.isNotEmpty() && state.content != ActivityContent.NoAccess) {
+                IconButton(actions::checkWithBank, enabled = !state.checking) {
+                    Icon(painterResource(Ds.drawable.ic_refresh), "Últimas operaciones", Modifier.spinning(state.checking))
+                }
+            }
+            if (searchable && state.cards.size > 1) CardFilter(state, actions, Modifier.padding(start = NeoSpace.xs, end = NeoSpace.l))
         }
         if (searchable) NeoSearchField(state.query, actions::query, "Buscar nombre, tarjeta o importe", Modifier.padding(horizontal = NeoSpace.gutter))
         if (searchable) Filters(state, actions)
@@ -108,6 +120,23 @@ fun ActivityScreen(state: ActivityUi, actions: ActivityActions, modifier: Modifi
                         }
                     }
                 }
+            }
+        }
+    }
+    if (state.pickCard) NeoBottomSheet(actions::closeCheck, title = "Últimas operaciones") {
+        Text(
+            "La respuesta llega por SMS.",
+            Modifier.padding(horizontal = NeoSpace.gutter, vertical = NeoSpace.s),
+            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Column(Modifier.padding(horizontal = NeoSpace.xs)) {
+            state.cards.forEach { card ->
+                NeoRow(
+                    formatCardNumber(card.number),
+                    supporting = card.bank.shortName,
+                    leading = { BankCardThumb(card.bank) },
+                    onClick = { actions.checkCard(card.id) },
+                )
             }
         }
     }

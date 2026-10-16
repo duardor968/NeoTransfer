@@ -342,11 +342,27 @@ class AppControllerTest {
             mapOf("9204-9900-0000-0007" to " Salario  BANDEC ", "9204990000000099" to "Sin tarjeta")))
         assertEquals(Contact(juan.id, "Juan", listOf("50000009"), listOf(friend), mapOf(friend to "Salario BANDEC")), juan)
         rig.controller.saveService(ServiceReference(ServiceKind.ELECTRICITY, "12345678901", "Casa"))
-        rig.phoneContacts["content://contacts/1"] = PhoneContact("lookup-1", "Ana", listOf("52222222"))
-        val ana = rig.controller.importPhoneContact("content://contacts/1")
-        rig.phoneContacts["content://contacts/1"] = PhoneContact("lookup-1", "Ana B.", listOf("53333333"))
-        assertEquals(listOf("52222222", "53333333"), rig.controller.importPhoneContact("content://contacts/1").phones)
-        assertEquals(2, rig.controller.contacts.value.size)
+        // The address book is the source: Ana is listed without importing anything; her card is the app's.
+        rig.addressBook = listOf(PhoneContact("lookup-1", "Ana", listOf("52222222")))
+        rig.controller.onPermissionsChanged()
+        runCurrent()
+        assertEquals(listOf("Ana", "Juan"), rig.controller.contacts.value.map { it.name })
+        assertEquals(setOf("phone:lookup-1"), rig.controller.addressBook.value)
+        val ana = rig.controller.saveContact(Contact("phone:lookup-1", "Ana", listOf("52222222"), listOf("9204990000000015")))
+        // Renamed in the phone: the app follows, and her card stays.
+        rig.addressBook = listOf(PhoneContact("lookup-1", "Ana B.", listOf("52222222")))
+        rig.controller.onForeground()
+        runCurrent()
+        assertEquals(Contact(ana.id, "Ana B.", listOf("52222222"), listOf("9204990000000015")), rig.controller.contacts.value.first { it.id == ana.id })
+        // Without the permission only what the app keeps remains.
+        rig.addressBook = null
+        rig.controller.onPermissionsChanged()
+        runCurrent()
+        assertNull(rig.controller.addressBook.value)
+        assertEquals(listOf("Ana", "Juan"), rig.controller.contacts.value.map { it.name })
+        rig.addressBook = listOf(PhoneContact("lookup-1", "Ana B.", listOf("52222222")))
+        rig.controller.onPermissionsChanged()
+        runCurrent()
 
         rig.controller.exportBackup("content://backup", "clave segura".toCharArray())
         assertEquals(now(), rig.controller.lastBackup.value)
@@ -359,7 +375,7 @@ class AppControllerTest {
         assertEquals(mapOf(friend to "Salario BANDEC"), restored.controller.contacts.value.first { it.id == juan.id }.labels)
         assertEquals(ImportSummary(0, 0, 0), restored.controller.importBackup("content://backup", "clave segura".toCharArray()))
         rig.controller.deleteContact(juan.id)
-        assertEquals(listOf("Ana"), rig.controller.contacts.value.map { it.name })
+        assertEquals(listOf("Ana B."), rig.controller.contacts.value.map { it.name })
     }
 
     /** Local only: `NEOTRANSFER_TRM` = a real Transfermóvil backup. Prints counts, never contents. */

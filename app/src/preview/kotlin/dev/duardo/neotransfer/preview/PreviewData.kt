@@ -6,6 +6,7 @@ import dev.duardo.neotransfer.ui.model.CardUi
 import dev.duardo.neotransfer.ui.model.ContactUi
 import dev.duardo.neotransfer.ui.model.CounterpartUi
 import dev.duardo.neotransfer.ui.model.ForeignCardUi
+import dev.duardo.neotransfer.ui.model.LastMovementUi
 import dev.duardo.neotransfer.ui.model.Money
 import dev.duardo.neotransfer.ui.model.OperationKind
 import dev.duardo.neotransfer.ui.model.OperationStatus
@@ -30,6 +31,7 @@ object PreviewData {
     val clock: Clock = Clock.fixed(now.toInstant(), zone)
 
     fun ago(minutes: Long): Instant = now.minusMinutes(minutes).toInstant()
+    private const val DAY = 24 * 60L
     fun at(daysAgo: Long, hour: Int, minute: Int): Instant = now.minusDays(daysAgo).withHour(hour).withMinute(minute).toInstant()
 
     fun cup(value: String) = Money(BigDecimal(value), "CUP")
@@ -37,6 +39,7 @@ object PreviewData {
     val bpa = CardUi("bpa-1", Bank.BPA, "9212060123456781", "CUP", holder = "LAURA MENDEZ SOTO", expiry = "03/29")
     val bandec = CardUi("bandec-1", Bank.BANDEC, "9205129987654325", "CUP", holder = "LAURA MENDEZ SOTO", expiry = "11/30")
     val bpaUsd = CardUi("bpa-2", Bank.BPA, "9212060155520199", "USD")
+    val banmet = CardUi("banmet-1", Bank.BANMET, "9225959800000000", "CUP", holder = "LAURA MENDEZ SOTO", expiry = "10/28")
 
     val wallet = listOf(
         WalletCardUi(bpa, BalanceUi.Known(cup("12480.50"), ago(5))),
@@ -51,13 +54,32 @@ object PreviewData {
             ForeignCardUi("jc-2", "9212333188042154", "BPA"),
         ),
         listOf("53124578", "78302214"),
+        last = LastMovementUi(OperationKind.Transfer, cup("1500.00"), ago(13 * DAY)),
     )
-    val maria = ContactUi("c-maria", "María Fernanda Ruiz", listOf(ForeignCardUi("mf-1", "9205770422901639", "BANDEC")), listOf("52981134"))
+    val maria = ContactUi("c-maria", "María Fernanda Ruiz", listOf(ForeignCardUi("mf-1", "9205770422901639", "BANDEC")), listOf("52981134"),
+        fromAddressBook = true, last = LastMovementUi(OperationKind.Incoming, cup("300.00"), ago(17 * DAY)))
     val carmen = ContactUi("c-carmen", "Abuela Carmen", listOf(ForeignCardUi("ca-1", "9225950003124472", "BANMET")), listOf("54417720"))
-    val yunior = ContactUi("c-yunior", "Yunior Castillo", listOf(ForeignCardUi("yc-1", "9205112233445565", "BANDEC")), emptyList())
-    val daniela = ContactUi("c-daniela", "Daniela Ortiz", listOf(ForeignCardUi("do-1", "9212077700319588", "BPA")), listOf("58337102"))
-    val rafael = ContactUi("c-rafael", "Rafael Torres", emptyList(), listOf("53660981"))
+    val yunior = ContactUi("c-yunior", "Yunior Castillo", listOf(ForeignCardUi("yc-1", "9205112233445565", "BANDEC")), listOf("52990127"),
+        fromAddressBook = true, last = LastMovementUi(OperationKind.Incoming, cup("10000.00"), ago(2 * DAY + 190)))
+    val daniela = ContactUi("c-daniela", "Daniela Ortiz", listOf(ForeignCardUi("do-1", "9212077700319588", "BPA")), listOf("58337102"),
+        fromAddressBook = true, last = LastMovementUi(OperationKind.MobileTopUp, cup("500.00"), ago(4 * DAY)))
+    val mama = ContactUi("c-mama", "Mamá", listOf(ForeignCardUi("ma-1", "9205440012003318", "BANDEC")), listOf("53019944"),
+        fromAddressBook = true, last = LastMovementUi(OperationKind.Transfer, cup("2000.00"), ago(40)))
+    val rafael = ContactUi("c-rafael", "Rafael Torres", emptyList(), listOf("53660981"), fromAddressBook = true)
+    val mario = ContactUi("c-mario", "Mario Almeida", emptyList(), listOf("52339054"), fromAddressBook = true)
     val contacts = listOf(carmen, daniela, juan, maria, rafael, yunior)
+    /** The Contacts tab: a movement or a card, newest movement first. */
+    val people = listOf(mama, yunior, daniela, juan, maria, carmen)
+    /** Everyone, as "Todos los contactos" lists them. */
+    val everyone = listOf(
+        carmen,
+        ContactUi("c-adrian", "Adrián Gómez", emptyList(), listOf("53127781"), fromAddressBook = true),
+        ContactUi("c-ana", "Ana Laura", emptyList(), listOf("53981204"), fromAddressBook = true),
+        ContactUi("c-beatriz", "Beatriz Morales", emptyList(), listOf("52416630"), fromAddressBook = true),
+        ContactUi("c-bryan", "Bryan", emptyList(), listOf("55770912"), fromAddressBook = true),
+        ContactUi("c-carlos", "Carlos (taller)", emptyList(), listOf("53204417"), fromAddressBook = true),
+        daniela, juan, mama, maria, mario, rafael, yunior,
+    )
 
     val juanRecipient = RecipientUi(juan.cards.first(), juan.name, juan.id)
 
@@ -111,11 +133,24 @@ object PreviewData {
         "op-card", OperationKind.Transfer, "9212 3331 8804 2154", OperationStatus.Confirmed, at(6, 10, 41),
         amount = cup("120.00"), card = bpa, counterpart = CounterpartUi.Card("9212333188042154", "BPA"), transactionId = "TRF8825990345",
     )
+    /** BANDEC's own alert of a withdrawal at a branch. */
+    val branchWithdrawal = OperationUi(
+        "op-branch", OperationKind.Transfer, "Extracción en sucursal", OperationStatus.Confirmed, at(6, 5, 1),
+        amount = cup("15000.00"), card = bandec, transactionId = "OL60000000001",
+    )
+
+    /** The newest money moved with Yunior, for his page. */
+    val withYunior = listOf(
+        OperationUi("op-yc-in", OperationKind.Incoming, "Yunior Castillo", OperationStatus.Confirmed, at(2, 11, 29),
+            amount = cup("10000.00"), card = bandec, counterpart = CounterpartUi.Phone("52990127"), contactId = yunior.id),
+        OperationUi("op-yc-out", OperationKind.Transfer, "Yunior Castillo", OperationStatus.Confirmed, at(44, 16, 5),
+            amount = cup("800.00"), card = bpa, counterpart = CounterpartUi.Card("9205112233445565", "BANDEC"), contactId = yunior.id),
+    )
 
     val inProgress = listOf(sentToJuan, notExecuted)
     val history = listOf(
         sentToJuan, notExecuted, confirmedToMaria, incomingFromDaniela, qrCafe, rejectedToYunior, noResponseNauta,
-        electricity, incomingUnknown, topUp, toUnknownCard,
+        electricity, incomingUnknown, topUp, toUnknownCard, branchWithdrawal,
     )
     val recent = listOf(confirmedToMaria, incomingFromDaniela, qrCafe, rejectedToYunior, electricity)
 

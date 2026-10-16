@@ -70,8 +70,12 @@ class RealSmsDumpTest {
                         val baseAt = before.getValue(card.number).observedAt!!
                         // Movements known at that point: last-operations rows learned later cannot be applied earlier.
                         val between = known.movements.filter { it.at > baseAt && it.at <= record.sentAt && (it.debitCard == card.number || it.creditCard == card.number) }
-                        val explainsByMovement = between.any { it.amount.amount.compareTo(delta.abs()) == 0 }
-                        "differed(${if (delta.signum() > 0) "+" else "-"}, movementsBetween=${between.size}, equalsOneMovement=$explainsByMovement, gapHours=${java.time.Duration.between(baseAt, record.sentAt).toHours()})"
+                        // Bank alerts are shown but never applied: a gap equal to one is the staleness chosen on purpose.
+                        val (applied, alerts) = between.partition { it.movesBalance }
+                        val explainsByMovement = applied.any { it.amount.amount.compareTo(delta.abs()) == 0 }
+                        val explainsByAlert = alerts.any { it.amount.amount.compareTo(delta.abs()) == 0 }
+                        "differed(${if (delta.signum() > 0) "+" else "-"}, movementsBetween=${between.size}, equalsOneMovement=$explainsByMovement, " +
+                            "equalsOneAlert=$explainsByAlert, gapHours=${java.time.Duration.between(baseAt, record.sentAt).toHours()})"
                     }
                 }
                 outcome[key] = (outcome[key] ?: 0) + 1

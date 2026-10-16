@@ -82,10 +82,10 @@ data class BalanceQuery(override val bank: Bank, val source: Source = Source.Def
     )
 }
 
-/** Last operations `48`. */
+/** Last operations `48`. Metropolitano asks which kind first: `1` is all of them (GhhAuUBVrI). */
 @Serializable @SerialName("history")
 data class HistoryQuery(override val bank: Bank, val source: Source = Source.Default()) : BankRequest {
-    override fun commands(secret: CharArray?, at: Instant, seed: Int?) = listOf(encoded(48, listOf("0",
+    override fun commands(secret: CharArray?, at: Instant, seed: Int?) = listOf(encoded(48, listOf(if (bank == Bank.BANMET) "1" else "0",
         if (bank == Bank.BANDEC) (if (source is Source.Default) "1" else "0") else cardCurrency(bank, source), origin(source)), seed))
 }
 
@@ -159,20 +159,27 @@ data class QrPay(
     }
 }
 
-/** Electricity `41`; the bank pays the whole invoice (amount `0`). */
+/** Electricity `41`; the bank pays the whole invoice (amount `0`). Metropolitano takes 13-digit invoices only (PliSaYhOg0). */
 @Serializable @SerialName("electricity")
 data class ElectricityBill(override val bank: Bank, val source: Source, val invoice: String) : BankRequest {
-    init { require(invoice.matches(Regex("[0-9]{11}|[0-9]{13}"))) { "La factura eléctrica tiene 11 o 13 dígitos" } }
+    init {
+        require(invoice.matches(Regex("[0-9]{11}|[0-9]{13}"))) { "La factura eléctrica tiene 11 o 13 dígitos" }
+        require(bank != Bank.BANMET || invoice.length == 13) { "Con Metropolitano, la factura eléctrica tiene 13 dígitos" }
+    }
     override val duplicateKey get() = key("41", source, invoice, null)
     override fun commands(secret: CharArray?, at: Instant, seed: Int?) = listOf(encoded(41, billParameters(bank, source, listOf(invoice, "0")), seed))
 }
 
-/** Landline `42`. BPA needs the amount; in BANDEC a null amount pays the total. */
+/**
+ * Landline `42`. BPA needs the amount; in BANDEC and Metropolitano a null amount pays the total. Metropolitano's
+ * invoices start with `01` (pnl2Kga8j7).
+ */
 @Serializable @SerialName("phone")
 data class PhoneBill(override val bank: Bank, val source: Source, val invoice: String, val amount: Money? = null) : BankRequest {
     init {
         require(invoice.matches(Regex("[0-9]{14,15}"))) { "La factura telefónica tiene 14 o 15 dígitos" }
-        require(bank == Bank.BANDEC || amount != null) { "Indica el importe" }
+        require(bank != Bank.BANMET || invoice.startsWith("01")) { "Con Metropolitano, la factura telefónica empieza por 01" }
+        require(bank != Bank.BPA || amount != null) { "Indica el importe" }
         require(amount == null || amount.amount.signum() > 0) { "El importe debe ser mayor que cero" }
     }
     override val duplicateKey get() = key("42", source, invoice, amount)
@@ -182,7 +189,7 @@ data class PhoneBill(override val bank: Bank, val source: Source, val invoice: S
 
 enum class WaterRegion(val code: String, val service: Int) { HAVANA("1", 19), OTHER("2", 51), VARADERO("3", 21) }
 
-/** Water `19`/`51`/`21`, total debt. BANDEC's `51` has one field less (T4RQ5wDJDt). */
+/** Water `19`/`51`/`21`, total debt. Metropolitano sends what BPA does; BANDEC's `51` has one field less (T4RQ5wDJDt). */
 @Serializable @SerialName("water")
 data class WaterBill(override val bank: Bank, val source: Source, val region: WaterRegion, val account: String) : BankRequest {
     init { require(account.isNotEmpty() && account.all { it in '0'..'9' }) { "Cuenta de agua no válida" } }
@@ -190,7 +197,7 @@ data class WaterBill(override val bank: Bank, val source: Source, val region: Wa
     override fun commands(secret: CharArray?, at: Instant, seed: Int?): List<UssdCommand> {
         val type = if (region == WaterRegion.OTHER) "0" else "1"
         val parameters = when {
-            bank == Bank.BPA -> listOf(region.code, account, "0.0", type, cardCurrency(bank, source), origin(source))
+            bank != Bank.BANDEC -> listOf(region.code, account, "0.0", type, cardCurrency(bank, source), origin(source))
             region == WaterRegion.OTHER -> listOf(region.code, account, "0", type, origin(source))
             else -> listOf(region.code, account, "0", type, "0", origin(source))
         }
@@ -264,9 +271,9 @@ private fun cardCurrency(bank: Bank, source: Source) = when (source) {
     is Source.Default -> if (bank == Bank.BANDEC) "0" else source.currency.wireCode
 }
 
-/** 41/42: BPA always sends currency and origin; BANDEC only adds an explicit origin. */
+/** 41/42: BPA and Metropolitano always send currency and origin; BANDEC only adds an explicit origin. */
 private fun billParameters(bank: Bank, source: Source, values: List<String>) = when (bank) {
-    Bank.BPA -> values + listOf(cardCurrency(bank, source), origin(source))
+    Bank.BPA, Bank.BANMET -> values + listOf(cardCurrency(bank, source), origin(source))
     Bank.BANDEC -> if (source is Source.Card) values + source.number else values
 }
 

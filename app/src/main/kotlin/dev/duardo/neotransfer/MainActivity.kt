@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.provider.ContactsContract
 import android.provider.OpenableColumns
 import android.provider.Settings
 import android.view.View
@@ -33,7 +34,6 @@ class MainActivity : ComponentActivity(), Host {
     private val onePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { answer?.complete(it) }
     private val createDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { answer?.complete(it) }
     private val openDocument = registerForActivityResult(ActivityResultContracts.OpenDocument()) { answer?.complete(it) }
-    private val pickContact = registerForActivityResult(ActivityResultContracts.PickContact()) { answer?.complete(it) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -88,7 +88,6 @@ class MainActivity : ComponentActivity(), Host {
 
     override suspend fun createDocument(name: String): Uri? = ask { createDocument.launch(name) }
     override suspend fun openDocument(): Uri? = ask { openDocument.launch(arrayOf("*/*")) }
-    override suspend fun pickContact(): Uri? = ask { pickContact.launch(null) }
     override suspend fun requestPermission(permission: String): Boolean = ask { onePermission.launch(permission) }
 
     override fun displayName(uri: Uri): String? =
@@ -106,6 +105,11 @@ class MainActivity : ComponentActivity(), Host {
     }
 
     override fun open(url: String) = start(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    /** The Contacts editor; it comes back here once saved. */
+    override fun openContact(key: String) = start(
+        Intent(Intent.ACTION_EDIT, Uri.withAppendedPath(ContactsContract.Contacts.CONTENT_LOOKUP_URI, Uri.encode(key)))
+            .putExtra("finishActivityOnSaveCompleted", true),
+    )
     override fun openAppSettings() = start(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
     override fun openNotificationSettings() = start(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
 

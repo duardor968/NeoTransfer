@@ -125,6 +125,26 @@ class ProtocolContractTest {
         assertEquals(listOf(expected(42, "00000000000001*0", 2)), wire(PhoneBill(Bank.BANDEC, Source.Default(), "00000000000001"), 2))
     }
 
+    @Test fun `Metropolitano is BPA with agency 03 and three differences`() {
+        val dest = "9204000000000001"
+        val card = "9225950000000001"
+        assertEquals(listOf(expected(40, "03*1234", 0)), wire(Authenticate(Bank.BANMET), 0, "1234"))
+        assertFailsWith<IllegalArgumentException> { Authenticate(Bank.BANMET).commands("12345".toCharArray()) }
+        assertEquals(listOf(expected(46, "1*0000", 3)), wire(BalanceQuery(Bank.BANMET), 3))
+        assertEquals(listOf(expected(45, "$dest*10.50*1*1*0000*0000*0*0000*0", 99)),
+            wire(Transfer(Bank.BANMET, Source.Default(), dest, Money.cup("10.50")), 99))
+        assertEquals(listOf(expected(19, "1*0000123*0.0*1*1*0000", 2)), wire(WaterBill(Bank.BANMET, Source.Default(), WaterRegion.HAVANA, "0000123"), 2))
+        // 48 asks for a kind of operation first: 1 is all of them.
+        assertEquals(listOf(expected(48, "1*1*0000", 1)), wire(HistoryQuery(Bank.BANMET), 1))
+        assertEquals(listOf(expected(48, "1*0*$card", 1)), wire(HistoryQuery(Bank.BANMET, Source.Card(card)), 1))
+        // Electricity: 13-digit invoices only.
+        assertEquals(listOf(expected(41, "0000000000001*0*1*0000", 2)), wire(ElectricityBill(Bank.BANMET, Source.Default(), "0000000000001"), 2))
+        assertFailsWith<IllegalArgumentException> { ElectricityBill(Bank.BANMET, Source.Default(), "00000000001") }
+        // Landline: the invoice starts with 01, and no amount pays the total.
+        assertEquals(listOf(expected(42, "01000000000001*0*1*0000", 2)), wire(PhoneBill(Bank.BANMET, Source.Default(), "01000000000001"), 2))
+        assertFailsWith<IllegalArgumentException> { PhoneBill(Bank.BANMET, Source.Default(), "00000000000001", Money.cup("1")) }
+    }
+
     @Test fun `Cubacel codes are plain and the packages menu is dialed`() {
         assertEquals(listOf("*222#", "*222*266#", "*222*328#", "*222*869#", "*222*767#"),
             CubacelQueryKind.entries.map { wire(CubacelQuery(it), 0).single() })
@@ -140,13 +160,13 @@ class ProtocolContractTest {
         val money = Money.cup("10")
         val requests: List<UssdRequest> = Bank.entries.flatMap { bank ->
             listOf(Authenticate(bank), Disconnect(bank), BalanceQuery(bank), BalanceQuery(bank, card), HistoryQuery(bank), HistoryQuery(bank, card),
-                Transfer(bank, card, "9205000000000002", money), ElectricityBill(bank, card, "00000000001"),
-                PhoneBill(bank, card, "000000000000001", money), WaterBill(bank, card, WaterRegion.OTHER, "1"),
+                Transfer(bank, card, "9205000000000002", money), ElectricityBill(bank, card, "0000000000001"),
+                PhoneBill(bank, card, "010000000000001", money), WaterBill(bank, card, WaterRegion.OTHER, "1"),
                 NautaPayment(bank, card, NautaService.HOME_DEBT, NautaAccount("a"), money), MobileRecharge(bank, card, "50000001", money),
                 QrPay(bank, card, QrPayment("X", "1", money), money))
         } + CubacelQueryKind.entries.map(::CubacelQuery) + CubacelTransfer("50000001", 1)
         for (request in requests) {
-            val pin = when (request.secret) { SecretKind.BANK_PIN -> if ((request as BankRequest).bank == Bank.BPA) "1234" else "12345"; SecretKind.CUBACEL_PIN -> "1234"; null -> null }
+            val pin = when (request.secret) { SecretKind.BANK_PIN -> "1234567".take((request as BankRequest).bank.pinLength); SecretKind.CUBACEL_PIN -> "1234"; null -> null }
             for (command in request.commands(pin?.toCharArray(), at, 0)) {
                 assertFalse(command.service in setOf(60, 49, 58, 68, 69), "$request")
                 assertFalse(Regex("^\\*444\\*(60|49|58|68|69)[*#]").containsMatchIn(command.valueForTransport()), "$request")

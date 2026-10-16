@@ -151,9 +151,9 @@ fun OperationAmount(operation: OperationUi, modifier: Modifier = Modifier) {
  * elsewhere); the state is added unless the operation is confirmed.
  */
 @Composable
-fun OperationRow(operation: OperationUi, timeLabel: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun OperationRow(operation: OperationUi, timeLabel: String, onClick: () -> Unit, modifier: Modifier = Modifier, title: String = operation.title) {
     NeoRow(
-        title = operation.title,
+        title = title,
         modifier = modifier,
         leading = { OperationAvatar(operation) },
         supportingContent = {

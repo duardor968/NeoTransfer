@@ -73,6 +73,8 @@ object Sms {
     fun authBpa() = "Usted se ha autenticado en la plataforma de pagos moviles, en el Banco Popular de Ahorro, puede comenzar a utilizar nuestros servicios de pagos a traves del movil"
     fun authBandec(card: String) = "Usted se ha autenticado en la plataforma de pagos moviles, en el Banco Bandec con la cuenta ${mask6(card)}, puede comenzar a utilizar nuestros servicios de pagos a traves del movil"
     fun wrongPin() = "Banco Bandec: Clave incorrecta Error de autenticacion, intente nuevamente. Si persiste el problema, contacte con ETECSA. "
+    fun branchAlert(card: String, amount: String, ref: String) =
+        "BANDEC >> Operacion en Linea Sucursal por $amount Tarjeta $card. Referencia $ref. Configure en https://kiosco.bandec.cu."
     fun busy() = "Usted tiene una solicitud en proceso, en breve recibira respuesta y podra realizar otra operacion. "
     fun balanceBpa(value: String) = "Banco Popular de Ahorro:  La consulta de saldo fue completada. \n Saldo Disponible: CR $value CUP"
     fun balanceBandec(card: String, available: String, ledger: String = available) =

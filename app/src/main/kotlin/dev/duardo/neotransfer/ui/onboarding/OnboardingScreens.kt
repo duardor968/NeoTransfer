@@ -81,7 +81,7 @@ private val PermissionKind.purpose: String
     get() = when (this) {
         PermissionKind.Sms -> "Resultados y saldo de tus operaciones"
         PermissionKind.Phone -> "Enviar operaciones al banco"
-        PermissionKind.Contacts -> "Importar contactos del teléfono"
+        PermissionKind.Contacts -> "Nombres de tu agenda en contactos y actividad"
         PermissionKind.Camera -> "Escanear códigos QR y tarjetas"
         PermissionKind.Notifications -> "Avisos de abonos y resultados"
     }

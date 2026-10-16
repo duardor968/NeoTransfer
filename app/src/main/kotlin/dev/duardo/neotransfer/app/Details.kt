@@ -23,6 +23,7 @@ import dev.duardo.neotransfer.designsystem.component.NeoButton
 import dev.duardo.neotransfer.designsystem.format.formatCardNumber
 import dev.duardo.neotransfer.designsystem.format.formatMoney
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
+import dev.duardo.neotransfer.engine.Directory
 import dev.duardo.neotransfer.scanner.QrVerdict
 import dev.duardo.neotransfer.scanner.ScanMode
 import dev.duardo.neotransfer.scanner.ScanResult
@@ -30,10 +31,13 @@ import dev.duardo.neotransfer.ui.activity.OperationActions
 import dev.duardo.neotransfer.ui.activity.OperationDetailScreen
 import dev.duardo.neotransfer.ui.common.TimeLabels
 import dev.duardo.neotransfer.ui.common.label
+import dev.duardo.neotransfer.ui.contacts.AllContactsActions
+import dev.duardo.neotransfer.ui.contacts.AllContactsScreen
 import dev.duardo.neotransfer.ui.contacts.ContactActions
 import dev.duardo.neotransfer.ui.contacts.ContactDetailScreen
 import dev.duardo.neotransfer.ui.contacts.ContactEditActions
 import dev.duardo.neotransfer.ui.contacts.ContactEditScreen
+import dev.duardo.neotransfer.ui.model.AllContactsUi
 import dev.duardo.neotransfer.ui.model.ContactEditUi
 import dev.duardo.neotransfer.ui.model.CounterpartUi
 import dev.duardo.neotransfer.ui.model.EditableCardUi
@@ -43,6 +47,7 @@ import dev.duardo.neotransfer.ui.model.OperationKind
 import dev.duardo.neotransfer.ui.model.OperationUi
 import dev.duardo.neotransfer.ui.model.ReceiveUi
 import dev.duardo.neotransfer.ui.model.RecipientUi
+import dev.duardo.neotransfer.ui.shell.Tab
 import dev.duardo.neotransfer.ui.receive.ReceiveActions
 import dev.duardo.neotransfer.ui.receive.ReceiveScreen
 import java.time.Clock
@@ -111,17 +116,40 @@ class OperationDestination(private val app: AppModel, private val id: String) : 
     private fun cardId(): String? = shown?.card?.id ?: app.book.value.cards.firstOrNull()?.id
 }
 
+/** Everyone, by name: the phone's address book and the contacts kept only in the app. */
+class AllContactsDestination(private val app: AppModel) : Destination(), AllContactsActions {
+    private var query by mutableStateOf("")
+
+    @Composable
+    override fun Content(app: AppModel, book: Book) {
+        AllContactsScreen(AllContactsUi(query, book.contacts.filter { it.matches(query) }), this)
+    }
+
+    override fun back() { app.navigator.remove(this) }
+    override fun query(value: String) { query = value }
+    override fun open(id: String) = app.navigator.push(ContactDestination(app, id))
+}
+
 class ContactDestination(private val app: AppModel, private val id: String) : Destination(), ContactActions {
     private var deleting by mutableStateOf(false)
 
     @Composable
     override fun Content(app: AppModel, book: Book) {
         val contact = book.contact(id) ?: return
-        ContactDetailScreen(contact, this, confirmingDelete = deleting)
+        ContactDetailScreen(contact, this, confirmingDelete = deleting, movements = book.activity.filter { it.contactId == id }.take(3))
     }
 
     override fun back() { app.navigator.remove(this) }
     override fun edit() = app.navigator.push(ContactEditDestination(app, id))
+    override fun editInContacts() { Directory.key(id)?.let { app.host?.openContact(it) } }
+    override fun openMovement(id: String) = app.navigator.push(OperationDestination(app, id))
+
+    override fun allMovements() {
+        val contact = app.book.value.contact(id) ?: return
+        app.activity.search(contact.name)
+        app.navigator.popToRoot()
+        app.tab = Tab.Activity
+    }
 
     override fun transfer(cardId: String) {
         val contact = app.book.value.contact(id) ?: return
@@ -141,12 +169,16 @@ class ContactDestination(private val app: AppModel, private val id: String) : De
     }
 }
 
-/** New contact ([id] null), possibly started from a card or phone seen in activity, or an edit. */
+/**
+ * New contact ([id] null), possibly started from a card or phone seen in activity, or an edit: only the cards for
+ * someone in the phone's address book. [onSaved] runs once it is saved and closed.
+ */
 class ContactEditDestination(
     private val app: AppModel,
     private val id: String?,
     card: String? = null,
     phone: String? = null,
+    private val onSaved: ((Contact) -> Unit)? = null,
 ) : Destination(), ContactEditActions {
     private var name by mutableStateOf("")
     private val cards = mutableStateListOf<EditableCardUi>()
@@ -172,7 +204,7 @@ class ContactEditDestination(
         val shownPhones = phones.map { it.copy(error = phoneError(it.number)) }
         val valid = name.isNotBlank() && shownCards.all { it.error == null } && shownPhones.all { it.error == null } &&
             cards.all { it.number.isEmpty() || it.number.length == 16 } && phones.all { it.number.isEmpty() || it.number.length == 8 }
-        ContactEditScreen(ContactEditUi(id, name, shownCards, shownPhones, valid), this)
+        ContactEditScreen(ContactEditUi(id, name, shownCards, shownPhones, valid, book.domain.addressBook?.contains(id) == true), this)
     }
 
     private fun cardError(number: String) = if (number.length == 16 && !luhn(number)) "Revisa el número" else null
@@ -232,8 +264,9 @@ class ContactEditDestination(
         )
         app.launch {
             try {
-                app.controller.saveContact(contact)
+                val saved = app.controller.saveContact(contact)
                 app.navigator.remove(this)
+                onSaved?.invoke(saved)
             } catch (e: IllegalArgumentException) {
                 app.message(e.message ?: "Revisa los datos")
             }

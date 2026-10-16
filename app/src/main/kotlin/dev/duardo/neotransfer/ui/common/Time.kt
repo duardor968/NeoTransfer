@@ -38,14 +38,13 @@ class TimeLabels(private val clock: Clock) {
     fun clockTime(at: Instant): String = hourMinute.format(zoned(at))
 
     /** "Hoy, 14:32", "Ayer, 09:10", "12 oct, 18:20". */
-    fun moment(at: Instant): String {
-        val day = date(at)
-        val prefix = when (day) {
-            today -> "Hoy"
-            today.minusDays(1) -> "Ayer"
-            else -> if (day.year == today.year) dayMonth.format(day).trimEnd('.') else dayMonthYear.format(day).replace(".", "")
-        }
-        return "$prefix, ${clockTime(at)}"
+    fun moment(at: Instant): String = "${shortDay(at).replaceFirstChar { it.uppercase() }}, ${clockTime(at)}"
+
+    /** "hoy", "ayer", "12 oct", "12 oct 2025". */
+    fun shortDay(at: Instant): String = when (val day = date(at)) {
+        today -> "hoy"
+        today.minusDays(1) -> "ayer"
+        else -> if (day.year == today.year) dayMonth.format(day).trimEnd('.') else dayMonthYear.format(day).replace(".", "")
     }
 
     /** Section header for a day of activity. */

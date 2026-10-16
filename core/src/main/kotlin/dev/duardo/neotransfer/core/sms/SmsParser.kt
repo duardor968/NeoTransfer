@@ -10,7 +10,7 @@ import java.time.format.DateTimeFormatter
 import java.time.format.ResolverStyle
 
 /**
- * Reads PAGOxMOVIL bodies. Tolerates accents, case, repeated spaces and line breaks, missing
+ * Reads PAGOxMOVIL bodies and BANDEC's own alerts. Tolerates accents, case, repeated spaces and line breaks, missing
  * "Fecha", and labels with or without colon. Unknown wording becomes [Unrecognized], never a guess.
  */
 object SmsParser {
@@ -18,6 +18,7 @@ object SmsParser {
         val text = Normalizer.normalize(body, Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
             .replace(Regex("\\s+"), " ").trim()
         return when {
+            text.startsWith("BANDEC >>", ignoreCase = true) -> cardOperation(text)
             has(text, "operacion de registro fue completada") -> Registration
             has(text, "Usted se ha autenticado") -> authenticated(text)
             has(text, "Error de autenticacion") || has(text, "AUTENTICACION HA FALLADO") || has(text, "Clave incorrecta") -> authenticationFailed(text)
@@ -29,6 +30,7 @@ object SmsParser {
             has(text, "El titular del telefono") -> transferReceived(text)
             has(text, "Se ha realizado una transferencia") -> transferNotice(text)
             has(text, "Pago completado") -> payment(text)
+            has(text, "pago externo fue completado") -> externalPayment(text)
             has(text, "Se ha pagado la cuenta") || has(text, "Se ha recargado la cuenta") -> serviceNotice(text)
             has(text, "recibido una recarga de saldo movil") -> mobileBalance(text)
             else -> serviceReceipt(text)
@@ -43,10 +45,14 @@ object SmsParser {
     private fun has(text: String, phrase: String) = text.contains(phrase, ignoreCase = true)
 
     private val rejection = rx("^(?:Banco [A-Za-z ]+?:? )?(?:Fallo|Error)\\b|vuelva a intentarlo")
-    private val bankName = rx("Banco:? (Popular de Ahorros?|BPA|Bandec)\\b")
+    private val bankName = rx("Banco:? (Popular de Ahorros?|BPA|Bandec|Metropolitano)\\b")
 
-    private fun bank(text: String): Bank? = bankName.find(text)?.groupValues?.get(1)?.let {
-        if (it.equals("Bandec", true)) Bank.BANDEC else Bank.BPA
+    private fun bank(text: String): Bank? = bankName.find(text)?.groupValues?.get(1)?.let(::bankOf)
+
+    private fun bankOf(name: String): Bank = when {
+        name.equals("Bandec", true) -> Bank.BANDEC
+        name.equals("Metropolitano", true) -> Bank.BANMET
+        else -> Bank.BPA
     }
 
     private fun money(value: String, unit: String?): Money? {
@@ -64,10 +70,22 @@ object SmsParser {
 
     private fun token(text: String, label: String): String? = rx("$label ?:? ?([^ ]+)").find(text)?.groupValues?.get(1)?.trimEnd('.', ',')
 
+    /** Alert wordings whose direction is known: label to show and whether it is a credit. */
+    private val alertKinds = mapOf(
+        // Last operations list the same references as "Extraccion en Linea", debits.
+        "operacion en linea sucursal" to ("Extracción en sucursal" to false),
+    )
+
+    private fun cardOperation(text: String): SmsMessage? {
+        val match = rx("^BANDEC >> (.+?) por $AMOUNT ?$UNIT? Tarjeta ([0-9]{16})\\. Referencia $REF\\b").find(text) ?: return null
+        val (label, credit) = alertKinds[match.groupValues[1].lowercase()] ?: return null
+        val amount = money(match.groupValues[2], match.groupValues[3].ifEmpty { null }) ?: return null
+        return CardOperation(Bank.BANDEC, match.groupValues[4], label, credit, amount, match.groupValues[5])
+    }
+
     private fun authenticated(text: String): SmsMessage? {
-        val match = rx("en el Banco (Bandec|Popular de Ahorros?|BPA)(?: con la cuenta ?([0-9Xx*]{16})?)? ?,").find(text) ?: return null
-        val bank = if (match.groupValues[1].equals("Bandec", true)) Bank.BANDEC else Bank.BPA
-        return Authenticated(bank, match.groupValues[2].ifEmpty { null })
+        val match = rx("en el Banco (Bandec|Popular de Ahorros?|BPA|Metropolitano)(?: con la cuenta ?([0-9Xx*]{16})?)? ?,").find(text) ?: return null
+        return Authenticated(bankOf(match.groupValues[1]), match.groupValues[2].ifEmpty { null })
     }
 
     private fun authenticationFailed(text: String): SmsMessage {
@@ -133,6 +151,19 @@ object SmsParser {
             token(text, "Id Compra"), labeled(text, "Importe"), paid, reference(text) ?: return null,
             labeled(text, "Saldo (?:disponible|restante)", unitRequired = false)?.let { Money(it.amount, paid.currency) },
         )
+    }
+
+    /**
+     * "El pago externo fue completado": an online payment. `Nro. Transaccion` is the merchant's id, the bank's
+     * reference comes after `Nro. Transaccion Banco`; no balance.
+     */
+    private fun externalPayment(text: String): SmsMessage? {
+        val bank = bank(text) ?: return null
+        val paid = labeled(text, "Monto Pagado") ?: return null
+        val reference = rx("Nro\\.? ?Transaccion Banco ?:? ?$REF").find(text)?.groupValues?.get(1) ?: return null
+        val purchase = rx("Nro\\.? ?Transaccion ?:? ?([0-9]+)").find(text)?.groupValues?.get(1)
+        val merchant = rx("Entidad ?: ?(.+?) Nro").find(text)?.groupValues?.get(1)?.trim()
+        return PaymentCompleted(bank, merchant, purchase, null, paid, reference, null)
     }
 
     private fun serviceNotice(text: String): SmsMessage? {

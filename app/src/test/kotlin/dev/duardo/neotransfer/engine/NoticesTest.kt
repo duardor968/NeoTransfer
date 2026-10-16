@@ -36,7 +36,7 @@ class NoticesTest {
 
     @Test fun amounts() {
         assertEquals("300 CUP", Notices.amount(Money.cup("300.00")))
-        assertEquals("10,000 CUP", Notices.amount(Money.cup("10000"))) // es-CU follows es-419: comma groups, point decimals
+        assertEquals("10 000 CUP", Notices.amount(Money.cup("10000"))) // a space between thousands, never split
         assertEquals("300.50 CUP", Notices.amount(Money.cup("300.5")))
     }
 

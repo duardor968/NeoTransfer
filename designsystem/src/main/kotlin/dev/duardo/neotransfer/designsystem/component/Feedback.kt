@@ -47,7 +47,6 @@ fun EmptyState(
     body: String? = null,
     action: String? = null,
     onAction: (() -> Unit)? = null,
-    busy: Boolean = false,
 ) {
     Column(
         modifier.fillMaxWidth().padding(horizontal = NeoSpace.xxl, vertical = NeoSpace.xxxl),
@@ -60,7 +59,7 @@ fun EmptyState(
         Text(title, Modifier.padding(top = NeoSpace.s), style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
         if (body != null) Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
         if (action != null && onAction != null) {
-            NeoButton(action, onAction, Modifier.padding(top = NeoSpace.m), style = NeoButtonStyle.Tonal, fill = false, loading = busy)
+            NeoButton(action, onAction, Modifier.padding(top = NeoSpace.m), style = NeoButtonStyle.Tonal, fill = false)
         }
     }
 }

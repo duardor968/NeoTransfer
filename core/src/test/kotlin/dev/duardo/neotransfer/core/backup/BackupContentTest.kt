@@ -61,11 +61,14 @@ class BackupContentTest {
             {"tabla":"Pin","dataJSON":[{"id":1,"pin":"000000000001"}]}
         ]}"""
         val result = TrmImporter.import(trm(json))
-        assertEquals(listOf(BackupCard(OwnCard("9204000000000001", Bank.BANDEC, Currency.CUP, "Principal"))), result.content.cards)
+        assertEquals(
+            listOf(BackupCard(OwnCard("9204000000000001", Bank.BANDEC, Currency.CUP, "Principal")), BackupCard(OwnCard("9225000000000001", Bank.BANMET, Currency.CUP, "x"))),
+            result.content.cards,
+        )
         assertEquals(listOf(Contact("trm-7", "Ana Prueba", listOf("50000001", "50000002"), listOf("9205990000000007"))), result.content.contacts)
         assertEquals(listOf(ServiceKind.NAUTA, ServiceKind.ELECTRICITY, ServiceKind.PHONE), result.content.services.map { it.kind })
         assertEquals("usuario@nauta.co.cu", result.content.services.first().value)
-        assertEquals(mapOf("MCBank" to 1, "Pin" to 1), result.skipped)
+        assertEquals(mapOf("Pin" to 1), result.skipped)
         assertTrue("9999" !in result.toString())
     }
 

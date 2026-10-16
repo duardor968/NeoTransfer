@@ -48,6 +48,45 @@ class SmsTemplateTest {
         assertEquals("Credito", message.entries[2].description)
     }
 
+    @Test fun metropolitano() {
+        assertEquals(Authenticated(Bank.BANMET, null), parse("Usted se ha autenticado en la plataforma de pagos moviles, en el Banco Metropolitano, puede comenzar a utilizar nuestros servicios de pagos a traves del movil"))
+        // Seen in 2025: an account closed by the bank.
+        assertEquals(AuthenticationFailed(Bank.BANMET, false, "No se pudo autenticar"),
+            parse("Banco Metropolitano: Usuario cancelado en el sistema Error de autenticacion, intente nuevamente. Si persiste el problema, contacte con ETECSA."))
+        assertEquals(Balance(Bank.BANMET, listOf(BalanceRow(null, null, null, cup("845.10")))),
+            parse("Banco Metropolitano: La consulta de saldo fue completada.\n Saldo Contable: CR 900.00 CUP\n Saldo Disponible: CR 845.10 CUP"))
+        assertEquals(Rejected(Bank.BANMET, RejectedOperation.TRANSFER, "Excedido el limite de extracciones."),
+            parse("Fallo la transferencia. Banco Metropolitano: Excedido el limite de extracciones"))
+    }
+
+    @Test fun `online payments of every bank`() {
+        // Seen in August 2026, one line per field; the bank's reference follows "Nro. Transaccion Banco".
+        assertEquals(PaymentCompleted(Bank.BANMET, "Tienda Prueba", "1234567890", null, cup("1.00"), "MM00000000001", null),
+            parse("Banco Metropolitano El pago\nexterno fue completado.\nFecha: 11/8/2026\nEntidad: Tienda Prueba\nNro. Transaccion: 1234567890\nMonto Pagado:1.00 CUP\nNro. Transaccion Banco:\nMM00000000001."))
+        assertEquals(PaymentCompleted(Bank.BANDEC, "Tienda Prueba", "1234567891", null, cup("840.00"), "KW00000000002", null),
+            parse("Banco Bandec Elpago externo fue\ncompletado\nFecha: 11/8/2026\nEntidad: Tienda Prueba\nNro. Transaccion: 1234567891\nMonto Pagado: 840.00 CUP\nNro. Transaccion Banco:\nKW00000000002."))
+        assertEquals(PaymentCompleted(Bank.BPA, "Tienda Prueba", "1234567892", null, cup("280.00"), "BR00000000003", null),
+            parse("Banco Popular de Ahorro El pago\nexterno fue completado\nFecha: 11/8/2026\nEntidad: Tienda Prueba\nNro. Transaccion: 1234567892\nMonto Pagado: 280.00 CUP\nNro. Transaccion Banco:\nBR00000000003."))
+    }
+
+    @Test fun `BANDEC alerts`() {
+        assertEquals(CardOperation(Bank.BANDEC, "9204000000000001", "Extracción en sucursal", false, cup("15000.00"), "OL000TEST1"),
+            parse("BANDEC >> Operacion en Linea Sucursal por 15000.00 Tarjeta 9204000000000001. Referencia OL000TEST1. Configure en https://kiosco.bandec.cu."))
+        // A wording whose direction is unknown is never guessed.
+        assertEquals(Unrecognized, parse("BANDEC >> Operacion Nueva por 10.00 Tarjeta 9204000000000001. Referencia OL000TEST2. Configure en https://kiosco.bandec.cu."))
+    }
+
+    @Test fun records() {
+        val alert = "BANDEC >> Operacion en Linea Sucursal por 1.00 Tarjeta 9204000000000001. Referencia OL000TEST3. Configure en https://kiosco.bandec.cu."
+        // BANDEC's alerts carry a stamp 11 hours off: they are ordered by reception.
+        val record = SmsRecord.from(1, "BANDEC", 1_000_000_000_000, 1_000_000_000_000 - 11 * 3_600_000, alert)!!
+        assertEquals(record.receivedAt, record.sentAt)
+        assertIs<CardOperation>(record.message)
+        val pagos = SmsRecord.from(2, "pagoxmovil", 1_000_000_000_000, 999_999_990_000, "Usted tiene una solicitud en proceso, en breve recibira respuesta y podra realizar otra operacion. ")!!
+        assertEquals(999_999_990_000, pagos.sentAt.toEpochMilli())
+        assertNull(SmsRecord.from(3, "+5350000001", 1_000_000_000_000, 0, alert))
+    }
+
     @Test fun transfers() {
         assertEquals(TransferSent(Bank.BANDEC, "9204XXXXXXXX0002", null, cup("300.00"), "KW000TEST3", cup("700.00")),
             parse("Banco Bandec:  La Transferencia fue completada. \n Fecha: 12/10/2026 \n Beneficiario: 9204XXXXXXXX0002 \n Ordenante: CUP \n Monto: 300.00 CUP \n Nro. Transaccion: KW000TEST3 \n Saldo restante: CR 700.00 CUP "))

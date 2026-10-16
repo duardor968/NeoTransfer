@@ -25,6 +25,7 @@ import dev.duardo.neotransfer.preview.PreviewData.cup
 import dev.duardo.neotransfer.preview.PreviewData.wallet
 import dev.duardo.neotransfer.ui.activity.ActivityScreen
 import dev.duardo.neotransfer.ui.activity.OperationDetailScreen
+import dev.duardo.neotransfer.ui.contacts.AllContactsScreen
 import dev.duardo.neotransfer.ui.contacts.ContactDetailScreen
 import dev.duardo.neotransfer.ui.contacts.ContactEditScreen
 import dev.duardo.neotransfer.ui.contacts.ContactsScreen
@@ -43,6 +44,7 @@ import dev.duardo.neotransfer.ui.model.BankSettingsUi
 import dev.duardo.neotransfer.ui.model.BankSummaryUi
 import dev.duardo.neotransfer.ui.model.CardFormUi
 import dev.duardo.neotransfer.ui.model.CardSetupUi
+import dev.duardo.neotransfer.ui.model.AllContactsUi
 import dev.duardo.neotransfer.ui.model.ContactEditUi
 import dev.duardo.neotransfer.ui.model.ContactsContent
 import dev.duardo.neotransfer.ui.model.ContactsUi
@@ -125,6 +127,11 @@ object PreviewCatalog {
         // Home ------------------------------------------------------------------------------------------------
         "home" to { Tabbed(Tab.Home) { HomeScreen(HomeUi(wallet, 0, PreviewData.inProgress, PreviewData.recent), noop()) } },
         "home-bandec" to { Tabbed(Tab.Home) { HomeScreen(HomeUi(wallet, 1, emptyList(), PreviewData.recent), noop()) } },
+        "home-banmet" to {
+            Tabbed(Tab.Home) {
+                HomeScreen(HomeUi(listOf(WalletCardUi(PreviewData.banmet, BalanceUi.Known(cup("8020.00"), PreviewData.ago(20)))), 0, emptyList(), PreviewData.recent), noop())
+            }
+        },
         "home-refreshing" to {
             Tabbed(Tab.Home) { HomeScreen(HomeUi(listOf(wallet[0].copy(refreshing = true), wallet[1]), 0, emptyList(), PreviewData.recent), noop()) }
         },
@@ -147,6 +154,9 @@ object PreviewCatalog {
 
         // Activity --------------------------------------------------------------------------------------------
         "activity" to { Tabbed(Tab.Activity) { ActivityScreen(activity(ActivityContent.Items(PreviewData.history)), noop()) } },
+        "activity-check" to {
+            Tabbed(Tab.Activity) { ActivityScreen(activity(ActivityContent.Items(PreviewData.history)).copy(pickCard = true), noop()) }
+        },
         "activity-search" to {
             Tabbed(Tab.Activity) {
                 ActivityScreen(
@@ -167,9 +177,27 @@ object PreviewCatalog {
         "operation-qr" to { OperationDetailScreen(PreviewData.qrCafe, noop()) },
 
         // Contacts --------------------------------------------------------------------------------------------
-        "contacts" to { Tabbed(Tab.Contacts) { ContactsScreen(ContactsUi("", ContactsContent.Items(PreviewData.contacts)), noop()) } },
-        "contacts-empty" to { Tabbed(Tab.Contacts) { ContactsScreen(ContactsUi("", ContactsContent.Empty), noop()) } },
+        "contacts" to { Tabbed(Tab.Contacts) { ContactsScreen(ContactsUi("", ContactsContent.People(PreviewData.people), 214, addressBook = true), noop()) } },
+        "contacts-empty" to { Tabbed(Tab.Contacts) { ContactsScreen(ContactsUi("", ContactsContent.People(emptyList()), 214, addressBook = true), noop()) } },
+        "contacts-search" to {
+            Tabbed(Tab.Contacts) {
+                ContactsScreen(ContactsUi("mar", ContactsContent.Results(listOf(PreviewData.maria), listOf(PreviewData.mario)), 214, addressBook = true), noop())
+            }
+        },
+        "contacts-no-access" to {
+            Tabbed(Tab.Contacts) { ContactsScreen(ContactsUi("", ContactsContent.People(listOf(PreviewData.juan, PreviewData.carmen)), 2, addressBook = false), noop()) }
+        },
+        "contacts-all" to { AllContactsScreen(AllContactsUi("", PreviewData.everyone), noop()) },
         "contact" to { ContactDetailScreen(PreviewData.juan, noop()) },
+        "contact-agenda" to { ContactDetailScreen(PreviewData.mario, noop()) },
+        "contact-agenda-cards" to { ContactDetailScreen(PreviewData.yunior, noop(), movements = PreviewData.withYunior) },
+        "contact-agenda-edit" to {
+            ContactEditScreen(
+                ContactEditUi(PreviewData.mario.id, PreviewData.mario.name, listOf(EditableCardUi("m-1", "", "")), listOf(EditablePhoneUi("p1", "52339054")),
+                    canSave = false, fromAddressBook = true),
+                noop(),
+            )
+        },
         "contact-delete" to { ContactDetailScreen(PreviewData.juan, noop(), confirmingDelete = true) },
         "contact-edit" to {
             ContactEditScreen(
@@ -259,9 +287,12 @@ object PreviewCatalog {
         },
         "transfer-recipient-empty" to {
             RecipientScreen(
-                RecipientPickUi("", null, null, recent = listOf(RecipientUi(ForeignCardUi("x", "9212333188042154", "BPA"))), contacts = emptyList(), canImport = true),
+                RecipientPickUi("", null, null, recent = emptyList(), contacts = emptyList()),
                 noop(),
             )
+        },
+        "transfer-recipient-search" to {
+            RecipientScreen(RecipientPickUi("mar", null, null, emptyList(), listOf(PreviewData.maria, PreviewData.mario)), noop())
         },
         "transfer-recipient-typed" to {
             RecipientScreen(

@@ -6,7 +6,7 @@ import java.time.Instant
 import java.time.LocalDate
 
 /**
- * Meaning of one PAGOxMOVIL SMS. Messages are backend data: the UI never shows their text.
+ * Meaning of one bank SMS: PAGOxMOVIL's, or a bank's own alert ([CardOperation]). Messages are backend data: the UI never shows their text.
  * Masks (`920406XXXXXX1234`) are kept as sent; balances written `DB x` in receipts are the balance x.
  */
 sealed interface SmsMessage {
@@ -54,6 +54,15 @@ sealed interface SmsMessage {
     /** The bank refused an operation; [reason] is ready to show. */
     data class Rejected(val bank: Bank?, val operation: RejectedOperation, val reason: String, val detail: String? = null) : SmsMessage
 
+    /**
+     * A bank's own alert of a card operation made outside the app ("BANDEC >> Operacion en Linea Sucursal por …"):
+     * [label] says what it was. The text names no currency, so [amount] is CUP until the card says otherwise. Alerts
+     * leave in batches, hours or weeks after the operation: their time is not the operation's.
+     */
+    data class CardOperation(
+        val bank: Bank, val card: String, val label: String, val credit: Boolean, override val amount: Money, override val reference: String,
+    ) : Receipt
+
     /** Cubacel phone balance received from another number; not bank money. */
     data class MobileBalanceReceived(val amount: Money, val fromPhone: String) : SmsMessage
 
@@ -87,18 +96,23 @@ data class BalanceRow(val account: String?, val label: String?, val ledger: Mone
 data class HistoryEntry(val date: LocalDate, val description: String, val credit: Boolean, val amount: Money, val reference: String?)
 
 /**
- * An ingested PAGOxMOVIL SMS. [sentAt] is the SMSC stamp (`date_sent`), reliable for this sender
- * and used for ordering; [receivedAt] is the phone's reception time (`date`).
+ * An ingested bank SMS. [sentAt] orders them: the SMSC stamp (`date_sent`) for PAGOxMOVIL, reliable for that
+ * sender; the reception time for BANDEC's alerts, whose stamp is 11 hours off. [receivedAt] is the phone's
+ * reception time (`date`).
  */
 data class SmsRecord(val id: Long, val sentAt: Instant, val receivedAt: Instant, val message: SmsMessage) {
     companion object {
         const val SENDER = "PAGOxMOVIL"
+        /** BANDEC's own alerts of card operations made at the bank (configured at kiosco.bandec.cu). */
+        const val BANDEC_ALERTS = "BANDEC"
+        val SENDERS = listOf(SENDER, BANDEC_ALERTS)
 
         /** Builds a record from `content://sms` columns; null for other senders. */
         fun from(id: Long, address: String, date: Long, dateSent: Long, body: String): SmsRecord? {
-            if (!address.equals(SENDER, ignoreCase = true)) return null
+            val sender = SENDERS.firstOrNull { it.equals(address, ignoreCase = true) } ?: return null
             val received = Instant.ofEpochMilli(date)
-            return SmsRecord(id, if (dateSent > 0) Instant.ofEpochMilli(dateSent) else received, received, SmsParser.parse(body))
+            val sent = if (sender == SENDER && dateSent > 0) Instant.ofEpochMilli(dateSent) else received
+            return SmsRecord(id, sent, received, SmsParser.parse(body))
         }
     }
 }

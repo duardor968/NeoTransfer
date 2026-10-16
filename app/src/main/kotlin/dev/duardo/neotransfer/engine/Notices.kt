@@ -20,6 +20,8 @@ import dev.duardo.neotransfer.core.protocol.QrPay
 import dev.duardo.neotransfer.core.protocol.Transfer
 import dev.duardo.neotransfer.core.protocol.UssdRequest
 import dev.duardo.neotransfer.core.protocol.WaterBill
+import dev.duardo.neotransfer.designsystem.format.DecimalSeparator
+import dev.duardo.neotransfer.designsystem.format.NoBreak
 import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
 import java.util.Locale
@@ -73,9 +75,9 @@ internal object Notices {
         else -> "Operación"
     }
 
-    /** `300 CUP`, `10,000 CUP`, `300.50 CUP` (es-CU). */
+    /** `300 CUP`, `10 000 CUP`, `300.50 CUP`: the app's grouping, a space. */
     fun amount(money: Money): String {
-        val symbols = DecimalFormatSymbols(Locale.forLanguageTag("es-CU"))
+        val symbols = DecimalFormatSymbols(Locale.ROOT).apply { decimalSeparator = DecimalSeparator; groupingSeparator = NoBreak }
         val pattern = if (money.amount.stripTrailingZeros().scale() <= 0) "#,##0" else "#,##0.00"
         return DecimalFormat(pattern, symbols).format(money.amount) + " " + money.currency.name
     }

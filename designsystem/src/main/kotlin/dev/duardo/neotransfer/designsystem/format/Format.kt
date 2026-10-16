@@ -6,25 +6,28 @@ import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
 import java.util.Locale
 
-/** Decimal point and comma grouping, as the banks print amounts. Fixed so the UI never depends on device locale. */
+/**
+ * Decimal point, as the banks print amounts, and a space between groups of three: a comma reads as a decimal
+ * separator to many people. Fixed so the UI never depends on device locale.
+ */
 private val symbols = DecimalFormatSymbols(Locale.ROOT).apply {
-    decimalSeparator = '.'
-    groupingSeparator = ','
+    decimalSeparator = DecimalSeparator
+    groupingSeparator = NoBreak
 }
 
 const val DecimalSeparator = '.'
 
-/** `12480.5` → `12,480.50`. */
+/** `12480.5` → `12 480.50`, never split across lines. */
 fun formatAmount(amount: BigDecimal): String =
     DecimalFormat("#,##0.00", symbols).format(amount.setScale(2, RoundingMode.HALF_UP))
 
-/** `12480.5`, `CUP` → `12,480.50 CUP`. */
+/** `12480.5`, `CUP` → `12 480.50 CUP`. */
 fun formatMoney(amount: BigDecimal, currency: String): String = "${formatAmount(amount)} $currency"
 
 /** No-break space: what joins the groups of a number so a line never splits it. */
 const val NoBreak = ' '
 
-/** The same text with its spaces made unbreakable, for values that must stay on one line ("12,480.50 CUP"). */
+/** The same text with its spaces made unbreakable, for values that must stay on one line ("12 480.50 CUP"). */
 fun String.unbroken(): String = replace(' ', NoBreak)
 
 /** Groups a PAN as printed on the card, never split across lines: `9204 1234 5678 9012`. Partial input is grouped as typed. */

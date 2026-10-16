@@ -15,11 +15,11 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import dev.duardo.neotransfer.designsystem.format.initialsOf
 import dev.duardo.neotransfer.designsystem.theme.Neo
 
@@ -30,9 +30,12 @@ data class AvatarBadge(@param:DrawableRes val icon: Int, val container: Color, v
 @Composable
 fun NameAvatar(name: String, modifier: Modifier = Modifier, size: Dp = 44.dp, badge: AvatarBadge? = null) {
     AvatarFrame(modifier, size, badge) {
+        // The circle does not grow with the font scale, so neither do the initials (toSp undoes non-linear scaling too).
         Text(
             initialsOf(name),
-            style = MaterialTheme.typography.titleSmall.copy(fontSize = (size.value * 0.36f).sp, fontWeight = FontWeight.SemiBold),
+            style = MaterialTheme.typography.titleSmall.copy(
+                fontSize = with(LocalDensity.current) { (size * 0.36f).toSp() }, fontWeight = FontWeight.SemiBold,
+            ),
             color = MaterialTheme.colorScheme.onSurface,
         )
     }

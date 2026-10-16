@@ -41,9 +41,11 @@ class StoreMappingTest {
 
     @Test fun preferences() {
         val preferences = Preferences(Settings(Theme.DARK, creditNotifications = false, resultNotifications = true),
-            mapOf(Bank.BANDEC to at), inboxImported = true, lastBackup = at)
+            mapOf(Bank.BANDEC to at), inboxVersion = 2, lastBackup = at)
         val millis = Instant.ofEpochMilli(at.toEpochMilli())
         assertEquals(preferences.copy(keySavedAt = mapOf(Bank.BANDEC to millis), lastBackup = millis), preferences.toRows().toPreferences())
         assertEquals(Preferences(), emptyList<SettingEntity>().toPreferences())
+        // 1.0.1 only read PAGOxMOVIL and wrote a boolean.
+        assertEquals(1, listOf(SettingEntity("inbox.imported", "true")).toPreferences().inboxVersion)
     }
 }

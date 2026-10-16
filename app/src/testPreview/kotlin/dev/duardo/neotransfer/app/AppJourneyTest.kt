@@ -324,7 +324,6 @@ class AppJourneyTest(private val mode: String) {
         }
         override suspend fun createDocument(name: String): Uri? = null
         override suspend fun openDocument(): Uri? = null
-        override suspend fun pickContact(): Uri? = null
         override fun displayName(uri: Uri): String? = null
         override fun requestPermissions(permissions: List<String>) = Unit
         override fun shouldExplain(permission: String) = false
@@ -332,6 +331,7 @@ class AppJourneyTest(private val mode: String) {
         override fun share(text: String) = Unit
         override fun copy(text: String) = Unit
         override fun open(url: String) = Unit
+        override fun openContact(key: String) = Unit
         override fun openAppSettings() = Unit
         override fun openNotificationSettings() = Unit
     }

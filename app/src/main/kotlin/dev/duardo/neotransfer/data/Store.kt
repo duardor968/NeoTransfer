@@ -14,7 +14,7 @@ import java.time.Instant
 /** An own card plus what the wallet shows besides the number. */
 data class WalletCard(val card: OwnCard, val holder: String? = null, val expiry: String? = null)
 
-/** One ingested PAGOxMOVIL SMS. [sentAt] is the SMSC stamp, [receivedAt] the inbox `date`. */
+/** One ingested bank SMS. [sentAt] orders it ([SmsRecord]), [receivedAt] is the inbox `date`. */
 data class StoredSms(val id: Long, val sentAt: Instant, val receivedAt: Instant, val body: String) {
     fun record(): SmsRecord = SmsRecord(id, sentAt, receivedAt, SmsParser.parse(body))
 }
@@ -23,11 +23,14 @@ enum class Theme { SYSTEM, LIGHT, DARK }
 
 data class Settings(val theme: Theme = Theme.SYSTEM, val creditNotifications: Boolean = true, val resultNotifications: Boolean = true)
 
-/** User settings plus the engine's own facts: when each bank key was saved, whether the inbox was imported, the last backup. */
+/**
+ * User settings plus the engine's own facts: when each bank key was saved, how the inbox was last read in full
+ * ([inboxVersion]: 0 never, 1 PAGOxMOVIL only, 2 with BANDEC's alerts), the last backup.
+ */
 data class Preferences(
     val settings: Settings = Settings(),
     val keySavedAt: Map<Bank, Instant> = emptyMap(),
-    val inboxImported: Boolean = false,
+    val inboxVersion: Int = 0,
     val lastBackup: Instant? = null,
 )
 
@@ -77,7 +80,7 @@ class RoomStore(private val dao: NeoDao) : Store {
     override suspend fun savePreferences(preferences: Preferences) {
         val rows = preferences.toRows()
         dao.upsertSettings(rows)
-        dao.deleteSettings(Bank.entries.map { KEY_SAVED + it.name } - rows.map { it.key }.toSet())
+        dao.deleteSettings(Bank.entries.map { KEY_SAVED + it.name } + INBOX_IMPORTED - rows.map { it.key }.toSet())
     }
 }
 
@@ -105,14 +108,16 @@ private const val THEME = "theme"
 private const val CREDIT_NOTIFICATIONS = "notify.credits"
 private const val RESULT_NOTIFICATIONS = "notify.results"
 private const val KEY_SAVED = "key.saved."
+/** Before [INBOX_VERSION]: `true` meant version 1. */
 private const val INBOX_IMPORTED = "inbox.imported"
+private const val INBOX_VERSION = "inbox.version"
 private const val LAST_BACKUP = "backup.last"
 
 internal fun Preferences.toRows(): List<SettingEntity> = listOf(
     SettingEntity(THEME, settings.theme.name),
     SettingEntity(CREDIT_NOTIFICATIONS, settings.creditNotifications.toString()),
     SettingEntity(RESULT_NOTIFICATIONS, settings.resultNotifications.toString()),
-    SettingEntity(INBOX_IMPORTED, inboxImported.toString()),
+    SettingEntity(INBOX_VERSION, inboxVersion.toString()),
 ) + listOfNotNull(lastBackup?.let { SettingEntity(LAST_BACKUP, it.toEpochMilli().toString()) }) +
     keySavedAt.map { (bank, at) -> SettingEntity(KEY_SAVED + bank.name, at.toEpochMilli().toString()) }
 
@@ -125,7 +130,7 @@ internal fun List<SettingEntity>.toPreferences(): Preferences {
             values[RESULT_NOTIFICATIONS]?.toBooleanStrict() ?: true,
         ),
         Bank.entries.mapNotNull { bank -> values[KEY_SAVED + bank.name]?.let { bank to Instant.ofEpochMilli(it.toLong()) } }.toMap(),
-        values[INBOX_IMPORTED]?.toBooleanStrict() ?: false,
+        values[INBOX_VERSION]?.toInt() ?: if (values[INBOX_IMPORTED]?.toBooleanStrict() == true) 1 else 0,
         values[LAST_BACKUP]?.let { Instant.ofEpochMilli(it.toLong()) },
     )
 }

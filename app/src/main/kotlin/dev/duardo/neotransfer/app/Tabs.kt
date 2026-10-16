@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import dev.duardo.neotransfer.designsystem.format.NoBreak
 import dev.duardo.neotransfer.designsystem.format.formatAmount
 import dev.duardo.neotransfer.ui.activity.ActivityActions
 import dev.duardo.neotransfer.ui.activity.ActivityScreen
@@ -33,7 +34,6 @@ import java.text.Normalizer
 /** The four tabs under the bottom bar. */
 class Main(private val app: AppModel) : Destination(), HomeActions, ContactsActions, ServicesActions {
     private var recharge by mutableStateOf(false)
-    private var importing by mutableStateOf(false)
 
     @Composable
     override fun Content(app: AppModel, book: Book) {
@@ -95,26 +95,20 @@ class Main(private val app: AppModel) : Destination(), HomeActions, ContactsActi
 
     private fun contacts(book: Book): ContactsUi {
         val query = app.contactsQuery
-        val content = when {
-            book.contacts.isEmpty() -> ContactsContent.Empty
-            else -> book.contacts.filter { it.matches(query) }.let { if (it.isEmpty()) ContactsContent.NoResults else ContactsContent.Items(it) }
+        val content = if (query.isBlank()) ContactsContent.People(book.people) else {
+            val people = book.people.filter { it.matches(query) }
+            val shown = people.mapTo(hashSetOf()) { it.id }
+            val others = book.contacts.filter { it.id !in shown && it.matches(query) }
+            if (people.isEmpty() && others.isEmpty()) ContactsContent.NoResults else ContactsContent.Results(people, others)
         }
-        return ContactsUi(query, content, importing)
+        return ContactsUi(query, content, book.contacts.size, book.domain.addressBook != null)
     }
 
     override fun query(value: String) { app.contactsQuery = value }
     override fun open(id: String) = app.navigator.push(ContactDestination(app, id))
     override fun create() = app.navigator.push(ContactEditDestination(app, null))
-    override fun importFromPhone() {
-        app.launch {
-            importing = true
-            try {
-                app.importPhoneContact()?.let { app.navigator.push(ContactDestination(app, it.id)) }
-            } finally {
-                importing = false
-            }
-        }
-    }
+    override fun everyone() = app.navigator.push(AllContactsDestination(app))
+    override fun allowContacts() = app.allowContacts()
 
     // ---- Services ----
 
@@ -132,6 +126,7 @@ class ActivityState(private val app: AppModel) : ActivityActions {
     private var query by mutableStateOf("")
     private var filter by mutableStateOf(ActivityFilter.All)
     private var card by mutableStateOf<String?>(null)
+    private var picking by mutableStateOf(false)
 
     fun ui(book: Book): ActivityUi {
         val content = when {
@@ -143,10 +138,18 @@ class ActivityState(private val app: AppModel) : ActivityActions {
                     (card == null || item.card?.id == card) && item.matches(query)
             }.let { if (it.isEmpty()) ActivityContent.NoResults else ActivityContent.Items(it) }
         }
-        return ActivityUi(query, filter, book.cards, card?.takeIf { id -> book.cards.any { it.id == id } }, content)
+        return ActivityUi(query, filter, book.cards, card?.takeIf { id -> book.cards.any { it.id == id } }, content, book.checkingHistory, picking)
     }
 
     override fun query(value: String) { query = value }
+
+    /** Opens on what matches [value], with no other filter. */
+    fun search(value: String) {
+        query = value
+        filter = ActivityFilter.All
+        card = null
+    }
+
     override fun filter(value: ActivityFilter) { filter = value }
     override fun card(cardId: String?) { card = cardId }
     override fun open(id: String) = app.navigator.push(OperationDestination(app, id))
@@ -159,9 +162,19 @@ class ActivityState(private val app: AppModel) : ActivityActions {
         }
     }
     override fun checkWithBank() {
-        val card = app.book.value.wallet.let { wallet -> wallet.firstOrNull { it.card.id == app.homeCard } ?: wallet.firstOrNull() } ?: return
-        app.query { app.controller.refreshHistory(card.card.id) }
+        val cards = app.book.value.cards
+        when (val chosen = cards.firstOrNull { it.id == card }?.id ?: cards.singleOrNull()?.id) {
+            null -> picking = cards.isNotEmpty()
+            else -> checkCard(chosen)
+        }
     }
+
+    override fun checkCard(cardId: String) {
+        picking = false
+        app.query { app.controller.refreshHistory(cardId) }
+    }
+
+    override fun closeCheck() { picking = false }
 }
 
 /** Accent- and case-insensitive text, digits compared without spaces. */
@@ -178,10 +191,13 @@ private fun OperationUi.matches(query: String): Boolean {
         null -> ""
     }
     return words in normalized(title) || (digits.length >= 3 && (digits in counterpart.filter(Char::isDigit) || card?.number?.contains(digits) == true)) ||
-        amount?.let { money -> words.replace(",", "") in formatAmount(money.amount).replace(",", "") } == true
+        amount?.let { money -> words.filterNot(::isGrouping) in formatAmount(money.amount).filterNot(::isGrouping) } == true
 }
 
-private fun ContactUi.matches(query: String): Boolean {
+/** Typed or shown between thousands: a space of any kind, or a comma out of habit. */
+private fun isGrouping(c: Char) = c == ',' || c.isWhitespace() || c == NoBreak
+
+internal fun ContactUi.matches(query: String): Boolean {
     if (query.isBlank()) return true
     val digits = query.filter(Char::isDigit)
     return normalized(query).trim() in normalized(name) ||

@@ -73,25 +73,35 @@ sealed interface ActivityContent {
 }
 
 @Immutable
+/** [checking]: last operations asked of the bank, answer pending. [pickCard]: which card to ask about. */
 data class ActivityUi(
     val query: String,
     val filter: ActivityFilter,
     val cards: List<CardUi>,
     val cardFilter: String?,
     val content: ActivityContent,
+    val checking: Boolean = false,
+    val pickCard: Boolean = false,
 )
 
 // ---- Contacts -----------------------------------------------------------------------------------------------
 
 @Immutable
 sealed interface ContactsContent {
-    data object Empty : ContactsContent
+    /** No search: [people] with a movement or a saved card, newest movement first. */
+    data class People(val people: List<ContactUi>) : ContactsContent
+    /** A search: matches among the people first, then everyone else ([others]). */
+    data class Results(val people: List<ContactUi>, val others: List<ContactUi>) : ContactsContent
     data object NoResults : ContactsContent
-    data class Items(val contacts: List<ContactUi>) : ContactsContent
 }
 
+/** [everyone]: how many contacts there are in all; [addressBook] false while the phone's address book cannot be read. */
 @Immutable
-data class ContactsUi(val query: String, val content: ContactsContent, val importing: Boolean = false)
+data class ContactsUi(val query: String, val content: ContactsContent, val everyone: Int, val addressBook: Boolean)
+
+/** Everyone: the phone's address book and the contacts kept only in the app, by name. */
+@Immutable
+data class AllContactsUi(val query: String, val contacts: List<ContactUi>)
 
 @Immutable
 data class EditableCardUi(val id: String, val number: String, val label: String, val bankName: String? = null, val error: String? = null)
@@ -99,7 +109,7 @@ data class EditableCardUi(val id: String, val number: String, val label: String,
 @Immutable
 data class EditablePhoneUi(val id: String, val number: String, val error: String? = null)
 
-/** [id] null when creating. */
+/** [id] null when creating. [fromAddressBook]: only the cards are edited here; name and phones belong to the address book. */
 @Immutable
 data class ContactEditUi(
     val id: String?,
@@ -107,6 +117,7 @@ data class ContactEditUi(
     val cards: List<EditableCardUi>,
     val phones: List<EditablePhoneUi>,
     val canSave: Boolean,
+    val fromAddressBook: Boolean = false,
 )
 
 // ---- Services -----------------------------------------------------------------------------------------------
@@ -184,8 +195,8 @@ data class CubacelUi(
 // ---- Transfer, pay, receive ---------------------------------------------------------------------------------
 
 /**
- * [typed] is a valid card number typed or scanned that matches no contact. [canImport] while no contact has a card:
- * the list offers the phone's contacts instead.
+ * [typed] is a valid card number typed or scanned that matches no contact. [contacts]: people with a card, and while
+ * searching also those without one, whose card is asked for when chosen.
  */
 @Immutable
 data class RecipientPickUi(
@@ -195,8 +206,6 @@ data class RecipientPickUi(
     val recent: List<RecipientUi>,
     val contacts: List<ContactUi>,
     val chooseCardOf: ContactUi? = null,
-    val canImport: Boolean = false,
-    val importing: Boolean = false,
 )
 
 @Immutable

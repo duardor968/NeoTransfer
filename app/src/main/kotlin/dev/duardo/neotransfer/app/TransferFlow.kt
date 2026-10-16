@@ -69,7 +69,6 @@ class RecipientDestination(private val flow: TransferFlow) : Destination(), Reci
     private val app = flow.app
     private var query by mutableStateOf("")
     private var chooseCardOf by mutableStateOf<String?>(null)
-    private var importing by mutableStateOf(false)
 
     @Composable
     override fun Content(app: AppModel, book: Book) {
@@ -88,14 +87,10 @@ class RecipientDestination(private val flow: TransferFlow) : Destination(), Reci
             .filter { it.kind == OperationKind.Transfer }
             .mapNotNull { (it.counterpart as? CounterpartUi.Card)?.number?.takeIf(Cards::isNumber) }
             .distinct().take(8).map { number -> recipientFor(book, number) }.toList()
-        val contacts = book.contacts.filter { it.cards.isNotEmpty() && it.matchesRecipient(query, digits) }
-        RecipientScreen(
-            RecipientPickUi(
-                query, typed, error, recent, contacts, chooseCardOf?.let(book::contact),
-                canImport = query.isBlank() && book.contacts.none { it.cards.isNotEmpty() }, importing = importing,
-            ),
-            this,
-        )
+        // People with a card; while searching, the rest of the address book too (its card is asked for when chosen).
+        val contacts = book.contacts.filter { (it.cards.isNotEmpty() || query.isNotBlank()) && it.matchesRecipient(query, digits) }
+            .sortedBy { it.cards.isEmpty() }
+        RecipientScreen(RecipientPickUi(query, typed, error, recent, contacts, chooseCardOf?.let(book::contact)), this)
     }
 
     override fun back() { app.navigator.remove(this) }
@@ -124,7 +119,13 @@ class RecipientDestination(private val flow: TransferFlow) : Destination(), Reci
 
     override fun pickContact(contactId: String) {
         val contact = app.book.value.contact(contactId) ?: return
-        if (contact.cards.size == 1) choose(RecipientUi(contact.cards.single(), contact.name, contact.id)) else chooseCardOf = contactId
+        when (contact.cards.size) {
+            0 -> app.navigator.push(ContactEditDestination(app, contactId) { saved ->
+                saved.cards.firstOrNull()?.let { number -> choose(RecipientUi(app.book.value.foreignCard(number, saved.labels[number]), saved.name, saved.id)) }
+            })
+            1 -> choose(RecipientUi(contact.cards.single(), contact.name, contact.id))
+            else -> chooseCardOf = contactId
+        }
     }
 
     override fun pickContactCard(contactId: String, cardId: String) {
@@ -134,18 +135,6 @@ class RecipientDestination(private val flow: TransferFlow) : Destination(), Reci
     }
 
     override fun closeCards() { chooseCardOf = null }
-
-    /** A phone contact brings name and phones; its card is added right after, then it is listed here. */
-    override fun importContacts() {
-        app.launch {
-            importing = true
-            try {
-                app.importPhoneContact()?.let { app.navigator.push(ContactEditDestination(app, it.id)) }
-            } finally {
-                importing = false
-            }
-        }
-    }
 
     private fun choose(recipient: RecipientUi) {
         flow.recipient = recipient

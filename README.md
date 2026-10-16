@@ -5,7 +5,7 @@
 <h1 align="center">NeoTransfer</h1>
 
 <p align="center">
-  Tus tarjetas de BPA y BANDEC en el teléfono: saldo, transferencias, pagos con QR y servicios. Funciona sin datos móviles.
+  Tus tarjetas de BPA, BANDEC y Metropolitano en el teléfono: saldo, transferencias, pagos con QR y servicios. Funciona sin datos móviles.
 </p>
 
 <p align="center">
@@ -22,20 +22,20 @@ NeoTransfer es una app Android independiente. No está afiliada a ETECSA, a Tran
 
 ## Qué hace
 
-- **Cartera.** Tus tarjetas de BPA y BANDEC, en CUP o USD, tal como son, con el número completo y el saldo siempre a la vista.
+- **Cartera.** Tus tarjetas de BPA, BANDEC y Metropolitano, en CUP o USD, tal como son, con el número completo y el saldo siempre a la vista.
 - **Saldo al día.** Se ajusta con cada comprobante del banco y con cada transferencia que recibes. Lo consultas cuando quieras.
 - **Transferir** a cualquier tarjeta: escribe el número, escanéalo o elige un contacto. Si ya enviaste lo mismo y no ha llegado la respuesta, te pregunta antes de repetirlo.
 - **Pagar con QR** de comercios y tiendas en línea, desde la cámara, una imagen de la galería o un enlace de pago.
 - **Cobrar.** El QR de tu tarjeta, que también lee Transfermóvil, para mostrarlo o compartirlo con el importe que pides.
 - **Servicios** desde tu tarjeta: electricidad, teléfono fijo, agua, Nauta Hogar (recarga y deuda), cuenta Nauta y recarga móvil. Con el saldo del teléfono: consultar saldo, datos, minutos, SMS y bonos, comprar paquetes y transferir saldo.
 - **Actividad.** Todos tus movimientos con su comprobante, también los que hagas desde Transfermóvil. Al instalar la app, la arma con los SMS del banco que ya tienes.
-- **Contactos.** Varias tarjetas y teléfonos por persona, importados del teléfono o de Transfermóvil. Cuando alguien te transfiere, la notificación dice quién y cuánto.
+- **Contactos.** Tu agenda del teléfono, sin importar nada: la lista muestra a quien le mueves dinero, con su último movimiento, y le añades tarjetas a cualquiera. Cuando alguien te transfiere, la notificación dice quién y cuánto.
 - **Escáner.** Lee QR y números de tarjeta y de móvil, impresos o escritos a mano. Lo abres desde la app, con «Escanear» al mantener pulsado el icono o desde los Ajustes rápidos.
 - **Respaldo** cifrado con contraseña de tus tarjetas, contactos y servicios guardados, sin las claves del banco. También importa el respaldo `.trm` de Transfermóvil.
 
 ## Cómo funciona
 
-NeoTransfer usa los mismos códigos USSD que Transfermóvil y lee los SMS que te manda el banco (remitente `PAGOxMOVIL`). Por eso funciona con 2G y sin datos móviles.
+NeoTransfer usa los mismos códigos USSD que Transfermóvil y lee los SMS que te manda el banco (remitente `PAGOxMOVIL`, y los avisos de `BANDEC`). Por eso funciona con 2G y sin datos móviles.
 
 Envías y sigues: la operación queda «Enviada» y la app queda libre para otra cosa. El resultado aparece cuando llega el SMS, aunque tarde unos minutos, y te avisa si no estás en la app. Si el banco pide autenticarte, NeoTransfer lo hace solo con tu clave guardada. El dinero nunca se reenvía solo.
 
@@ -44,7 +44,7 @@ La 1.0 envía las operaciones con el mismo formato que Transfermóvil y pruebas 
 ## Requisitos
 
 - Android 15 o más nuevo, de 64 bits.
-- Una línea cubana registrada en Transfermóvil con BPA o BANDEC. NeoTransfer usa esa misma clave; el registro no lo hace. Si el teléfono tiene dos SIM, usa la predeterminada para llamadas.
+- Una línea cubana registrada en Transfermóvil con BPA, BANDEC o Metropolitano. NeoTransfer usa esa misma clave; el registro no lo hace. Si el teléfono tiene dos SIM, usa la predeterminada para llamadas.
 - Una huella configurada en el teléfono.
 
 ## Instalación
@@ -59,8 +59,8 @@ Las versiones nuevas se instalan igual, encima de la anterior, y conservan tus d
 ## Primeros pasos
 
 1. Al abrir la app, Android te pide todos los permisos de una vez: SMS y Teléfono, que son imprescindibles, y Cámara, Contactos y Notificaciones.
-2. Elige tu banco: BPA o BANDEC.
-3. Escribe la clave de autenticación del banco, la misma de Transfermóvil (4 dígitos en BPA, 5 en BANDEC), y confírmala con la huella.
+2. Elige tu banco: BPA, BANDEC o Metropolitano.
+3. Escribe la clave de autenticación del banco, la misma de Transfermóvil (4 dígitos en BPA y Metropolitano, 5 en BANDEC), y confírmala con la huella.
 4. Añade tus tarjetas de ese banco: escribe el número o escanéalo, y elige CUP o USD. El titular y el vencimiento son opcionales.
 5. Toca «Consultar saldo» para ver el saldo por primera vez. La actividad ya aparece con los SMS del banco que tenías.
 
@@ -95,4 +95,4 @@ Kotlin y Jetpack Compose, en cuatro módulos: `core` (protocolo y libro de opera
 
 [Apache 2.0](LICENSE). Las fuentes Inter y Arimo (OFL) y los iconos Material Symbols (Apache 2.0) conservan sus licencias, incluidas en `app/src/main/assets/licenses/`.
 
-Los fondos de las tarjetas BPA y BANDEC son reconstrucciones vectoriales hechas a partir de fotos de tarjetas, no archivos oficiales de los bancos; los logotipos y marcas que muestran pertenecen a sus dueños. No contienen datos personales: el número, el titular y el vencimiento los dibuja la app.
+Los fondos de las tarjetas BPA, BANDEC y Metropolitano son reconstrucciones vectoriales hechas a partir de fotos de tarjetas, no archivos oficiales de los bancos; los logotipos y marcas que muestran pertenecen a sus dueños. No contienen datos personales: el número, el titular y el vencimiento los dibuja la app.

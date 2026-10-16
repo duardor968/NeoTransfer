@@ -1,6 +1,7 @@
 package dev.duardo.neotransfer.engine
 
 import dev.duardo.neotransfer.core.protocol.UssdCommand
+import dev.duardo.neotransfer.core.sms.SmsRecord
 import javax.crypto.Cipher
 
 /** The modem. Android: `TelephonyManager.sendUssdRequest` and `ACTION_CALL`; tests: a fake. */
@@ -20,11 +21,11 @@ sealed interface UssdReply {
     data class Failure(val reason: String) : UssdReply
 }
 
-/** A PAGOxMOVIL row of the SMS inbox: `_id`, `date`, `date_sent` (epoch millis) and body. */
-data class InboxSms(val id: Long, val date: Long, val dateSent: Long, val body: String)
+/** A bank row of the SMS inbox: `_id`, `date`, `date_sent` (epoch millis), body and sender. */
+data class InboxSms(val id: Long, val date: Long, val dateSent: Long, val body: String, val address: String = SmsRecord.SENDER)
 
 interface SmsInbox {
-    /** PAGOxMOVIL rows with `_id >= fromId`. Throws [SecurityException] without READ_SMS. */
+    /** Rows of [SmsRecord.SENDERS] with `_id >= fromId`. Throws [SecurityException] without READ_SMS. */
     fun read(fromId: Long): List<InboxSms>
 }
 
@@ -60,9 +61,11 @@ interface Documents {
     fun write(uri: String, bytes: ByteArray)
 }
 
-/** A contact the user picked from the phone: [key] is stable across imports, [phones] are Cuban mobiles (8 digits). */
+/** Someone in the phone's address book: [key] is the contact's lookup key, [phones] its Cuban mobiles (8 digits). */
 data class PhoneContact(val key: String, val name: String, val phones: List<String>)
 
-fun interface PhoneContacts {
-    fun read(uri: String): PhoneContact
+/** The phone's address book, read whole: it is the source of names and phones; the app only adds cards. */
+fun interface PhoneBook {
+    /** Everyone with a name and a Cuban mobile. Throws [SecurityException] without READ_CONTACTS. */
+    fun read(): List<PhoneContact>
 }

@@ -8,6 +8,7 @@ import java.time.Instant
 enum class Bank(val shortName: String, val fullName: String) {
     BPA("BPA", "Banco Popular de Ahorro"),
     BANDEC("BANDEC", "Banco de Crédito y Comercio"),
+    BANMET("Metropolitano", "Banco Metropolitano"),
 }
 
 @Immutable
@@ -39,13 +40,19 @@ data class WalletCardUi(val card: CardUi, val balance: BalanceUi, val refreshing
 @Immutable
 data class ForeignCardUi(val id: String, val number: String, val bankName: String? = null, val label: String? = null)
 
+/** [fromAddressBook]: name and phones come from the phone's address book. [last]: the newest movement with them. */
 @Immutable
 data class ContactUi(
     val id: String,
     val name: String,
     val cards: List<ForeignCardUi>,
     val phones: List<String>,
+    val fromAddressBook: Boolean = false,
+    val last: LastMovementUi? = null,
 )
+
+@Immutable
+data class LastMovementUi(val kind: OperationKind, val amount: Money?, val at: Instant)
 
 /** Destination of a transfer: a card, named when it belongs to a contact. */
 @Immutable

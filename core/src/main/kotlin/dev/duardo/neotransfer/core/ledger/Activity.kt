@@ -25,7 +25,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
-/** [OTHER]: a bank movement known only from last operations (card payment, ATM, interest…). */
+/** [OTHER]: a bank movement known only from last operations or a bank alert (card payment, ATM, branch…). */
 enum class MovementKind { TRANSFER, QR_PAYMENT, SERVICE, OTHER }
 enum class Direction { IN, OUT, BETWEEN_OWN }
 
@@ -60,6 +60,11 @@ data class Movement(
     val label: String? = null,
     /** Known only by its date (last operations): there is no time of day. */
     val dateOnly: Boolean = false,
+    /**
+     * False for a bank alert: it leaves hours or weeks after the operation, so a balance queried in between may
+     * already include it. It is shown, never applied to the balance.
+     */
+    val movesBalance: Boolean = true,
 ) {
     val external: Boolean get() = operationId == null
 }
@@ -92,6 +97,7 @@ internal class Activity(
         fun <T : SmsMessage> first(type: Class<T>) = records.firstOrNull { type.isInstance(it.message) }
         val primary = first(SmsMessage.TransferSent::class.java) ?: first(SmsMessage.PaymentCompleted::class.java)
             ?: first(SmsMessage.ServicePaid::class.java) ?: first(SmsMessage.TransferReceived::class.java)
+            ?: first(SmsMessage.CardOperation::class.java)
             ?: return null // a copy alone is ambiguous: never attributed
         val messages = records.map { it.message }
         val operationId = operationOf[primary.id]
@@ -115,6 +121,12 @@ internal class Activity(
                 val credit = own(m.account)
                 Movement("ref:${m.reference}", MovementKind.TRANSFER, null, Direction.IN, m.amount, at,
                     cards.firstOrNull { it.number == credit }?.bank, null, credit, m.senderPhone, m.reference, null, null)
+            }
+            is SmsMessage.CardOperation -> {
+                val card = cards.firstOrNull { it.number == m.card }
+                Movement("ref:${m.reference}", MovementKind.OTHER, null, if (m.credit) Direction.IN else Direction.OUT,
+                    Money(m.amount.amount, card?.currency ?: m.amount.currency), at, m.bank, card?.number?.takeUnless { m.credit },
+                    card?.number?.takeIf { m.credit }, null, m.reference, null, null, label = m.label, movesBalance = false)
             }
             else -> return null
         }
@@ -215,7 +227,7 @@ internal class Activity(
 
     private fun project(card: OwnCard, observations: List<Observation>): CardBalance {
         val events = observations.map { Triple(it.at, it.order, it as Any) } +
-            entries.filter { it.movement.debitCard == card.number || it.movement.creditCard == card.number }
+            entries.filter { it.movement.movesBalance && (it.movement.debitCard == card.number || it.movement.creditCard == card.number) }
                 .map { Triple(it.movement.at, it.order, it.movement as Any) }
         var value: BigDecimal? = null
         var observedAt: Instant? = null

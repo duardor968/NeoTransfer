@@ -9,7 +9,7 @@ import dev.duardo.neotransfer.data.LegacyData
 import dev.duardo.neotransfer.data.NeoDatabase
 import dev.duardo.neotransfer.data.RoomStore
 import dev.duardo.neotransfer.platform.AndroidNotifier
-import dev.duardo.neotransfer.platform.AndroidPhoneContacts
+import dev.duardo.neotransfer.platform.AndroidPhoneBook
 import dev.duardo.neotransfer.platform.AndroidSmsInbox
 import dev.duardo.neotransfer.platform.AndroidUssdModem
 import dev.duardo.neotransfer.platform.BankPinVault
@@ -42,7 +42,7 @@ open class NeoTransferApplication : Application() {
             vault = BankPinVault(this),
             notifier = AndroidNotifier(this),
             documents = ContentDocuments(this),
-            phoneContacts = AndroidPhoneContacts(this),
+            phoneBook = AndroidPhoneBook(this),
             clock = Instant::now,
             state = Dispatchers.Default.limitedParallelism(1),
             io = Dispatchers.IO,

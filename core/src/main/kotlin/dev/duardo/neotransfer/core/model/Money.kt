@@ -10,7 +10,8 @@ import java.math.BigDecimal
 import java.time.Instant
 
 /** Banks in scope. [code] is the agency sent on the wire; [pinLength] is the banking key length. */
-enum class Bank(val code: String, val pinLength: Int) { BPA("01", 4), BANDEC("02", 5) }
+/** Agency code and key length on the wire. Metropolitano's key is the 4-digit Telebanca card PIN. */
+enum class Bank(val code: String, val pinLength: Int) { BPA("01", 4), BANDEC("02", 5), BANMET("03", 4) }
 
 /** Currencies the green app operates with. CUC is gone on purpose. */
 enum class Currency(val wireCode: String) { CUP("1"), USD("3") }

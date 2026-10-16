@@ -54,7 +54,8 @@ import dev.duardo.neotransfer.ui.model.CardUi
 
 /**
  * Print positions measured on rectified photos of physical cards (ID-1, card-printer output, Arial metrics):
- * number centred in its band, then holder, then currency and expiry on one line. BANDEC prints lower than BPA.
+ * number centred in its band, then holder, then currency and expiry on one line. BANDEC prints lower than BPA;
+ * Metropolitano prints a larger number and puts the currency alone under the holder, by the bottom edge.
  */
 private val BpaPrint = CardFaceLayout(
     number = CardPrint(x = 0.107f, baseline = 0.582f, size = 0.083f, maxWidth = 0.84f),
@@ -70,11 +71,19 @@ private val BandecPrint = CardFaceLayout(
     expiry = CardPrint(x = 0.302f, baseline = 0.926f, size = 0.041f, maxWidth = 0.45f),
 )
 
+private val BanmetPrint = CardFaceLayout(
+    number = CardPrint(x = 0.119f, baseline = 0.588f, size = 0.088f, maxWidth = 0.80f),
+    holder = CardPrint(x = 0.100f, baseline = 0.785f, size = 0.041f, maxWidth = 0.68f),
+    currency = CardPrint(x = 0.085f, baseline = 0.963f, size = 0.041f, maxWidth = 0.14f),
+    expiry = CardPrint(x = 0.309f, baseline = 0.905f, size = 0.041f, maxWidth = 0.45f),
+)
+
 @get:DrawableRes
 val Bank.art: Int
     get() = when (this) {
         Bank.BPA -> R.drawable.card_bpa_red
         Bank.BANDEC -> R.drawable.card_bandec_red
+        Bank.BANMET -> R.drawable.card_banmet_red
     }
 
 /** The card's own colour, sampled from its art: the halo behind it in the wallet. */
@@ -82,12 +91,14 @@ val Bank.artColor: Color
     get() = when (this) {
         Bank.BPA -> Color(0xFF1E7A5E)
         Bank.BANDEC -> Color(0xFFCC2A45)
+        Bank.BANMET -> Color(0xFF90D200)
     }
 
 private val Bank.print: CardFaceLayout
     get() = when (this) {
         Bank.BPA -> BpaPrint
         Bank.BANDEC -> BandecPrint
+        Bank.BANMET -> BanmetPrint
     }
 
 /** The user's card, 1:1 with the plastic. */
@@ -112,20 +123,25 @@ private val Bank.logo: Int
     get() = when (this) {
         Bank.BPA -> R.drawable.bank_logo_bpa
         Bank.BANDEC -> R.drawable.bank_logo_bandec
+        Bank.BANMET -> R.drawable.bank_logo_banmet
     }
 
-/** What each bank prints its logo on: BPA's green logo on white, BANDEC's white logo on its red. */
+/**
+ * What each bank prints its logo on: BPA's green logo on white, BANDEC's white logo on its red, Metropolitano's
+ * black and white mark on its lime band.
+ */
 private val Bank.logoGround: Color
     get() = when (this) {
         Bank.BPA -> Color.White
-        Bank.BANDEC -> artColor
+        Bank.BANDEC, Bank.BANMET -> artColor
     }
 
-/** Heights that give both logos the same weight: BPA's heavy lettering goes smaller. */
+/** Heights that give the logos the same weight: BPA's heavy lettering goes smaller, Metropolitano's long name too. */
 private val Bank.logoHeight: Dp
     get() = when (this) {
         Bank.BPA -> 44.dp
         Bank.BANDEC -> 56.dp
+        Bank.BANMET -> 36.dp
     }
 
 /**

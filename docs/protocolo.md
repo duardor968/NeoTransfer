@@ -1,6 +1,6 @@
 # Protocolo de pagos móviles por USSD y SMS
 
-Referencia del protocolo que NeoTransfer usa con BPA (agencia `01`) y BANDEC (`02`), y de los códigos Cubacel que ofrece. No es una especificación oficial: describe lo que hace el cliente Transfermóvil, lo que se observa en los SMS del banco y lo que envía NeoTransfer. Revisado el 2026-10-15.
+Referencia del protocolo que NeoTransfer usa con BPA (agencia `01`), BANDEC (`02`) y Metropolitano (`03`), y de los códigos Cubacel que ofrece. No es una especificación oficial: describe lo que hace el cliente Transfermóvil, lo que se observa en los SMS del banco y lo que envía NeoTransfer. Revisado el 2026-10-16.
 
 ## Procedencia
 
@@ -48,7 +48,7 @@ NeoTransfer: `protocol/Requests.kt`, `protocol/UssdCommand.kt`.
 
 ## 2. Sesión bancaria
 
-- Autenticar: servicio `40` con `<agencia>*<clave>`: BPA `01*<clave de 4 dígitos>`, BANDEC `02*<clave de 5 dígitos>` (`lzGEfceoJu:45,56`; `TGFziPh3KJ:45,56`). Desconectar: `*444*70#` (`R7PmVxXLJZC:329-343`).
+- Autenticar: servicio `40` con `<agencia>*<clave>`: BPA `01*<clave de 4 dígitos>`, BANDEC `02*<clave de 5 dígitos>` (`lzGEfceoJu:45,56`; `TGFziPh3KJ:45,56`), Metropolitano `03*<clave de 4 dígitos>`, que es el PIN de la tarjeta Telebanca (`PAZK2sdsJ5:30-32,49-51,60`). Desconectar: `*444*70#` (`R7PmVxXLJZC:329-343`).
 - **[TM]**
   - Marca la sesión al pulsar «Confirmar» del `40`, antes del `ACTION_CALL`: guarda banco y hora sin esperar acuse ni SMS (`FBsQzP3Zfj:563-587`).
   - La da por válida 1 hora (`FBsQzP3Zfj:625-636`, `Calendar.add(HOUR,1)`; igual en 1.250620).
@@ -88,6 +88,7 @@ NeoTransfer: `protocol/ParameterCodec.kt`. Prueba: `core/src/test/resources/code
 
 - BPA (`Agg55uYctq:62-101`): CUP o USD → `1` o `3` con `0000`, la cuenta predeterminada de esa moneda. «Mis cuentas» o «Insertar cuenta» → `0` con los 16 dígitos.
 - BANDEC (`Agg55uYctq:150-166,205`): no hay selector de moneda. El interruptor «Tipo de cuenta a operar» apagado deja `0*0000`; encendido envía `0` con la tarjeta.
+- Metropolitano (`Agg55uYctq:128-169,204-224`): el selector de BPA, con elección obligatoria; no existe el `0*0000` de BANDEC.
 
 **NeoTransfer** (`Source.forCard`): con una sola tarjeta de ese banco usa la cuenta predeterminada; con varias, envía la tarjeta explícita. `monedaTarjeta` es siempre `0` en BANDEC y con tarjeta explícita.
 
@@ -121,7 +122,15 @@ Detalles:
 - **Nauta.** `tipo` es `1` para cuentas `@nauta.com.cu` y `2` para `@nauta.co.cu`. El usuario va sin dominio, sin espacios ni `@` y con 20 caracteres como máximo (`PqTzgaEYF6:320-335`). El importe sale como `float` de Java (`100.0`) y debe ser al menos 1 (`:361`). El móvil omitido es `0000000`.
 - **Recarga móvil.** El servicio `88` (en MLC) queda fuera de alcance.
 
-NeoTransfer: `protocol/Requests.kt`. Pruebas en `ProtocolContractTest`: orden de parámetros de cada operación, `core/src/test/resources/service-oracle.tsv` (41, 42, agua y 54 de ambos bancos con tres semillas) y los 800 vectores QR.
+**Metropolitano (`03`)** envía lo mismo que BPA en todas las filas, con `03` donde BPA pone `01` (`dVxDCMi9cK:53`, `x6Wob3Sa98U:617`, `BoMBck6OXT:210`, `PqTzgaEYF6:120-136`, `SjZHfPJPwX:131-143`), salvo en tres:
+
+- **48**: el primer campo es el tipo de operación que se consulta, `1` = todas (`GhhAuUBVrI:46-56,71-82`; `arrays.xml:296-309`), en vez del `0` fijo.
+- **41**: solo facturas de 13 dígitos (`PliSaYhOg0:167-171`).
+- **42**: la factura empieza por `01` y el importe `0` paga el total («Pago Total», `pnl2Kga8j7:170-179,199-203,258-272`).
+
+Que el servidor acepte estos formatos: **[no verificado]**, no hay ningún SMS de Metropolitano en la muestra.
+
+NeoTransfer: `protocol/Requests.kt`. Pruebas en `ProtocolContractTest`: orden de parámetros de cada operación, las diferencias de Metropolitano, `core/src/test/resources/service-oracle.tsv` (41, 42, agua y 54 de ambos bancos con tres semillas) y los 800 vectores QR.
 
 ### 4.3 Cubacel
 
@@ -204,9 +213,9 @@ Ninguna operación de NeoTransfer produce `60`, `49`, `58`, `68` ni `69`; lo fij
 
 ### 7.2 Recepción en NeoTransfer
 
-- `SmsReceiver` despierta la app, aunque esté cerrada, cuando llega un SMS de `PAGOxMOVIL`. El controlador lee la bandeja desde el último `_id` guardado, inclusive; mientras el proceso vive, un observador de `content://sms` cubre las escrituras tardías (`app/src/main/kotlin/dev/duardo/neotransfer/platform/SmsPlatform.kt`, `AppController.ingest`).
-- La primera vez importa toda la bandeja de `PAGOxMOVIL` sin notificar: la actividad se reconstruye al instalar.
-- Orden: `date_sent` (marca del SMSC). **[SMS]** `PAGOxMOVIL` llega siempre por el mismo SMSC, sin marcas anómalas en 251 mensajes (un solo valor negativo, −0,13 s). ETECSA, Cubacel, Nauta, BANDEC y ENZONA llegan por otros SMSC cuyo `date_sent` va unas 11 horas (≈39.600 s) por detrás de la recepción; NeoTransfer solo lee `PAGOxMOVIL`.
+- `SmsReceiver` despierta la app, aunque esté cerrada, cuando llega un SMS de `PAGOxMOVIL` o de `BANDEC`. El controlador lee la bandeja desde el último `_id` guardado, inclusive; mientras el proceso vive, un observador de `content://sms` cubre las escrituras tardías (`app/src/main/kotlin/dev/duardo/neotransfer/platform/SmsPlatform.kt`, `AppController.ingest`).
+- La primera vez importa toda la bandeja de esos remitentes sin notificar: la actividad se reconstruye al instalar. Cuando una versión añade un remitente, vuelve a leerla entera una vez, también sin notificar (`Preferences.inboxVersion`).
+- Orden: `date_sent` (marca del SMSC). **[SMS]** `PAGOxMOVIL` llega siempre por el mismo SMSC, sin marcas anómalas en 251 mensajes (un solo valor negativo, −0,13 s). ETECSA, Cubacel, Nauta, BANDEC y ENZONA llegan por otros SMSC cuyo `date_sent` va unas 11 horas (≈39.600 s) por detrás de la recepción: los avisos de `BANDEC` se ordenan por la recepción.
 - Los SMS son datos internos: la app no muestra su texto. Del SMS de registro no se guarda el cuerpo.
 
 ### 7.3 Plantillas observadas
@@ -236,6 +245,12 @@ Ninguna operación de NeoTransfer produce `60`, `49`, `58`, `68` ni `69`; lo fij
 | Recarga de saldo recibida | 4 | `Usted ha recibido una recarga de saldo movil por un monto de <importe> CUP del numero <móvil>…` (saldo del teléfono, no del banco) | `MobileBalanceReceived` |
 | Registro completado | 1 | `… La operacion de registro fue completada. Bienvenido a Transfermovil. Clave de Autenticacion: … El PIN asociado a su tarjeta … es …` | `Registration` |
 | Error de asociación | 5 | `Error en la asociacion de tarjeta. Banco Bandec: Esta tarjeta ya esta asociada a un celular` (4) · `Error en la asociacion de tarjeta. Banco Popular de Ahorro: LA CUENTA NO ESTA ASOCIADA A UNA TARJETA MAGNETICA` (1) | `Rejected` |
+
+**Avisos de BANDEC** (remitente `BANDEC`, los que el cliente activa en el Kiosco; 15 en la bandeja al 2026-10-16): `BANDEC >> Operacion en Linea Sucursal por <importe> Tarjeta <16 dígitos>. Referencia OL<ref>. Configure en https://kiosco.bandec.cu.` → `CardOperation`, un débito: las últimas operaciones listan las mismas referencias como «Extracción en línea». Salen en lotes, de horas a 23 días después de la operación, así que se muestran en la actividad y nunca mueven el saldo: una consulta hecha entre la extracción y el aviso ya la incluye. El Kiosco ofrece también avisos de transferencias, pagos, salario y depósitos; su texto: **[no verificado]**, y una redacción desconocida queda sin reconocer, nunca adivinada.
+
+**Pago externo** (sin muestra propia; textos de agosto de 2026 de los tres bancos publicados en un analizador de terceros): `Banco <banco> El pago externo fue completado. Fecha: … Entidad: <comercio> Nro. Transaccion: <id> Monto Pagado: <importe> CUP Nro. Transaccion Banco: <ref>.`, sin saldo → `PaymentCompleted`, con `<id>` como identificador de la compra.
+
+**Metropolitano** (sin muestra propia): el lector reconoce «Banco Metropolitano» en las mismas plantillas que BPA (autenticación, saldo con `Saldo Disponible`, rechazos) y su autenticación fallida «Usuario cancelado en el sistema», vista en 2025. Su forma real: **[no verificado]**.
 
 Sin muestra real, el lector reconoce los pagos de electricidad (`El pago de la factura de electricidad fue completado`, `g0xM9kQCsqu:578-590`), teléfono fijo (`El pago de la factura telefonica fue completado`, `:539-577`) y agua (`El pago de la factura del agua fue completado.`, `:248-267`) con las plantillas del analizador de TM, y las últimas operaciones de BPA con el formato de BANDEC. Su forma real: **[no verificado]**.
 

@@ -40,6 +40,7 @@ import dev.duardo.neotransfer.ui.model.CardUi
 import dev.duardo.neotransfer.ui.model.ContactUi
 import dev.duardo.neotransfer.ui.model.CounterpartUi
 import dev.duardo.neotransfer.ui.model.ForeignCardUi
+import dev.duardo.neotransfer.ui.model.LastMovementUi
 import dev.duardo.neotransfer.ui.model.Money
 import dev.duardo.neotransfer.ui.model.OperationKind
 import dev.duardo.neotransfer.ui.model.OperationStatus
@@ -64,6 +65,8 @@ data class Domain(
     val settings: Settings = Settings(),
     val locked: Boolean = true,
     val lastBackup: Instant? = null,
+    /** Contacts that come from the phone's address book; null while it cannot be read. */
+    val addressBook: Set<String>? = null,
 ) {
     /** A bank is set up once it has a card or a saved key: from then on the app locks. */
     val configured: Boolean get() = cards.isNotEmpty() || savedKeys.isNotEmpty()
@@ -82,6 +85,10 @@ fun WalletCard.ui(): CardUi = CardUi(card.number, card.bank.ui(), card.number, c
 class Book(val domain: Domain, private val now: Instant = Instant.now()) {
     private val ownCards = domain.cards.map { it.card.card }
 
+    // The whole address book is in [Domain.contacts]: activity looks people up here instead of scanning it per item.
+    private val byPhone = domain.contacts.flatMap { c -> c.phones.mapNotNull(Phones::normalize).distinct().map { it to c } }.groupBy({ it.first }, { it.second })
+    private val byCard = domain.contacts.flatMap { c -> c.cards.mapNotNull(Cards::normalize).distinct().map { it to c } }.groupBy({ it.first }, { it.second })
+
     val cards: List<CardUi> = domain.cards.map { it.card.ui() }
 
     val wallet: List<WalletCardUi> = domain.cards.map { view ->
@@ -89,10 +96,6 @@ class Book(val domain: Domain, private val now: Instant = Instant.now()) {
         val query = BalanceQuery(view.card.card.bank, Source.forCard(view.card.card, ownCards))
         val refreshing = domain.operations.any { it.operation.request == query && it.state.inFlight }
         WalletCardUi(view.card.ui(), balance, refreshing)
-    }
-
-    val contacts: List<ContactUi> = domain.contacts.map { contact ->
-        ContactUi(contact.id, contact.name, contact.cards.map { foreignCard(it, contact.labels[it]) }, contact.phones)
     }
 
     private val operationIdsWithReceipt = domain.movements.mapNotNullTo(mutableSetOf()) { it.operationId }
@@ -118,6 +121,23 @@ class Book(val domain: Domain, private val now: Instant = Instant.now()) {
         }.mapNotNull { status -> fromOperations.firstOrNull { it.id == status.operation.id } }
     }
 
+    /** Everyone, by name, each with the newest movement with them (money that did not go through left out). */
+    val contacts: List<ContactUi> = run {
+        val last = activity.filter { it.contactId != null && it.status != OperationStatus.Rejected && it.status != OperationStatus.NotExecuted }
+            .groupBy { it.contactId!! }.mapValues { (_, items) -> items.first().let { LastMovementUi(it.kind, it.amount, it.at) } }
+        domain.contacts.map { contact ->
+            ContactUi(contact.id, contact.name, contact.cards.map { foreignCard(it, contact.labels[it]) }, contact.phones,
+                domain.addressBook?.contains(contact.id) == true, last[contact.id])
+        }
+    }
+
+    /** The Contacts tab: people with a movement or a saved card, newest movement first. */
+    val people: List<ContactUi> = contacts.filter { it.last != null || it.cards.isNotEmpty() }
+        .sortedWith(compareByDescending<ContactUi> { it.last?.at }.thenBy { it.name.lowercase() })
+
+    /** Last operations asked of the bank, answer still pending. */
+    val checkingHistory: Boolean = domain.operations.any { it.operation.request is HistoryQuery && it.state.inFlight }
+
     /** Recent activity for Home: what is not already listed as in progress. */
     val recent: List<OperationUi> = inProgress.mapTo(mutableSetOf()) { it.id }.let { shown -> activity.filter { it.id !in shown } }
 
@@ -142,7 +162,9 @@ class Book(val domain: Domain, private val now: Instant = Instant.now()) {
     fun foreignCard(number: String, label: String? = null): ForeignCardUi =
         ForeignCardUi(number, number, ownCards.firstOrNull { it.number.take(6) == number.take(6) }?.bank?.name, label)
 
-    fun contactName(card: String? = null, phone: String? = null): Contact? = domain.contacts.identify(phone = phone, card = card)
+    /** The contact that owns the phone or card, only when exactly one does ([identify]). */
+    fun contactName(card: String? = null, phone: String? = null): Contact? =
+        (phone?.let(Phones::normalize)?.let(byPhone::get).orEmpty() + card?.let(Cards::normalize)?.let(byCard::get).orEmpty()).distinct().singleOrNull()
 
     // ---- Operations and movements ----
 

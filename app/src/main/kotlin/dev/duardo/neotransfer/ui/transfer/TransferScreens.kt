@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -39,6 +40,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.duardo.neotransfer.designsystem.R as Ds
 import dev.duardo.neotransfer.designsystem.component.AmountDisplay
 import dev.duardo.neotransfer.designsystem.component.EmptyState
@@ -63,6 +65,7 @@ import dev.duardo.neotransfer.designsystem.component.StatusTone
 import dev.duardo.neotransfer.designsystem.component.SummaryLine
 import dev.duardo.neotransfer.designsystem.component.groupItem
 import dev.duardo.neotransfer.designsystem.format.formatAmount
+import dev.duardo.neotransfer.designsystem.format.NoBreak
 import dev.duardo.neotransfer.designsystem.format.formatCardNumber
 import dev.duardo.neotransfer.designsystem.format.formatMoney
 import dev.duardo.neotransfer.designsystem.format.unbroken
@@ -98,7 +101,6 @@ interface RecipientActions {
     fun pickContact(contactId: String)
     fun pickContactCard(contactId: String, cardId: String)
     fun closeCards()
-    fun importContacts()
 }
 
 /** Who receives: a contact, a recent recipient, a typed or scanned card number. */
@@ -134,13 +136,10 @@ fun RecipientScreen(state: RecipientPickUi, actions: RecipientActions, modifier:
                     }
                 }
             }
-            if (state.canImport) item(key = "import") {
-                EmptyState(
-                    Ds.drawable.ic_contacts, "Sin contactos",
-                    action = "Importar contactos del teléfono", onAction = actions::importContacts, busy = state.importing,
-                )
-            }
             val typed = state.typed
+            if (state.query.isBlank() && state.recent.isEmpty() && state.contacts.isEmpty()) item(key = "empty") {
+                EmptyState(Ds.drawable.ic_contacts, "Sin contactos con tarjeta")
+            }
             val count = state.contacts.size + if (typed != null) 1 else 0
             if (count > 0) {
                 item(key = "contacts-title") {
@@ -164,8 +163,8 @@ fun RecipientScreen(state: RecipientPickUi, actions: RecipientActions, modifier:
                         NeoRow(
                             contact.name,
                             supporting = contact.cards.firstOrNull()?.let { first ->
-                                formatCardNumber(first.number) + if (contact.cards.size > 1) " · ${contact.cards.size} tarjetas" else ""
-                            },
+                                formatCardNumber(first.number) + if (contact.cards.size > 1) "$NoBreak· " + "${contact.cards.size} tarjetas".unbroken() else ""
+                            } ?: "Sin tarjeta guardada",
                             leading = { NameAvatar(contact.name) },
                             onClick = { actions.pickContact(contact.id) },
                         )
@@ -190,6 +189,8 @@ private fun RecentChip(recipient: RecipientUi, onClick: () -> Unit) {
             name?.substringBefore(' ') ?: recipient.card.number.chunked(8).joinToString("\n", transform = ::formatCardNumber),
             style = MaterialTheme.typography.labelMedium,
             textAlign = TextAlign.Center,
+            softWrap = false,
+            autoSize = TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = MaterialTheme.typography.labelMedium.fontSize),
         )
     }
 }

@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import dev.duardo.neotransfer.designsystem.R
 import dev.duardo.neotransfer.designsystem.format.DecimalSeparator
+import dev.duardo.neotransfer.designsystem.format.NoBreak
 import dev.duardo.neotransfer.designsystem.theme.Neo
 import dev.duardo.neotransfer.designsystem.theme.NeoMotion
 
@@ -136,7 +137,7 @@ fun AmountDisplay(input: String, currency: String, modifier: Modifier = Modifier
 private fun groupInput(input: String): String {
     val cut = input.indexOf(DecimalSeparator)
     val whole = if (cut >= 0) input.substring(0, cut) else input
-    val grouped = whole.reversed().chunked(3).joinToString(",").reversed()
+    val grouped = whole.reversed().chunked(3).joinToString(NoBreak.toString()).reversed()
     return if (cut >= 0) grouped + input.substring(cut) else grouped
 }
 

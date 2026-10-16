@@ -408,6 +408,27 @@ class LedgerScenarioTest {
         assertEquals(cup("850.00"), phone.balance(bandec))
     }
 
+    @Test fun `a BANDEC branch alert is shown but never moves the balance, and last operations do not repeat it`() {
+        val phone = Phone(listOf(bandec))
+        phone.receive(Sms.balanceBandec(bandec.number, "18000.00"))
+        phone.minutes(30)
+        // Queried after the withdrawal, before its alert: the balance already includes it.
+        phone.receive(Sms.balanceBandec(bandec.number, "3000.00"))
+        phone.advance(Duration.ofHours(12))
+        phone.receive(Sms.branchAlert(bandec.number, "15000.00", "OL000S1"))
+        phone.receive(Sms.branchAlert(bandec.number, "15000.00", "OL000S1")) // resent: one movement
+        assertEquals(cup("3000.00"), phone.balance(bandec))
+        val alert = phone.view().movements.single()
+        assertEquals(MovementKind.OTHER, alert.kind)
+        assertEquals(Direction.OUT, alert.direction)
+        assertEquals("Extracción en sucursal", alert.label)
+        assertEquals(bandec.number, alert.debitCard)
+        assertEquals(cup("15000.00"), alert.amount)
+        phone.receive(Sms.history(Sms.row("15/10/2026", "Extraccion en Linea", "OL000S1", false, "15000.00")))
+        assertEquals(1, phone.view().movements.size)
+        assertEquals(cup("3000.00"), phone.balance(bandec))
+    }
+
     @Test fun `last operations rows without reference dedupe by day, direction and amount`() {
         val phone = Phone(listOf(bandec))
         phone.receive(Sms.sent(Bank.BANDEC, friend, "20.00", "KW000R2"))

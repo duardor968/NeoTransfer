@@ -102,7 +102,7 @@ object TrmImporter {
 
         val cards = linkedMapOf<String, OwnCard>()
         for (row in table("MCBank")) {
-            val bank = when (row["agencia"]) { "BPA" -> Bank.BPA; "BANDEC" -> Bank.BANDEC; else -> null }
+            val bank = when (row["agencia"]) { "BPA" -> Bank.BPA; "BANDEC" -> Bank.BANDEC; "Metropolitano" -> Bank.BANMET; else -> null }
             val number = row["cuenta"]?.let(Cards::normalize)
             if (bank == null || number == null || number in cards) { count(skipped, row); continue }
             cards[number] = OwnCard(number, bank, if (row["tipo_moneda"] == "USD") Currency.USD else Currency.CUP, row["alias"])

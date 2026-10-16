@@ -86,7 +86,7 @@ class AppController(
     private val vault: KeyVault,
     private val notifier: Notifier,
     private val documents: Documents,
-    private val phoneContacts: PhoneContacts,
+    private val phoneBook: PhoneBook,
     private val clock: () -> Instant,
     /** Runs one coroutine at a time: all mutable state below is confined to it. */
     state: CoroutineDispatcher,
@@ -99,6 +99,10 @@ class AppController(
     private val sms = mutableMapOf<Long, StoredSms>()
     private val records = mutableMapOf<Long, SmsRecord>()
     private var wallet = emptyList<WalletCard>()
+    /** Contacts as stored: address-book people only when the app keeps cards for them. */
+    private var stored = emptyList<Contact>()
+    /** The phone's address book; null while it cannot be read. */
+    private var agenda: List<PhoneContact>? = null
     private var preferences = Preferences()
     private var view: LedgerView? = null
     private var sending = false
@@ -115,6 +119,7 @@ class AppController(
     private val _operations = MutableStateFlow(emptyList<OperationStatus>())
     private val _movements = MutableStateFlow(emptyList<Movement>())
     private val _contacts = MutableStateFlow(emptyList<Contact>())
+    private val _addressBook = MutableStateFlow<Set<String>?>(null)
     private val _services = MutableStateFlow(emptyList<ServiceReference>())
     private val _session = MutableStateFlow<Session?>(null)
     private val _blockedBanks = MutableStateFlow(emptySet<Bank>())
@@ -130,7 +135,10 @@ class AppController(
     val operations: StateFlow<List<OperationStatus>> = _operations
     /** Activity, newest first. */
     val movements: StateFlow<List<Movement>> = _movements
+    /** Everyone in the phone's address book plus the contacts kept only in the app, by name ([Directory]). */
     val contacts: StateFlow<List<Contact>> = _contacts
+    /** Ids of the [contacts] that come from the phone's address book; null while it cannot be read. */
+    val addressBook: StateFlow<Set<String>?> = _addressBook
     val services: StateFlow<List<ServiceReference>> = _services
     /** The bank session the app counts on (60 min, one bank); it survives the UI lock. */
     val session: StateFlow<Session?> = _session
@@ -152,12 +160,14 @@ class AppController(
             snapshot.operations.forEach { operationsById[it.id] = it }
             snapshot.sms.forEach { sms[it.id] = it; records[it.id] = it.record() }
             wallet = snapshot.cards
-            _contacts.value = snapshot.contacts.sortedBy { it.name.lowercase() }
+            stored = snapshot.contacts
+            publishContacts()
             _services.value = snapshot.services
             preferences = snapshot.preferences
             startup.complete(Unit)
             publish()
             _loaded.value = true
+            readAddressBook()
             ingest()
         }
     }
@@ -170,6 +180,7 @@ class AppController(
             foreground = true
             lockTimer?.cancel()
             startup.await()
+            readAddressBook()
             ingest()
         }
     }
@@ -186,9 +197,32 @@ class AppController(
         }
     }
 
-    /** Permissions changed (READ_SMS may have just been granted): import what is missing. */
+    /** Permissions changed (READ_SMS or READ_CONTACTS may have just been granted): read what is missing. */
     fun onPermissionsChanged() {
-        scope.launch { startup.await(); ingest() }
+        scope.launch { startup.await(); readAddressBook(); ingest() }
+    }
+
+    /** Reads the address book and moves the cards saved for someone onto their entry in it ([Directory.link]). */
+    private suspend fun readAddressBook() {
+        val people = try {
+            withContext(io) { phoneBook.read() }
+        } catch (_: SecurityException) {
+            null
+        }
+        agenda = people
+        if (people != null) {
+            val (save, delete) = Directory.link(stored, people)
+            if (save.isNotEmpty()) store.saveContacts(save)
+            delete.forEach { store.deleteContact(it) }
+            val replaced = save.mapTo(hashSetOf()) { it.id } + delete
+            stored = stored.filterNot { it.id in replaced } + save
+        }
+        publishContacts()
+    }
+
+    private fun publishContacts() {
+        _contacts.value = Directory.merge(stored, agenda)
+        _addressBook.value = agenda?.mapTo(hashSetOf(), Directory::id)
     }
 
     /**
@@ -352,21 +386,15 @@ class AppController(
         require(clean.name.isNotEmpty()) { "Escribe un nombre" }
         val saved = clean.copy(labels = labels)
         store.saveContacts(listOf(saved))
-        _contacts.value = (_contacts.value.filterNot { it.id == saved.id } + saved).sortedBy { it.name.lowercase() }
+        stored = stored.filterNot { it.id == saved.id } + saved
+        publishContacts()
         saved
     }
 
     suspend fun deleteContact(id: String) = onState {
         store.deleteContact(id)
-        _contacts.value = _contacts.value.filterNot { it.id == id }
-    }
-
-    /** Imports the contact picked in the phone's contacts app; importing it again adds new phones. */
-    suspend fun importPhoneContact(uri: String): Contact = onState {
-        val picked = withContext(io) { phoneContacts.read(uri) }
-        val id = "phone:${picked.key}"
-        val existing = _contacts.value.firstOrNull { it.id == id }
-        saveContact(Contact(id, existing?.name ?: picked.name, existing?.phones.orEmpty() + picked.phones, existing?.cards.orEmpty(), existing?.labels.orEmpty()))
+        stored = stored.filterNot { it.id == id }
+        publishContacts()
     }
 
     suspend fun saveService(service: ServiceReference) = onState {
@@ -386,7 +414,7 @@ class AppController(
     /** Writes the encrypted backup (format 4: cards, contacts, services; never keys) to [uri]. */
     suspend fun exportBackup(uri: String, password: CharArray) = onState {
         try {
-            val content = BackupContent(wallet.map { BackupCard(it.card, it.holder, it.expiry) }, _contacts.value, _services.value)
+            val content = BackupContent(wallet.map { BackupCard(it.card, it.holder, it.expiry) }, stored, _services.value)
             val file = withContext(io) { BackupFile.export(content, password) }
             withContext(io) { documents.write(uri, file) }
             preferences = preferences.copy(lastBackup = clock())
@@ -542,25 +570,27 @@ class AppController(
 
     /**
      * Reads the inbox from the last stored `_id` (inclusive: Android may reuse the id of a deleted
-     * newest SMS). The first import rebuilds the activity silently; later SMS are announced.
+     * newest SMS). A full read (the first, or one that adds a sender) rebuilds the activity silently;
+     * later SMS are announced.
      */
     private suspend fun ingest(): Int {
-        val from = sms.keys.maxOrNull() ?: 0L
+        val full = preferences.inboxVersion < INBOX_VERSION
+        val from = if (full) 0L else sms.keys.maxOrNull() ?: 0L
         val rows = try {
             withContext(io) { inbox.read(from) }
         } catch (_: SecurityException) {
             return 0
         }
         val fresh = rows.filter { sms[it.id]?.receivedAt?.toEpochMilli() != it.date }
-            .mapNotNull { row -> SmsRecord.from(row.id, SmsRecord.SENDER, row.date, row.dateSent, row.body)?.let { row to it } }
-        if (fresh.isEmpty() && preferences.inboxImported) return 0
+            .mapNotNull { row -> SmsRecord.from(row.id, row.address, row.date, row.dateSent, row.body)?.let { row to it } }
+        if (fresh.isEmpty() && !full) return 0
         val stored = fresh.map { (row, record) ->
             // The registration SMS carries the bank key and the card PIN in clear: its body is never copied.
             StoredSms(row.id, record.sentAt, record.receivedAt, if (record.message == SmsMessage.Registration) REGISTRATION else row.body)
                 .also { sms[row.id] = it; records[row.id] = record }
         }
-        val announce = preferences.inboxImported
-        preferences = preferences.copy(inboxImported = true)
+        val announce = !full
+        preferences = preferences.copy(inboxVersion = INBOX_VERSION)
         publish(if (announce) fresh.map { it.second } else emptyList())
         if (stored.isNotEmpty()) store.saveSms(stored)
         if (!announce) store.savePreferences(preferences)
@@ -589,7 +619,7 @@ class AppController(
     private suspend fun merge(content: BackupContent): ImportSummary {
         val numbers = wallet.mapTo(mutableSetOf()) { it.card.number }
         val cards = content.cards.filter { numbers.add(it.card.number) }.map { WalletCard(it.card, it.holder, it.expiry) }
-        val existing = _contacts.value.associateBy { it.id }
+        val existing = stored.associateBy { it.id }
         val contacts = content.contacts.mapNotNull { incoming ->
             val current = existing[incoming.id] ?: return@mapNotNull incoming
             current.copy(
@@ -604,7 +634,8 @@ class AppController(
         if (contacts.isNotEmpty()) store.saveContacts(contacts)
         if (services.isNotEmpty()) store.saveServices(services)
         wallet = wallet + cards
-        _contacts.value = (_contacts.value.filterNot { contact -> contacts.any { it.id == contact.id } } + contacts).sortedBy { it.name.lowercase() }
+        stored = stored.filterNot { contact -> contacts.any { it.id == contact.id } } + contacts
+        readAddressBook()
         _services.value = _services.value + services
         publish()
         return ImportSummary(cards.size, content.contacts.count { it.id !in existing }, services.size)
@@ -617,5 +648,7 @@ class AppController(
         private val INBOX_POLL_INTERVAL: Duration = Duration.ofMillis(500)
         /** Stored instead of the registration SMS; it still reads as one. */
         private const val REGISTRATION = "La operacion de registro fue completada."
+        /** Bumped when the inbox gains a sender: the next read starts over, silently ([Preferences.inboxVersion]). */
+        private const val INBOX_VERSION = 2
     }
 }

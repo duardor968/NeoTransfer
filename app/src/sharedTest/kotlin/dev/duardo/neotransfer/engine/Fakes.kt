@@ -113,8 +113,9 @@ class Rig(
 ) {
     val notifier = FakeNotifier()
     val documents = FakeDocuments()
-    val phoneContacts = mutableMapOf<String, PhoneContact>()
-    val controller = AppController(store, modem, inbox, vault, notifier, documents, { phoneContacts.getValue(it) }, clock, state, io)
+    /** The phone's address book; null as if READ_CONTACTS were denied. */
+    var addressBook: List<PhoneContact>? = emptyList()
+    val controller = AppController(store, modem, inbox, vault, notifier, documents, { addressBook ?: throw SecurityException() }, clock, state, io)
 
     fun status(id: String) = controller.operations.value.first { it.operation.id == id }
     fun state(id: String) = status(id).state

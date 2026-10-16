@@ -47,7 +47,7 @@ class RoomStoreTest {
         val electricity = ServiceReference(ServiceKind.ELECTRICITY, "12345678901", "Casa")
         store.saveServices(listOf(electricity, ServiceReference(ServiceKind.PHONE, "123456789012345")))
         store.deleteService(ServiceReference(ServiceKind.PHONE, "123456789012345"))
-        val preferences = Preferences(Settings(Theme.LIGHT), mapOf(Bank.BPA to at, Bank.BANDEC to at), inboxImported = true)
+        val preferences = Preferences(Settings(Theme.LIGHT), mapOf(Bank.BPA to at, Bank.BANDEC to at), inboxVersion = 2)
         store.savePreferences(preferences)
         store.savePreferences(preferences.copy(keySavedAt = mapOf(Bank.BANDEC to at)))
 

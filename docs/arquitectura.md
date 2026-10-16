@@ -25,7 +25,7 @@ La variante `preview` añade `app/src/preview/`: un banco simulado y un catálog
 
 ## Enviar y seguir
 
-El libro de operaciones es una función pura: `Ledger.evaluate` (`core/src/main/kotlin/dev/duardo/neotransfer/core/ledger/Ledger.kt`) recibe lo que se envió, los SMS de `PAGOxMOVIL`, las tarjetas y la hora, y devuelve el estado de cada operación, lo próximo que hay que enviar, la sesión, los movimientos y los saldos. `AppController` (`app/src/main/kotlin/dev/duardo/neotransfer/engine/AppController.kt`) solo guarda hechos y vuelve a evaluar.
+El libro de operaciones es una función pura: `Ledger.evaluate` (`core/src/main/kotlin/dev/duardo/neotransfer/core/ledger/Ledger.kt`) recibe lo que se envió, los SMS del banco (`PAGOxMOVIL` y los avisos de `BANDEC`), las tarjetas y la hora, y devuelve el estado de cada operación, lo próximo que hay que enviar, la sesión, los movimientos y los saldos. `AppController` (`app/src/main/kotlin/dev/duardo/neotransfer/engine/AppController.kt`) solo guarda hechos y vuelve a evaluar.
 
 1. **Pedir.** `AppController.submit` comprueba que el banco tenga clave guardada y que no haya un pago idéntico pendiente: mismo origen, destino e importe. Si lo hay, pregunta antes («Ya enviaste… ¿Enviar otro?»); no bloquea. La operación se guarda antes de que nada pueda enviarla.
 2. **Turno.** Hay una sola solicitud USSD en curso a la vez: la siguiente sale cuando llega el acuse de la anterior, o a los 45 s sin acuse. La interfaz no se bloquea mientras tanto.
@@ -70,7 +70,7 @@ Los comprobantes sin operación propia (hechos desde Transfermóvil, por ejemplo
 - La atribución a tarjetas se calcula cada vez y no se guarda: añadir una tarjeta después reasigna lo que le corresponde. Un débito con cuenta predeterminada se atribuye si solo una tarjeta de ese banco y moneda puede ser; en BANDEC ayuda la tarjeta que nombra el SMS de autenticación.
 - Las autenticaciones nunca aparecen como movimientos.
 
-Al instalar, la app importa todos los SMS de `PAGOxMOVIL` de la bandeja sin notificar; después lee de forma incremental desde el último `_id`, nunca la bandeja entera por cada SMS.
+Al instalar, la app importa todos los SMS del banco de la bandeja sin notificar; después lee de forma incremental desde el último `_id`, nunca la bandeja entera por cada SMS.
 
 ### Saldo
 
@@ -93,9 +93,9 @@ Room, base `neotransfer.db`, versión 2 (`app/src/main/kotlin/dev/duardo/neotran
 | Tabla | Contenido |
 |---|---|
 | `operation` | Cada operación como JSON (`Operation.encode`): la solicitud y sus intentos, sin secretos |
-| `sms` | SMS de `PAGOxMOVIL` ingeridos: `_id`, hora del SMSC, hora de recepción y texto. Del SMS de registro, que trae la clave y el PIN, no se guarda el texto |
+| `sms` | SMS del banco ingeridos: `_id`, hora del SMSC, hora de recepción y texto. Del SMS de registro, que trae la clave y el PIN, no se guarda el texto |
 | `card` | Tarjetas propias en orden de cartera, con titular y vencimiento opcionales |
-| `contact` | Contactos con varios teléfonos y tarjetas, y un nombre por tarjeta («Salario») |
+| `contact` | Lo que la app añade a cada persona: tarjetas y un nombre por tarjeta («Salario»). Las de la agenda del teléfono se guardan como `phone:<lookup key>`, con una copia de su nombre y teléfonos para el respaldo; la agenda manda en nombre y teléfonos (`engine/Directory.kt`). Las que solo existen en la app guardan todo |
 | `service` | Referencias de servicios guardadas: factura, cuenta Nauta, móvil |
 | `setting` | Tema, avisos, cuándo se guardó cada clave, si ya se importó la bandeja y fecha del último respaldo |
 
@@ -127,4 +127,4 @@ La 1.0 empieza limpia: al primer arranque, `LegacyData` borra lo que dejaron las
 `core/src/main/kotlin/dev/duardo/neotransfer/core/backup/`:
 
 - **Respaldo propio** (`.ntbackup`, formato 4): tarjetas con titular y vencimiento, contactos y referencias de servicios. Nunca lleva claves del banco, claves de transferencia ni la actividad, que se reconstruye desde los SMS. Se cifra con contraseña obligatoria (`BackupEnvelope.kt`): AES-256-GCM con la cabecera como datos asociados y clave derivada con PBKDF2-HMAC-SHA256 de 600.000 iteraciones. Importar añade lo que falta y no sobrescribe.
-- **Respaldo de Transfermóvil** (`.trm`, `TrmImporter.kt`): importa tarjetas BPA y BANDEC, contactos con sus teléfonos y tarjetas, cuentas Nauta y facturas de electricidad y teléfono. Nunca lee la tabla de claves (`AOperKey`), los códigos de recarga ni los comprobantes.
+- **Respaldo de Transfermóvil** (`.trm`, `TrmImporter.kt`): importa tarjetas BPA, BANDEC y Metropolitano, contactos con sus teléfonos y tarjetas, cuentas Nauta y facturas de electricidad y teléfono. Nunca lee la tabla de claves (`AOperKey`), los códigos de recarga ni los comprobantes.

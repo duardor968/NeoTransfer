@@ -147,12 +147,14 @@ class FakeBank(private val context: Context) : PhoneLine, UssdModem, SmsInbox {
     private fun authenticated(bank: Bank): String = when (bank) {
         Bank.BPA -> "Usted se ha autenticado en la plataforma de pagos moviles, en el Banco Popular de Ahorro, puede comenzar a utilizar nuestros servicios de pagos a traves del movil"
         Bank.BANDEC -> "Usted se ha autenticado en la plataforma de pagos moviles, en el Banco Bandec con la cuenta ${firstCard(bank)?.let(::mask).orEmpty()}, puede comenzar a utilizar nuestros servicios de pagos a traves del movil"
+        Bank.BANMET -> "Usted se ha autenticado en la plataforma de pagos moviles, en el Banco Metropolitano, puede comenzar a utilizar nuestros servicios de pagos a traves del movil"
     }
 
     private fun balance(bank: Bank, source: Source): String {
         val value = balances.getOrPut(bank) { BigDecimal("25000.00") }.setScale(2)
         return when (bank) {
             Bank.BPA -> "Banco Popular de Ahorro:  La consulta de saldo fue completada. \n Saldo Disponible: CR $value CUP"
+            Bank.BANMET -> "Banco Metropolitano:  La consulta de saldo fue completada. \n Saldo Contable: CR $value CUP \n Saldo Disponible: CR $value CUP"
             Bank.BANDEC -> {
                 val card = (source as? Source.Card)?.number ?: firstCard(bank) ?: "9205000000000000"
                 "Banco Bandec La consulta de saldo fue completada. \n Cuenta;Saldo Contable;Saldo Disponible;Moneda \n${mask(card)}; CR $value ; CR $value ;CUP | \n"
@@ -185,10 +187,15 @@ class FakeBank(private val context: Context) : PhoneLine, UssdModem, SmsInbox {
 
     private fun firstCard(bank: Bank): String? = controller.cards.value.firstOrNull { it.card.card.bank == bank }?.card?.card?.number
 
-    private fun bankName(bank: Bank) = if (bank == Bank.BPA) "Banco Popular de Ahorro" else "Banco Bandec"
+    private fun bankName(bank: Bank) = when (bank) {
+        Bank.BPA -> "Banco Popular de Ahorro"
+        Bank.BANDEC -> "Banco Bandec"
+        Bank.BANMET -> "Banco Metropolitano"
+    }
     private fun mask(card: String) = card.take(4) + "XXXXXXXX" + card.takeLast(4)
     private fun today(): String = LocalDate.now().format(DateTimeFormatter.ofPattern("d/M/yyyy"))
-    private fun reference(bank: Bank) = (if (bank == Bank.BPA) "BR" else "KW") + (System.currentTimeMillis() % 100_000_000).toString().padStart(8, '0')
+    private fun reference(bank: Bank) = when (bank) { Bank.BPA -> "BR"; Bank.BANDEC -> "KW"; Bank.BANMET -> "MM" } +
+        (System.currentTimeMillis() % 100_000_000).toString().padStart(8, '0')
 
     private companion object {
         const val ACK = "Su solicitud esta siendo procesada, espere un SMS"
