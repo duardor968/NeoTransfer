@@ -108,6 +108,7 @@ object PreviewCatalog {
         "onboarding-permissions" to { PermissionsScreen(PermissionsUi(emptyList()), noop()) },
         "onboarding-permissions-denied" to { PermissionsScreen(PermissionsUi(listOf(PermissionKind.Sms, PermissionKind.Camera)), noop()) },
         "onboarding-bank" to { BankChoiceScreen(BankChoiceUi(emptySet()), noop()) },
+        "onboarding-bank-added" to { BankChoiceScreen(BankChoiceUi(setOf(Bank.BPA)), noop(), canGoBack = true) },
         "onboarding-key" to { BankKeyScreen(BankKeyUi(Bank.BANDEC, length = 5, entered = 3), noop()) },
         "onboarding-key-error" to { BankKeyScreen(BankKeyUi(Bank.BPA, length = 4, entered = 4, error = "Clave incorrecta"), noop()) },
         "onboarding-card-form" to {

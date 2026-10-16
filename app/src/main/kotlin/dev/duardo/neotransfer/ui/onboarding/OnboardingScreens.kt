@@ -47,7 +47,7 @@ import dev.duardo.neotransfer.designsystem.format.unbroken
 import dev.duardo.neotransfer.designsystem.theme.Neo
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
 import dev.duardo.neotransfer.ui.common.BankCard
-import dev.duardo.neotransfer.ui.common.BankCardArt
+import dev.duardo.neotransfer.ui.common.BankLogoTile
 import dev.duardo.neotransfer.ui.common.BankCardThumb
 import dev.duardo.neotransfer.ui.common.CardNumberTransformation
 import dev.duardo.neotransfer.ui.common.ExpiryTransformation
@@ -145,7 +145,7 @@ interface BankChoiceActions {
     fun back()
 }
 
-/** The two banks as their own cards: the choice is the card you hold. */
+/** The two banks by their logos. */
 @Composable
 fun BankChoiceScreen(state: BankChoiceUi, actions: BankChoiceActions, modifier: Modifier = Modifier, canGoBack: Boolean = false) {
     Scaffold(
@@ -155,19 +155,10 @@ fun BankChoiceScreen(state: BankChoiceUi, actions: BankChoiceActions, modifier: 
     ) { padding ->
         Column(
             Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(horizontal = NeoSpace.gutter),
-            verticalArrangement = Arrangement.spacedBy(NeoSpace.xxl),
+            verticalArrangement = Arrangement.spacedBy(NeoSpace.m),
         ) {
-            Text("Elige tu banco", style = MaterialTheme.typography.headlineMedium)
-            Bank.entries.forEach { bank ->
-                val configured = bank in state.configured
-                Box {
-                    BankCardArt(bank, onClick = if (configured) null else ({ actions.choose(bank) }))
-                    if (configured) StatusChip(
-                        "Configurado", StatusTone.Positive, Ds.drawable.ic_check_circle,
-                        Modifier.align(Alignment.TopEnd).padding(NeoSpace.m),
-                    )
-                }
-            }
+            Text("Elige tu banco", Modifier.padding(bottom = NeoSpace.m), style = MaterialTheme.typography.headlineMedium)
+            Bank.entries.forEach { bank -> BankLogoTile(bank, configured = bank in state.configured, onClick = { actions.choose(bank) }) }
             Spacer(Modifier.height(NeoSpace.l))
         }
     }
