@@ -9,6 +9,7 @@ import dev.duardo.neotransfer.data.LegacyData
 import dev.duardo.neotransfer.data.NeoDatabase
 import dev.duardo.neotransfer.data.RoomStore
 import dev.duardo.neotransfer.platform.AndroidNotifier
+import dev.duardo.neotransfer.platform.AndroidPeerActivity
 import dev.duardo.neotransfer.platform.AndroidPeerContacts
 import dev.duardo.neotransfer.platform.AndroidPhoneBook
 import dev.duardo.neotransfer.platform.AndroidSmsInbox
@@ -45,6 +46,7 @@ open class NeoTransferApplication : Application() {
             documents = ContentDocuments(this),
             phoneBook = AndroidPhoneBook(this),
             peer = AndroidPeerContacts(this),
+            peerOperations = AndroidPeerActivity(this),
             clock = Instant::now,
             state = Dispatchers.Default.limitedParallelism(1),
             io = Dispatchers.IO,

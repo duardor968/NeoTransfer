@@ -22,7 +22,15 @@ enum class OperationKind(val incoming: Boolean = false) {
     MobileTopUp,
     CubacelPlan,
     CubacelTransfer,
+    /** Another service NeoTransfer+ paid through ENZONA. */
+    Service,
 }
+
+/**
+ * Which app made an operation: by USSD in this one, or through ENZONA in NeoTransfer+. Known only while NeoTransfer+ is
+ * installed and readable; otherwise no operation carries one.
+ */
+enum class Origin { Ussd, Enzona }
 
 /** The other side of an operation, as identified by the bank's receipt. */
 @Immutable
@@ -54,4 +62,5 @@ data class OperationUi(
     val transactionId: String? = null,
     val balanceAfter: Money? = null,
     val dateOnly: Boolean = false,
+    val origin: Origin? = null,
 )

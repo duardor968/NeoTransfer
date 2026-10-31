@@ -1,5 +1,6 @@
 package dev.duardo.neotransfer.engine
 
+import dev.duardo.neotransfer.core.ledger.ActivityRow
 import dev.duardo.neotransfer.core.ledger.Operation
 import dev.duardo.neotransfer.core.model.ContactRecord
 import dev.duardo.neotransfer.core.model.ServiceReference
@@ -128,8 +129,10 @@ class Rig(
     var addressBook: List<PhoneContact>? = emptyList()
     /** What NeoTransfer+ keeps; null as if it were not installed. */
     var peer: () -> List<ContactRecord>? = { null }
+    /** NeoTransfer+'s operations; null as if it were not installed. */
+    var peerActivity: () -> List<ActivityRow>? = { null }
     val controller = AppController(store, modem, inbox, vault, notifier, documents, { addressBook ?: throw SecurityException() }, { peer() },
-        clock, state, io)
+        { peerActivity() }, clock, state, io)
 
     fun status(id: String) = controller.operations.value.first { it.operation.id == id }
     fun state(id: String) = status(id).state
@@ -144,8 +147,8 @@ object BankSms {
     fun received(to: String, amount: String, ref: String, from: String = "5350000009") =
         "El titular del telefono $from le ha realizado una transferencia a la cuenta $to de $amount CUP. Nro. Transaccion $ref. Fecha: 15/10/2026."
     fun rejectedTransfer() = "Fallo la transferencia. Banco Bandec: LA CUENTA NO ESTA ASOCIADA A UNA TARJETA MAGNETICA"
-    fun transferDone(to: String, amount: String) = "Banco Bandec:  La Transferencia fue completada. \n Fecha: 15/10/2026 \n " +
-        "Beneficiario: ${to.take(4)}XXXXXXXX${to.takeLast(4)} \n Ordenante: CUP \n Monto: $amount CUP \n Nro. Transaccion: KW000TEST3 \n Saldo restante: CR 700.00 CUP "
+    fun transferDone(to: String, amount: String, ref: String = "KW000TEST3") = "Banco Bandec:  La Transferencia fue completada. \n Fecha: 15/10/2026 \n " +
+        "Beneficiario: ${to.take(4)}XXXXXXXX${to.takeLast(4)} \n Ordenante: CUP \n Monto: $amount CUP \n Nro. Transaccion: $ref \n Saldo restante: CR 700.00 CUP "
     fun registration(key: String) =
         "Banco Bandec:  La operacion de registro fue completada. Bienvenido a Transfermovil.Clave de Autenticacion: $key Guarde esta clave."
 }

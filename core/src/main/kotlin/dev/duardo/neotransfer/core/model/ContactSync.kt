@@ -9,7 +9,7 @@ package dev.duardo.neotransfer.core.model
 data class ContactRecord(val contact: Contact, val updated: Long, val deleted: Boolean = false)
 
 /**
- * One row of the read-only provider each app exports for the other (`content://<applicationId>.contacts/contacts`):
+ * One row of the read-only provider each app exports for the other (`content://<applicationId>.sync/contacts`):
  * [phones] are 8-digit numbers one per line, [cards] one `<16 digits>\t<label or empty>` per line.
  */
 data class ContactRow(val id: String, val name: String, val phones: String, val cards: String, val updated: Long, val deleted: Boolean)

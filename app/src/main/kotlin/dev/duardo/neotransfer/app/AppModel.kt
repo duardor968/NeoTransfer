@@ -78,7 +78,7 @@ class AppModel @JvmOverloads constructor(
     val book: StateFlow<Book> = combine(
         listOf(controller.loaded, controller.cards, controller.operations, controller.movements, controller.contacts,
             controller.services, controller.savedKeys, controller.blocked, controller.settings, controller.locked, controller.lastBackup,
-            controller.addressBook, controller.classics, controller.keysToSave, controller.keysLocked),
+            controller.addressBook, controller.classics, controller.keysToSave, controller.keysLocked, controller.peerActivity),
     ) { values ->
         @Suppress("UNCHECKED_CAST")
         Domain(
@@ -97,6 +97,7 @@ class AppModel @JvmOverloads constructor(
             classics = values[12] as List<ClassicCard>,
             keysToSave = values[13] as List<KeyToSave>,
             keysLocked = values[14] as Boolean,
+            peer = values[15] as List<dev.duardo.neotransfer.core.ledger.ActivityRow>?,
         )
     }.map { Book(it) }.flowOn(compute).stateIn(viewModelScope, SharingStarted.Eagerly, Book(Domain()))
 

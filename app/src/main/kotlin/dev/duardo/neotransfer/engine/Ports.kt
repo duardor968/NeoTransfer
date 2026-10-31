@@ -1,5 +1,6 @@
 package dev.duardo.neotransfer.engine
 
+import dev.duardo.neotransfer.core.ledger.ActivityRow
 import dev.duardo.neotransfer.core.model.ContactRecord
 import dev.duardo.neotransfer.core.protocol.UssdCommand
 import dev.duardo.neotransfer.core.sms.SmsRecord
@@ -81,4 +82,10 @@ fun interface PeerContacts {
      * not signed like this app.
      */
     fun read(): List<ContactRecord>?
+}
+
+/** The operations the author's other app (NeoTransfer+) made, for this app's activity ([dev.duardo.neotransfer.core.ledger.ActivitySync]). */
+fun interface PeerActivity {
+    /** Its rows, newest first; null when it is not installed. Throws [SecurityException] when it is not signed like this app. */
+    fun read(): List<ActivityRow>?
 }

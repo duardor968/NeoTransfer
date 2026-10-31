@@ -46,6 +46,7 @@ import dev.duardo.neotransfer.ui.model.CounterpartUi
 import dev.duardo.neotransfer.ui.model.OperationKind
 import dev.duardo.neotransfer.ui.model.OperationStatus
 import dev.duardo.neotransfer.ui.model.OperationUi
+import dev.duardo.neotransfer.ui.model.Origin
 import dev.duardo.neotransfer.ui.model.ServiceKind
 import dev.duardo.neotransfer.ui.model.issuerOf
 
@@ -61,7 +62,8 @@ interface OperationActions {
 
 /**
  * Receipt of one operation. The textured check appears only once the bank confirmed it and stands for the state;
- * otherwise who it was, the state chip and, when it failed, the bank's reason in plain words.
+ * otherwise who it was, the state chip and, when it failed, the bank's reason in plain words. One NeoTransfer+ made says
+ * so and offers nothing that would send to the bank from here.
  */
 @Composable
 fun OperationDetailScreen(operation: OperationUi, actions: OperationActions, modifier: Modifier = Modifier, canSaveContact: Boolean = false) {
@@ -132,6 +134,7 @@ private fun detailLines(operation: OperationUi): List<SummaryLine> {
         SummaryLine("Fecha", labels.stamp(operation.at, operation.dateOnly)),
         operation.transactionId?.let { SummaryLine("Transacción", it) },
         operation.balanceAfter?.let { SummaryLine("Saldo restante", formatMoney(it.amount, it.currency)) },
+        if (operation.origin == Origin.Enzona) SummaryLine("Hecha con", "NeoTransfer+") else null,
     )
 }
 
@@ -142,11 +145,15 @@ private fun referenceLabel(kind: OperationKind): String = when (kind) {
     OperationKind.Landline -> ServiceKind.Landline.referenceLabel
     OperationKind.NautaHome, OperationKind.NautaWifi -> "Cuenta"
     OperationKind.MobileTopUp, OperationKind.CubacelPlan, OperationKind.CubacelTransfer -> "Móvil"
-    OperationKind.Transfer, OperationKind.Incoming -> "Referencia"
+    OperationKind.Service -> "Referencia"
+    // Only a transfer NeoTransfer+ made to an ENZONA account names it by reference: the account.
+    OperationKind.Transfer -> "Cuenta"
+    OperationKind.Incoming -> "Referencia"
 }
 
 @Composable
 private fun DetailActions(operation: OperationUi, actions: OperationActions, canSaveContact: Boolean) {
+    if (operation.origin == Origin.Enzona && operation.status != OperationStatus.Confirmed) return
     when (operation.status) {
         OperationStatus.NotExecuted -> NeoButton("Reintentar", actions::retry, icon = Ds.drawable.ic_replay)
         OperationStatus.NoResponse -> {

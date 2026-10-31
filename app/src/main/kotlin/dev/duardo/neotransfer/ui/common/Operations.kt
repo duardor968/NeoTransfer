@@ -1,10 +1,21 @@
 package dev.duardo.neotransfer.ui.common
 
 import androidx.annotation.DrawableRes
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.designsystem.R as Ds
 import dev.duardo.neotransfer.designsystem.component.AvatarBadge
 import dev.duardo.neotransfer.designsystem.component.IconAvatar
@@ -17,9 +28,11 @@ import dev.duardo.neotransfer.designsystem.component.StatusChip
 import dev.duardo.neotransfer.designsystem.component.StatusTone
 import dev.duardo.neotransfer.designsystem.component.content
 import dev.duardo.neotransfer.designsystem.theme.Neo
+import dev.duardo.neotransfer.designsystem.theme.NeoAccents
 import dev.duardo.neotransfer.ui.model.OperationKind
 import dev.duardo.neotransfer.ui.model.OperationStatus
 import dev.duardo.neotransfer.ui.model.OperationUi
+import dev.duardo.neotransfer.ui.model.Origin
 import dev.duardo.neotransfer.ui.model.ServiceKind
 
 val OperationStatus.label: String
@@ -80,6 +93,7 @@ val OperationKind.label: String
         OperationKind.MobileTopUp -> "Recarga móvil"
         OperationKind.CubacelPlan -> "Paquete Cubacel"
         OperationKind.CubacelTransfer -> "Saldo Cubacel transferido"
+        OperationKind.Service -> "Pago de servicio"
     }
 
 @get:DrawableRes
@@ -96,6 +110,7 @@ val OperationKind.icon: Int
         OperationKind.MobileTopUp -> Ds.drawable.ic_smartphone
         OperationKind.CubacelPlan -> Ds.drawable.ic_package_2
         OperationKind.CubacelTransfer -> Ds.drawable.ic_swap_horiz
+        OperationKind.Service -> Ds.drawable.ic_receipt_long
     }
 
 @get:DrawableRes
@@ -110,21 +125,50 @@ val ServiceKind.icon: Int
         ServiceKind.Cubacel -> Ds.drawable.ic_sim_card
     }
 
-/** Who or what: initials with a direction badge for people, the service glyph otherwise. */
+/**
+ * Who or what: initials with a direction badge for people, the service glyph otherwise. While NeoTransfer+ is installed,
+ * a dot in the app's colour at the bottom left says which app made it ([Origin]), clear of the direction badge.
+ */
 @Composable
 fun OperationAvatar(operation: OperationUi) {
     val person = operation.kind == OperationKind.Transfer || operation.kind == OperationKind.Incoming
-    if (person && operation.contactId != null) {
-        val badge = if (operation.kind.incoming) {
-            AvatarBadge(Ds.drawable.ic_south_west, Neo.colors.accent, Neo.colors.onAccent)
+    val badged = person && operation.contactId != null
+    Box {
+        if (badged) {
+            val badge = if (operation.kind.incoming) {
+                AvatarBadge(Ds.drawable.ic_south_west, Neo.colors.accent, Neo.colors.onAccent)
+            } else {
+                AvatarBadge(Ds.drawable.ic_arrow_outward, MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.colorScheme.onSurface)
+            }
+            NameAvatar(operation.title, badge = badge)
         } else {
-            AvatarBadge(Ds.drawable.ic_arrow_outward, MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.colorScheme.onSurface)
+            IconAvatar(operation.kind.icon)
         }
-        NameAvatar(operation.title, badge = badge)
-    } else {
-        IconAvatar(operation.kind.icon)
+        operation.origin?.let { origin ->
+            OriginDot(origin, Modifier.align(Alignment.BottomStart).offset(x = (-2).dp, y = 2.dp))
+        }
     }
 }
+
+/** The app's brand colour, ringed in the list's colour. */
+@Composable
+private fun OriginDot(origin: Origin, modifier: Modifier = Modifier) {
+    val accent = if (origin == Origin.Ussd) NeoAccents.Mint else NeoAccents.RoyalBlue
+    val color: Color = if (Neo.colors.isDark) accent.onDark else accent.onLight
+    Box(
+        modifier
+            .size(16.dp)
+            .semantics { contentDescription = origin.label }
+            .border(2.dp, Neo.colors.group, CircleShape)
+            .background(color, CircleShape),
+    )
+}
+
+val Origin.label: String
+    get() = when (this) {
+        Origin.Ussd -> "Hecha con NeoTransfer"
+        Origin.Enzona -> "Hecha con NeoTransfer+"
+    }
 
 /** Amount as listed: incoming in positive ink with a plus; money that never moved, struck through. */
 @Composable

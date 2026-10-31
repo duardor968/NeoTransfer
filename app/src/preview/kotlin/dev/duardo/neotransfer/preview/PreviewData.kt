@@ -12,6 +12,7 @@ import dev.duardo.neotransfer.ui.model.Money
 import dev.duardo.neotransfer.ui.model.OperationKind
 import dev.duardo.neotransfer.ui.model.OperationStatus
 import dev.duardo.neotransfer.ui.model.OperationUi
+import dev.duardo.neotransfer.ui.model.Origin
 import dev.duardo.neotransfer.ui.model.RecipientUi
 import dev.duardo.neotransfer.ui.model.SavedReferenceUi
 import dev.duardo.neotransfer.ui.model.ServiceKind
@@ -154,6 +155,32 @@ object PreviewData {
         electricity, incomingUnknown, topUp, toUnknownCard, branchWithdrawal,
     )
     val recent = listOf(confirmedToMaria, incomingFromDaniela, qrCafe, rejectedToYunior, electricity)
+
+    // With NeoTransfer+ installed ------------------------------------------------------------------------------------
+    /** NeoTransfer+ paid through ENZONA; the bank has not answered yet. Read-only here. */
+    val enzonaPending = OperationUi(
+        "peer:enz-qr", OperationKind.QrPayment, "Farmacia Galeno", OperationStatus.Sent, ago(20),
+        amount = cup("640.00"), card = bpa, counterpart = CounterpartUi.Reference("FG-118204"), origin = Origin.Enzona,
+    )
+    /** NeoTransfer+'s transfer and the bank's receipt of it here: one item. */
+    val enzonaToCarmen = OperationUi(
+        "ref:TRF8826099120", OperationKind.Transfer, "Abuela Carmen", OperationStatus.Confirmed, at(0, 10, 15),
+        amount = cup("3000.00"), card = bandec, counterpart = CounterpartUi.Card("9205959803124479", "BANMET · CUP"), contactId = carmen.id,
+        transactionId = "TRF8826099120", balanceAfter = cup("3215.00"), origin = Origin.Enzona,
+    )
+    val enzonaService = OperationUi(
+        "peer:enz-gas", OperationKind.Service, "Gas licuado", OperationStatus.Confirmed, at(2, 19, 30),
+        amount = cup("210.00"), card = bpa, counterpart = CounterpartUi.Reference("GL-30018827"), origin = Origin.Enzona,
+    )
+    private fun OperationUi.here() = copy(origin = Origin.Ussd)
+    val sharedInProgress = inProgress.map { it.here() }
+    /** Every operation marked by the app that made it; receipts of unknown origin, unmarked. */
+    val sharedHistory = listOf(
+        sentToJuan.here(), notExecuted.here(), enzonaPending, confirmedToMaria.here(), incomingFromDaniela, enzonaToCarmen, qrCafe.here(),
+        rejectedToYunior.here(), noResponseNauta.here(), enzonaService, electricity.here(), incomingUnknown, topUp.here(), toUnknownCard,
+        branchWithdrawal,
+    )
+    val sharedRecent = listOf(enzonaPending, confirmedToMaria.here(), incomingFromDaniela, enzonaToCarmen, qrCafe.here())
 
     const val receivePayload = "TRANSFERMOVIL_ETECSA,TRANSFERENCIA,9212120123456783,LAURA MENDEZ SOTO"
     const val merchantPayload = "{\"id_transaccion\":\"CLE-00417\",\"importe\":480.0,\"moneda\":\"CUP\",\"numero_proveedor\":\"0001234\"}"

@@ -215,6 +215,9 @@ object PreviewCatalog {
 
         // Home ------------------------------------------------------------------------------------------------
         "home" to { Tabbed(Tab.Home) { HomeScreen(HomeUi(wallet, 0, PreviewData.inProgress, PreviewData.recent), noop()) } },
+        "home-shared" to {
+            Tabbed(Tab.Home) { HomeScreen(HomeUi(wallet, 0, PreviewData.sharedInProgress, PreviewData.sharedRecent), noop()) }
+        },
         "home-bandec" to { Tabbed(Tab.Home) { HomeScreen(HomeUi(wallet, 1, emptyList(), PreviewData.recent), noop()) } },
         "home-banmet" to {
             Tabbed(Tab.Home) {
@@ -250,6 +253,7 @@ object PreviewCatalog {
 
         // Activity --------------------------------------------------------------------------------------------
         "activity" to { Tabbed(Tab.Activity) { ActivityScreen(activity(ActivityContent.Items(PreviewData.history)), noop()) } },
+        "activity-shared" to { Tabbed(Tab.Activity) { ActivityScreen(activity(ActivityContent.Items(PreviewData.sharedHistory)), noop()) } },
         "activity-check" to {
             Tabbed(Tab.Activity) { ActivityScreen(activity(ActivityContent.Items(PreviewData.history)).copy(pickCard = true), noop()) }
         },
@@ -271,6 +275,8 @@ object PreviewCatalog {
         "operation-not-executed" to { OperationDetailScreen(PreviewData.notExecuted, noop()) },
         "operation-incoming" to { OperationDetailScreen(PreviewData.incomingUnknown, noop(), canSaveContact = true) },
         "operation-qr" to { OperationDetailScreen(PreviewData.qrCafe, noop()) },
+        "operation-enzona" to { OperationDetailScreen(PreviewData.enzonaPending, noop()) },
+        "operation-enzona-merged" to { OperationDetailScreen(PreviewData.enzonaToCarmen, noop()) },
 
         // Contacts --------------------------------------------------------------------------------------------
         "contacts" to { Tabbed(Tab.Contacts) { ContactsScreen(ContactsUi("", ContactsContent.People(PreviewData.people), 214, addressBook = true), noop()) } },

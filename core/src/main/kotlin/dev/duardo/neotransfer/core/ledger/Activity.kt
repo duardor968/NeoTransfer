@@ -69,6 +69,8 @@ data class Movement(
      * already include it. It is shown, never applied to the balance.
      */
     val movesBalance: Boolean = true,
+    /** The own card as the receipt wrote it, a mask or the whole number, matched to the wallet or not; null when it names none. */
+    val cardSeen: String? = null,
 ) {
     val external: Boolean get() = operationId == null
 }
@@ -116,7 +118,7 @@ internal class Activity(
                 val credit = own(destination)
                 Movement("ref:${m.reference}", MovementKind.TRANSFER, null, if (credit != null) Direction.BETWEEN_OWN else Direction.OUT,
                     m.amount, at, m.bank, debitCard(m.bank, source, m.sourceMask, m.amount.currency, at), credit,
-                    destination ?: m.beneficiaryMask, m.reference, operationId, m.balance)
+                    destination ?: m.beneficiaryMask, m.reference, operationId, m.balance, cardSeen = m.sourceMask)
             }
             is SmsMessage.PaymentCompleted -> Movement("ref:${m.reference}", MovementKind.QR_PAYMENT, null, Direction.OUT, m.amount, at, m.bank,
                 debitCard(m.bank, source, null, m.amount.currency, at), null, m.merchant ?: m.purchaseId, m.reference, operationId, m.balance)
@@ -131,13 +133,13 @@ internal class Activity(
             is SmsMessage.TransferReceived -> {
                 val credit = own(m.account)
                 Movement("ref:${m.reference}", MovementKind.TRANSFER, null, Direction.IN, m.amount, at,
-                    cards.firstOrNull { it.number == credit }?.bank, null, credit, m.senderPhone, m.reference, null, null)
+                    cards.firstOrNull { it.number == credit }?.bank, null, credit, m.senderPhone, m.reference, null, null, cardSeen = m.account)
             }
             is SmsMessage.CardOperation -> {
                 val card = cards.firstOrNull { it.number == m.card }
                 Movement("ref:${m.reference}", MovementKind.OTHER, null, if (m.credit) Direction.IN else Direction.OUT,
                     Money(m.amount.amount, card?.currency ?: m.amount.currency), at, m.bank, card?.number?.takeUnless { m.credit },
-                    card?.number?.takeIf { m.credit }, null, m.reference, null, null, label = m.label, movesBalance = false)
+                    card?.number?.takeIf { m.credit }, null, m.reference, null, null, label = m.label, movesBalance = false, cardSeen = m.card)
             }
             else -> return null
         }
@@ -216,7 +218,7 @@ internal class Activity(
 
     private class Observation(val card: String, val value: Money, val at: Instant, val order: Long)
 
-    private companion object {
+    internal companion object {
         /** Last-operations dates are Cuban calendar days. */
         val CUBA: ZoneId = ZoneId.of("America/Havana")
     }

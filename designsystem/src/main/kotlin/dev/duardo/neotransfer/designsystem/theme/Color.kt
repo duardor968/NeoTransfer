@@ -18,6 +18,8 @@ data class NeoAccent(val onLight: Color, val onDark: Color)
 
 object NeoAccents {
     val Mint = NeoAccent(onLight = Color(0xFF1FB36F), onDark = Color(0xFF3DDC97))
+    /** NeoTransfer+'s. */
+    val RoyalBlue = NeoAccent(onLight = Color(0xFF1D56DB), onDark = Color(0xFF6F9BFF))
 }
 
 /** Semantic colors that Material's scheme does not name. */

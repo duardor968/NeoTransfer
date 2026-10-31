@@ -7,9 +7,13 @@ import dev.duardo.neotransfer.ui.common.TimeLabels
 import dev.duardo.neotransfer.app.Book
 import dev.duardo.neotransfer.app.Domain
 import dev.duardo.neotransfer.core.backup.BackupFailure
+import dev.duardo.neotransfer.core.ledger.ActivityRow
+import dev.duardo.neotransfer.core.ledger.ActivitySync
 import dev.duardo.neotransfer.core.ledger.NotExecutedReason
 import dev.duardo.neotransfer.core.ledger.Operation
 import dev.duardo.neotransfer.core.ledger.OperationState
+import dev.duardo.neotransfer.core.ledger.SharedKind
+import dev.duardo.neotransfer.core.ledger.SharedStatus
 import dev.duardo.neotransfer.core.model.Bank
 import dev.duardo.neotransfer.core.model.Contact
 import dev.duardo.neotransfer.core.model.ContactRecord
@@ -36,7 +40,11 @@ import dev.duardo.neotransfer.data.ClassicCard
 import dev.duardo.neotransfer.data.WalletCard
 import dev.duardo.neotransfer.ui.model.BalanceUi
 import dev.duardo.neotransfer.ui.model.Bank as Issuer
+import dev.duardo.neotransfer.ui.model.CounterpartUi
 import dev.duardo.neotransfer.ui.model.LineStateUi
+import dev.duardo.neotransfer.ui.model.OperationKind
+import dev.duardo.neotransfer.ui.model.OperationStatus
+import dev.duardo.neotransfer.ui.model.Origin
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -732,6 +740,60 @@ class AppControllerTest {
         runCurrent()
         assertEquals(listOf("phone:lookup-1"), other.controller.contacts.value.map { it.id })
         assertEquals(setOf("phone:lookup-1"), other.controller.contactRecords().map { it.contact.id }.toSet())
+    }
+
+    @Test fun `with NeoTransfer+ the activity is one with each row marked by its app, and without it nothing changes`() = runTest {
+        val rig = rig()
+        rig.ready(bandec)
+        rig.controller.onForeground()
+        val sent = queued(rig.controller.submit(Transfer(Bank.BANDEC, rig.controller.sourceFor(bandec.card.number), friend, Money.cup("6000"))))
+        wait(Duration.ofSeconds(10))
+        assertTrue(rig.modem.dialed.isNotEmpty())
+        deliver(rig, BankSms.transferDone(friend, "6000.00"), late = Duration.ofSeconds(1))
+        rig.controller.onBankSms().join()
+        // NeoTransfer+ paid Ana through ENZONA from the same card: the bank's receipt reaches this phone too.
+        val ana = "9204990000000015"
+        wait(Duration.ofMinutes(30))
+        deliver(rig, BankSms.transferDone(ana, "250.00", ref = "KW000ENZ01"), late = Duration.ofSeconds(1))
+        rig.controller.onBankSms().join()
+        val alone = rig.book()
+        assertEquals(listOf("ref:KW000ENZ01", "ref:KW000TEST3"), alone.activity.map { it.id })
+        assertTrue(alone.activity.all { it.origin == null })
+        val balance = rig.balance(bandec)
+
+        fun row(id: String, kind: SharedKind, amount: String, at: Instant, counterpart: String, title: String) = ActivityRow(id, kind.name,
+            SharedStatus.CONFIRMED.name, title, at.toEpochMilli(), amount, "CUP", ActivitySync.OUT, bandec.card.number, counterpart, "")
+        val toAna = row("enz-1", SharedKind.CARD_TRANSFER, "250.00", now() - Duration.ofMinutes(2), ana, "Ana Prueba")
+        val cafe = row("enz-2", SharedKind.QR_PAYMENT, "80.00", now() - Duration.ofMinutes(50), "", "Cafetería")
+        // Same card, amount and minute as this app's own transfer: two operations are never one.
+        val twin = row("enz-3", SharedKind.CARD_TRANSFER, "6000.00", now() - Duration.ofMinutes(30), friend, "9204 9900 0000 0007")
+        rig.peerActivity = { listOf(toAna, cafe, twin) }
+        rig.controller.onForeground()
+        runCurrent()
+        assertEquals(listOf(toAna, cafe, twin), rig.controller.peerActivity.value)
+        val book = Book(rig.book().domain.copy(peer = rig.controller.peerActivity.value))
+        val byId = book.activity.associateBy { it.id }
+        assertEquals(setOf("ref:KW000TEST3", "ref:KW000ENZ01", "peer:enz-2", "peer:enz-3"), byId.keys)
+        assertEquals(Origin.Ussd, byId.getValue("ref:KW000TEST3").origin)
+        val merged = byId.getValue("ref:KW000ENZ01")
+        assertEquals(Triple(Origin.Enzona, "Ana Prueba", OperationStatus.Confirmed), Triple(merged.origin, merged.title, merged.status))
+        assertEquals(ana, (merged.counterpart as? CounterpartUi.Card)?.number)
+        assertEquals("KW000ENZ01", merged.transactionId)
+        assertEquals(OperationKind.QrPayment to Origin.Enzona, byId.getValue("peer:enz-2").let { it.kind to it.origin })
+        assertEquals(Origin.Enzona, byId.getValue("peer:enz-3").origin)
+        // The balance never takes NeoTransfer+'s rows; NeoTransfer+ reads only what this app sent.
+        assertEquals(balance, rig.balance(bandec))
+        val shared = book.shared.single()
+        assertEquals(listOf(sent, SharedKind.CARD_TRANSFER.name, SharedStatus.CONFIRMED.name, "6000.00", "CUP", ActivitySync.OUT, bandec.card.number, friend),
+            listOf(shared.id, shared.kind, shared.status, shared.amount, shared.currency, shared.direction, shared.card, shared.counterpart))
+        assertEquals(alone.shared, book.shared)
+
+        // Uninstalled, or not signed like this app: the feature is off.
+        rig.peerActivity = { throw SecurityException() }
+        rig.controller.onForeground()
+        runCurrent()
+        assertNull(rig.controller.peerActivity.value)
+        assertEquals(alone.activity, Book(rig.book().domain.copy(peer = rig.controller.peerActivity.value)).activity)
     }
 
     /** Local only: `NEOTRANSFER_TRM` = a real Transfermóvil backup. Prints counts, never contents. */

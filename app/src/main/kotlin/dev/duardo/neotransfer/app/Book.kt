@@ -1,10 +1,14 @@
 package dev.duardo.neotransfer.app
 
+import dev.duardo.neotransfer.core.ledger.ActivityRow
+import dev.duardo.neotransfer.core.ledger.ActivitySync
 import dev.duardo.neotransfer.core.ledger.Direction
 import dev.duardo.neotransfer.core.ledger.Movement
 import dev.duardo.neotransfer.core.ledger.MovementKind
 import dev.duardo.neotransfer.core.ledger.OperationState
 import dev.duardo.neotransfer.core.ledger.OperationStatus as CoreStatus
+import dev.duardo.neotransfer.core.ledger.SharedKind
+import dev.duardo.neotransfer.core.ledger.SharedStatus
 import dev.duardo.neotransfer.core.model.Agency
 import dev.duardo.neotransfer.core.model.Bank as CoreBank
 import dev.duardo.neotransfer.core.model.Cards
@@ -69,6 +73,7 @@ import dev.duardo.neotransfer.ui.model.Money
 import dev.duardo.neotransfer.ui.model.OperationKind
 import dev.duardo.neotransfer.ui.model.OperationStatus
 import dev.duardo.neotransfer.ui.model.OperationUi
+import dev.duardo.neotransfer.ui.model.Origin
 import dev.duardo.neotransfer.ui.model.PhoneTargetUi
 import dev.duardo.neotransfer.ui.model.RechargeTargetUi
 import dev.duardo.neotransfer.ui.model.RegistrationField
@@ -99,6 +104,8 @@ data class Domain(
     val lastBackup: Instant? = null,
     /** Contacts that come from the phone's address book; null while it cannot be read. */
     val addressBook: Set<String>? = null,
+    /** The operations NeoTransfer+ made ([ActivityRow]); null while it is not installed or cannot be read: nothing of it shows. */
+    val peer: List<ActivityRow>? = null,
 ) {
     /** A bank or the Clásica is set up once it has a card or a saved key: from then on the app locks. */
     val configured: Boolean get() = cards.isNotEmpty() || classics.isNotEmpty() || savedKeys.isNotEmpty()
@@ -133,6 +140,7 @@ class Book(val domain: Domain, private val now: Instant = Instant.now()) {
     // The whole address book is in [Domain.contacts]: activity looks people up here instead of scanning it per item.
     private val byPhone = domain.contacts.flatMap { c -> c.phones.mapNotNull(Phones::normalize).distinct().map { it to c } }.groupBy({ it.first }, { it.second })
     private val byCard = domain.contacts.flatMap { c -> c.cards.mapNotNull(Cards::normalize).distinct().map { it to c } }.groupBy({ it.first }, { it.second })
+    private val contactsById = domain.contacts.associateBy { it.id }
 
     /** Own cards: the bank cards in wallet order, then the Clásicas. */
     val cards: List<CardUi> = domain.cards.map { it.card.ui() } + domain.classics.map { it.ui() }
@@ -179,21 +187,44 @@ class Book(val domain: Domain, private val now: Instant = Instant.now()) {
     /** Operations still on their way, and money that did not go through and was not retried yet. */
     val inProgress: List<OperationUi>
 
-    /** Every movement and every money operation, newest first. */
+    /**
+     * Every movement and every money operation, newest first. With NeoTransfer+ readable, its operations too, each item
+     * marked by the app that made it ([Origin]): a receipt of unknown origin that is one of its operations
+     * ([ActivitySync.match]) is a single item, with what NeoTransfer+ knows of it and the bank's state.
+     */
     val activity: List<OperationUi>
+
+    /** The money operations this app sent, each with its operation's id, as they show before NeoTransfer+ is taken in. */
+    private val originated: List<Pair<String, OperationUi>>
 
     init {
         val fromOperations = domain.operations.filter { it.operation.request.isActivity && it.operation.id !in operationIdsWithReceipt }
-            .mapNotNull { status -> operation(status) }
-        val all = (fromOperations + domain.movements.map(::movement)).sortedByDescending { it.at }
-        activity = all
+            .mapNotNull { status -> operation(status)?.let { status.operation.id to it } }
+        val movements = domain.movements.map { it to movement(it) }
+        originated = fromOperations + movements.mapNotNull { (m, item) -> m.operationId?.let { it to item } }
+        val peer = domain.peer
+        activity = if (peer == null) (fromOperations.map { it.second } + movements.map { it.second }).sortedByDescending { it.at } else {
+            val same = ActivitySync.match(domain.movements, peer)
+            val sent = originated.map { it.second.copy(origin = Origin.Ussd) }
+            val receipts = movements.filter { it.first.operationId == null }.map { (m, item) -> same[m.id]?.let { merged(item, it) } ?: item }
+            val taken = same.values.toSet()
+            (sent + receipts + peer.filter { it !in taken }.mapNotNull(::peerItem)).sortedByDescending { it.at }
+        }
         val latestByRequest = domain.operations.groupBy { it.operation.request }.mapValues { (_, list) -> list.maxOf { it.operation.createdAt } }
         inProgress = domain.operations.filter { status ->
             val request = status.operation.request
             request.isActivity && status.operation.id !in operationIdsWithReceipt && (status.state.inFlight ||
                 (status.state is OperationState.NotExecuted && latestByRequest[request] == status.operation.createdAt &&
                     Duration.between(status.operation.createdAt, now) < RETRY_WINDOW))
-        }.mapNotNull { status -> fromOperations.firstOrNull { it.id == status.operation.id } }
+        }.mapNotNull { status -> activity.firstOrNull { it.id == status.operation.id } }
+    }
+
+    /**
+     * What NeoTransfer+ reads of this app's activity ([ActivitySync.exported]): the money operations it sent, by operation id,
+     * never a receipt of unknown origin nor anything taken from NeoTransfer+.
+     */
+    val shared: List<ActivityRow> by lazy {
+        ActivitySync.exported(originated.map { (id, item) -> sharedRow(id, item) }, now.toEpochMilli())
     }
 
     /** Everyone, by name, each with the newest movement with them (money that did not go through left out). */
@@ -351,6 +382,110 @@ class Book(val domain: Domain, private val now: Instant = Instant.now()) {
         )
     }
 
+    // ---- NeoTransfer+ ----
+
+    /** An operation of NeoTransfer+ no receipt here is: shown as it is there, read-only. */
+    private fun peerItem(row: ActivityRow): OperationUi? {
+        if (row.id.isBlank()) return null
+        val kind = peerKind(row)
+        val counterpart = peerCounterpart(row, kind)
+        val contact = peerContact(row, counterpart)
+        return OperationUi(
+            id = PEER + row.id,
+            kind = kind,
+            title = contact?.name ?: row.title.ifBlank { kindLabel(kind) },
+            status = peerStatus(row),
+            at = Instant.ofEpochMilli(row.at),
+            amount = row.amount.toBigDecimalOrNull()?.takeIf { row.currency.isNotBlank() }?.let { Money(it.abs(), row.currency.uppercase()) },
+            card = peerCard(row.card),
+            counterpart = counterpart,
+            contactId = contact?.id,
+            origin = Origin.Enzona,
+        )
+    }
+
+    /** A receipt of unknown origin that is [row]: what NeoTransfer+ says it was, as the bank confirmed it. */
+    private fun merged(receipt: OperationUi, row: ActivityRow): OperationUi {
+        val kind = peerKind(row)
+        val counterpart = peerCounterpart(row, kind) ?: receipt.counterpart
+        val contact = peerContact(row, counterpart)
+        return receipt.copy(kind = kind, title = contact?.name ?: row.title.ifBlank { receipt.title }, card = receipt.card ?: peerCard(row.card),
+            counterpart = counterpart, contactId = contact?.id, origin = Origin.Enzona,
+            // A last-operations line knows only its day; NeoTransfer+ knows the time.
+            at = if (receipt.dateOnly) Instant.ofEpochMilli(row.at) else receipt.at, dateOnly = false)
+    }
+
+    private fun peerKind(row: ActivityRow): OperationKind {
+        val incoming = row.direction == ActivitySync.IN
+        return when (SharedKind.of(row.kind)) {
+            SharedKind.CARD_TRANSFER, SharedKind.ACCOUNT_TRANSFER -> if (incoming) OperationKind.Incoming else OperationKind.Transfer
+            SharedKind.INCOMING -> OperationKind.Incoming
+            SharedKind.QR_PAYMENT -> OperationKind.QrPayment
+            SharedKind.ELECTRICITY -> OperationKind.Electricity
+            SharedKind.LANDLINE -> OperationKind.Landline
+            SharedKind.WATER -> OperationKind.Water
+            SharedKind.NAUTA -> OperationKind.NautaWifi
+            SharedKind.NAUTA_HOME -> OperationKind.NautaHome
+            SharedKind.MOBILE_TOPUP -> OperationKind.MobileTopUp
+            SharedKind.CUBACEL_TRANSFER -> OperationKind.CubacelTransfer
+            SharedKind.SERVICE, SharedKind.OTHER -> if (incoming) OperationKind.Incoming else OperationKind.Service
+        }
+    }
+
+    private fun peerStatus(row: ActivityRow): OperationStatus = when (SharedStatus.of(row.status)) {
+        SharedStatus.CONFIRMED -> OperationStatus.Confirmed
+        SharedStatus.PENDING -> OperationStatus.Sent
+        SharedStatus.UNCONFIRMED -> OperationStatus.NoResponse
+        SharedStatus.REJECTED -> OperationStatus.Rejected
+        SharedStatus.NOT_DONE, SharedStatus.NOT_SENT -> OperationStatus.NotExecuted
+    }
+
+    private fun peerCounterpart(row: ActivityRow, kind: OperationKind): CounterpartUi? {
+        val value = row.counterpart.trim().ifEmpty { return null }
+        val person = kind == OperationKind.Transfer || kind == OperationKind.Incoming
+        val phone = kind == OperationKind.MobileTopUp || kind == OperationKind.CubacelTransfer || kind == OperationKind.Incoming
+        Cards.normalize(value)?.takeIf { person }?.let { return CounterpartUi.Card(it, foreignCard(it).issuer) }
+        Phones.normalize(value)?.takeIf { phone }?.let { return CounterpartUi.Phone(it) }
+        return CounterpartUi.Reference(value)
+    }
+
+    /** NeoTransfer+'s contact when this app has it too, or whoever owns the card or phone here. */
+    private fun peerContact(row: ActivityRow, counterpart: CounterpartUi?): Contact? = contactsById[row.contactId] ?: when (counterpart) {
+        is CounterpartUi.Card -> contactName(card = counterpart.number)
+        is CounterpartUi.Phone -> contactName(phone = counterpart.number)
+        else -> null
+    }
+
+    /** The own card NeoTransfer+ used: the wallet's, or as its number tells when this app does not keep it. */
+    private fun peerCard(number: String): CardUi? = Cards.normalize(number)?.let { card ->
+        ownCard(card) ?: issuerBank(card)?.let { bank -> CardUi(card, bank, card, Cards.issuer(card).currency?.name ?: Currency.CUP.name) }
+    }
+
+    private fun sharedRow(id: String, item: OperationUi) = ActivityRow(
+        id = id,
+        kind = item.kind.shared().name,
+        status = when (item.status) {
+            OperationStatus.Confirmed -> SharedStatus.CONFIRMED
+            OperationStatus.Sent -> SharedStatus.PENDING
+            OperationStatus.NoResponse -> SharedStatus.UNCONFIRMED
+            OperationStatus.Rejected -> SharedStatus.REJECTED
+            OperationStatus.NotExecuted -> SharedStatus.NOT_DONE
+        }.name,
+        title = item.title,
+        at = item.at.toEpochMilli(),
+        amount = item.amount?.amount?.abs()?.let { if (it.scale() < 2) it.setScale(2) else it }?.toPlainString().orEmpty(),
+        currency = item.amount?.currency ?: item.card?.currency.orEmpty(),
+        direction = if (item.kind.incoming) ActivitySync.IN else ActivitySync.OUT,
+        card = item.card?.number?.takeIf(Cards::isNumber).orEmpty(),
+        counterpart = when (val c = item.counterpart) {
+            is CounterpartUi.Card -> c.number
+            is CounterpartUi.Phone -> c.number
+            is CounterpartUi.Reference -> c.value
+            null -> ""
+        },
+        contactId = item.contactId.orEmpty(),
+    )
+
     private fun title(request: UssdRequest): String = when (request) {
         is Transfer -> formatCardNumber(request.destination)
         is ClassicTransfer -> formatCardNumber(request.destination)
@@ -467,6 +602,9 @@ class Book(val domain: Domain, private val now: Instant = Instant.now()) {
     private companion object {
         /** A money operation that did not go through stays in "Pendientes" this long, with Reintentar. */
         val RETRY_WINDOW: Duration = Duration.ofHours(12)
+
+        /** Ids of NeoTransfer+'s operations, apart from this app's. */
+        const val PEER = "peer:"
     }
 }
 
@@ -568,7 +706,22 @@ private fun kindLabel(kind: OperationKind) = when (kind) {
     OperationKind.NautaHome -> "Nauta Hogar"
     OperationKind.NautaWifi -> "Nauta"
     OperationKind.MobileTopUp -> "Recarga móvil"
+    OperationKind.Service -> "Pago de servicio"
     else -> "Transferencia"
+}
+
+private fun OperationKind.shared(): SharedKind = when (this) {
+    OperationKind.Transfer -> SharedKind.CARD_TRANSFER
+    OperationKind.Incoming -> SharedKind.INCOMING
+    OperationKind.QrPayment -> SharedKind.QR_PAYMENT
+    OperationKind.Electricity -> SharedKind.ELECTRICITY
+    OperationKind.Water -> SharedKind.WATER
+    OperationKind.Landline -> SharedKind.LANDLINE
+    OperationKind.NautaHome -> SharedKind.NAUTA_HOME
+    OperationKind.NautaWifi -> SharedKind.NAUTA
+    OperationKind.MobileTopUp -> SharedKind.MOBILE_TOPUP
+    OperationKind.CubacelTransfer -> SharedKind.CUBACEL_TRANSFER
+    OperationKind.CubacelPlan, OperationKind.Service -> SharedKind.SERVICE
 }
 
 /**

@@ -4,6 +4,7 @@ import dev.duardo.neotransfer.core.backup.BackupCard
 import dev.duardo.neotransfer.core.backup.BackupContent
 import dev.duardo.neotransfer.core.backup.BackupFile
 import dev.duardo.neotransfer.core.backup.TrmImporter
+import dev.duardo.neotransfer.core.ledger.ActivityRow
 import dev.duardo.neotransfer.core.ledger.CardBalance
 import dev.duardo.neotransfer.core.ledger.Direction
 import dev.duardo.neotransfer.core.ledger.Dispatch
@@ -148,6 +149,7 @@ class AppController(
     private val documents: Documents,
     private val phoneBook: PhoneBook,
     private val peer: PeerContacts,
+    private val peerOperations: PeerActivity,
     private val clock: () -> Instant,
     /** Runs one coroutine at a time: all mutable state below is confined to it. */
     state: CoroutineDispatcher,
@@ -201,6 +203,7 @@ class AppController(
     private val _locked = MutableStateFlow(true)
     private val _loaded = MutableStateFlow(false)
     private val _lastBackup = MutableStateFlow<Instant?>(null)
+    private val _peerActivity = MutableStateFlow<List<ActivityRow>?>(null)
 
     /** Own bank cards in wallet order, each with its balance. */
     val cards: StateFlow<List<CardView>> = _cards
@@ -239,6 +242,11 @@ class AppController(
     val loaded: StateFlow<Boolean> = _loaded
     /** When the last encrypted backup was written. */
     val lastBackup: StateFlow<Instant?> = _lastBackup
+    /**
+     * NeoTransfer+'s operations as last read, at start and on every return to the foreground; null while it is not installed
+     * or cannot be read, and then nothing of it shows.
+     */
+    val peerActivity: StateFlow<List<ActivityRow>?> = _peerActivity
 
     init {
         scope.launch {
@@ -308,9 +316,16 @@ class AppController(
 
     /**
      * Takes what the other app changed in its stored contacts ([ContactSync.merge]). Not installed, not signed like this
-     * app or failing: nothing changes, and nothing is logged.
+     * app or failing: nothing changes, and nothing is logged. Its operations are read too ([peerActivity]).
      */
     private suspend fun pullPeer() {
+        _peerActivity.value = try {
+            withContext(io) { peerOperations.read() }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
         val remote = try {
             withContext(io) { peer.read() }
         } catch (e: CancellationException) {
@@ -604,7 +619,7 @@ class AppController(
         saved
     }
 
-    /** Every stored contact, tombstones included, as the other app reads them ([dev.duardo.neotransfer.platform.ContactsProvider]). */
+    /** Every stored contact, tombstones included, as the other app reads them ([dev.duardo.neotransfer.platform.SyncProvider]). */
     suspend fun contactRecords(): List<ContactRecord> = onState { storedRecords.values.toList() }
 
     /** Keeps a tombstone, so the other app deletes it too; saving the id again brings it back. */
