@@ -8,11 +8,17 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- NeoTransfer and NeoTransfer+ read each other's stored contacts; only apps signed like them get it. -->
+    <permission android:name="dev.duardo.neotransfer.permission.SYNC_CONTACTS" android:protectionLevel="signature" />
+    <uses-permission android:name="dev.duardo.neotransfer.permission.SYNC_CONTACTS" />
     <!-- Everything works offline: drop what bundled ML Kit adds for its usage reports. -->
     <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
     <uses-feature android:name="android.hardware.telephony" android:required="true" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <queries>
+        <provider android:authorities="dev.duardo.neotransfer.plus.contacts" />
+    </queries>
 
     <application
         android:name=".engine.NeoTransferApplication"
@@ -67,5 +73,10 @@
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
         </service>
+        <provider
+            android:name=".platform.ContactsProvider"
+            android:authorities="${applicationId}.contacts"
+            android:exported="true"
+            android:readPermission="dev.duardo.neotransfer.permission.SYNC_CONTACTS" />
     </application>
 </manifest>

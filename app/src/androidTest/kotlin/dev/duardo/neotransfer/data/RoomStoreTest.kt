@@ -6,6 +6,8 @@ import androidx.test.platform.app.InstrumentationRegistry
 import dev.duardo.neotransfer.core.ledger.Ledger
 import dev.duardo.neotransfer.core.model.Bank
 import dev.duardo.neotransfer.core.model.Contact
+import dev.duardo.neotransfer.core.model.ContactRecord
+import dev.duardo.neotransfer.core.model.ContactSync
 import dev.duardo.neotransfer.core.model.Money
 import dev.duardo.neotransfer.core.model.OwnCard
 import dev.duardo.neotransfer.core.model.ServiceKind
@@ -41,9 +43,10 @@ class RoomStoreTest {
         store.saveCards(listOf(bandec, bpa))
         store.saveCards(listOf(bandec, bpa, WalletCard(OwnCard("9204000000000002", Bank.BANDEC))))
         store.deleteCard("9204000000000002")
-        val juan = Contact("c1", "Juan", listOf("50000009"), listOf("9204990000000007"))
-        store.saveContacts(listOf(juan, Contact("c2", "Ana")))
-        store.deleteContact("c2")
+        val juan = ContactRecord(Contact("c1", "Juan", listOf("50000009"), listOf("9204990000000007")), at.toEpochMilli())
+        store.saveContacts(listOf(juan, ContactRecord(Contact("c2", "Ana"), 0)))
+        val ana = ContactSync.tombstone(Contact("c2", "Ana"), at.toEpochMilli())
+        store.saveContacts(listOf(ana))
         val electricity = ServiceReference(ServiceKind.ELECTRICITY, "12345678901", "Casa")
         store.saveServices(listOf(electricity, ServiceReference(ServiceKind.PHONE, "123456789012345")))
         store.deleteService(ServiceReference(ServiceKind.PHONE, "123456789012345"))
@@ -55,7 +58,7 @@ class RoomStoreTest {
         assertEquals(setOf(query, transfer), snapshot.operations.toSet())
         assertEquals(listOf("uno", "dos, otro"), snapshot.sms.sortedBy { it.id }.map { it.body })
         assertEquals(listOf(bandec, bpa), snapshot.cards)
-        assertEquals(listOf(juan), snapshot.contacts)
+        assertEquals(setOf(juan, ana), snapshot.contacts.toSet())
         assertEquals(listOf(electricity), snapshot.services)
         assertEquals(preferences.copy(keySavedAt = mapOf(Bank.BANDEC to at)), snapshot.preferences)
     }

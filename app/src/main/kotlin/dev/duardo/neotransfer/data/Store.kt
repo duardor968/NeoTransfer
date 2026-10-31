@@ -5,6 +5,7 @@ import dev.duardo.neotransfer.core.model.Agency
 import dev.duardo.neotransfer.core.model.Bank
 import dev.duardo.neotransfer.core.model.Cards
 import dev.duardo.neotransfer.core.model.Contact
+import dev.duardo.neotransfer.core.model.ContactRecord
 import dev.duardo.neotransfer.core.model.Currency
 import dev.duardo.neotransfer.core.model.MiTransfer
 import dev.duardo.neotransfer.core.model.OwnCard
@@ -58,7 +59,8 @@ data class Snapshot(
     val operations: List<Operation>,
     val sms: List<StoredSms>,
     val cards: List<WalletCard>,
-    val contacts: List<Contact>,
+    /** Tombstones included. */
+    val contacts: List<ContactRecord>,
     val services: List<ServiceReference>,
     val preferences: Preferences,
     val classics: List<ClassicCard>,
@@ -74,8 +76,8 @@ interface Store {
     suspend fun deleteCard(number: String)
     suspend fun saveClassic(card: ClassicCard)
     suspend fun deleteClassic(number: String)
-    suspend fun saveContacts(contacts: List<Contact>)
-    suspend fun deleteContact(id: String)
+    /** Contacts are never deleted: a deletion is a tombstone ([ContactRecord.deleted]) the other app reads. */
+    suspend fun saveContacts(contacts: List<ContactRecord>)
     suspend fun saveServices(services: List<ServiceReference>)
     suspend fun deleteService(service: ServiceReference)
     suspend fun savePreferences(preferences: Preferences)
@@ -86,7 +88,7 @@ class RoomStore(private val dao: NeoDao) : Store {
         dao.operations().map { it.toOperation() },
         dao.sms().map { it.toStoredSms() },
         dao.cards().map { it.toWalletCard() },
-        dao.contacts().map { it.toContact() },
+        dao.contacts().map { it.toRecord() },
         dao.services().map { it.toServiceReference() },
         dao.settings().toPreferences(),
         dao.classics().map { ClassicCard(it.number) },
@@ -98,8 +100,7 @@ class RoomStore(private val dao: NeoDao) : Store {
     override suspend fun deleteCard(number: String) = dao.deleteCard(number)
     override suspend fun saveClassic(card: ClassicCard) = dao.upsertClassic(ClassicCardEntity(card.number))
     override suspend fun deleteClassic(number: String) = dao.deleteClassic(number)
-    override suspend fun saveContacts(contacts: List<Contact>) = dao.upsertContacts(contacts.map { it.toEntity() })
-    override suspend fun deleteContact(id: String) = dao.deleteContact(id)
+    override suspend fun saveContacts(contacts: List<ContactRecord>) = dao.upsertContacts(contacts.map { it.toEntity() })
     override suspend fun saveServices(services: List<ServiceReference>) = dao.upsertServices(services.map { it.toEntity() })
     override suspend fun deleteService(service: ServiceReference) = dao.deleteService(service.kind.name, service.value)
 
@@ -122,10 +123,14 @@ internal fun WalletCard.toEntity(position: Int) =
 internal fun CardEntity.toWalletCard() =
     WalletCard(OwnCard(number, Bank.valueOf(bank), Currency.valueOf(currency), alias), holder, expiry)
 
-internal fun Contact.toEntity() =
-    ContactEntity(id, name, phones.joinToString("\n"), cards.joinToString("\n"), labels.entries.joinToString("\n") { "${it.key}\t${it.value}" })
-internal fun ContactEntity.toContact() =
-    Contact(id, name, lines(phones), lines(cards), lines(labels).associate { it.substringBefore('\t') to it.substringAfter('\t') })
+internal fun ContactRecord.toEntity() = with(contact) {
+    ContactEntity(id, name, phones.joinToString("\n"), cards.joinToString("\n"), labels.entries.joinToString("\n") { "${it.key}\t${it.value}" },
+        updated, deleted)
+}
+internal fun ContactEntity.toRecord() = ContactRecord(
+    Contact(id, name, lines(phones), lines(cards), lines(labels).associate { it.substringBefore('\t') to it.substringAfter('\t') }),
+    updated, deleted,
+)
 private fun lines(value: String) = value.split('\n').filter(String::isNotEmpty)
 
 internal fun ServiceReference.toEntity() = ServiceEntity(kind.name, value, label)

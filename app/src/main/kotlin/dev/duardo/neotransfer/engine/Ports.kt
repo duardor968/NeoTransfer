@@ -1,5 +1,6 @@
 package dev.duardo.neotransfer.engine
 
+import dev.duardo.neotransfer.core.model.ContactRecord
 import dev.duardo.neotransfer.core.protocol.UssdCommand
 import dev.duardo.neotransfer.core.sms.SmsRecord
 import javax.crypto.Cipher
@@ -71,4 +72,13 @@ data class PhoneContact(val key: String, val name: String, val phones: List<Stri
 fun interface PhoneBook {
     /** Everyone with a name and a Cuban mobile. Throws [SecurityException] without READ_CONTACTS. */
     fun read(): List<PhoneContact>
+}
+
+/** The author's other app (NeoTransfer+), whose stored contacts this one syncs with ([dev.duardo.neotransfer.core.model.ContactSync]). */
+fun interface PeerContacts {
+    /**
+     * Every contact it keeps, tombstones included; null when it is not installed. Throws [SecurityException] when it is
+     * not signed like this app.
+     */
+    fun read(): List<ContactRecord>?
 }

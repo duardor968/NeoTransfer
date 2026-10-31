@@ -31,7 +31,10 @@ data class CardEntity(
     val position: Int,
 )
 
-/** Phones and cards are digits only, one per line; [labels] is one `<card>\t<name>` per line. */
+/**
+ * Phones and cards are digits only, one per line; [labels] is one `<card>\t<name>` per line. [updated] and [deleted] are
+ * the sync's ([dev.duardo.neotransfer.core.model.ContactRecord]): a deleted row is a tombstone.
+ */
 @Entity(tableName = "contact")
 data class ContactEntity(
     @PrimaryKey val id: String,
@@ -39,6 +42,8 @@ data class ContactEntity(
     val phones: String,
     val cards: String,
     @ColumnInfo(defaultValue = "") val labels: String,
+    @ColumnInfo(defaultValue = "0") val updated: Long,
+    @ColumnInfo(defaultValue = "0") val deleted: Boolean,
 )
 
 /** An own Clásica ([ClassicCard]): only its number; it has no bank, and it is always USD. */
@@ -69,7 +74,6 @@ interface NeoDao {
 
     @Query("SELECT * FROM contact") suspend fun contacts(): List<ContactEntity>
     @Upsert suspend fun upsertContacts(rows: List<ContactEntity>)
-    @Query("DELETE FROM contact WHERE id = :id") suspend fun deleteContact(id: String)
 
     @Query("SELECT * FROM service") suspend fun services(): List<ServiceEntity>
     @Upsert suspend fun upsertServices(rows: List<ServiceEntity>)
@@ -85,9 +89,9 @@ interface NeoDao {
         OperationEntity::class, SmsEntity::class, CardEntity::class, ClassicCardEntity::class, ContactEntity::class, ServiceEntity::class,
         SettingEntity::class,
     ],
-    version = 3,
-    // 2 → 3 only adds `classic_card`.
-    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
+    version = 4,
+    // 2 → 3 only adds `classic_card`; 3 → 4 the contacts' `updated` and `deleted`.
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4)],
 )
 abstract class NeoDatabase : RoomDatabase() {
     abstract fun dao(): NeoDao

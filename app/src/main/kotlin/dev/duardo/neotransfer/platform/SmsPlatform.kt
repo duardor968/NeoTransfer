@@ -11,6 +11,8 @@ import dev.duardo.neotransfer.core.sms.SmsRecord
 import dev.duardo.neotransfer.engine.InboxSms
 import dev.duardo.neotransfer.engine.SmsInbox
 import dev.duardo.neotransfer.engine.controller
+import java.time.Duration
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Bank rows ([SmsRecord.SENDERS]) of `content://sms/inbox`; call off the main thread. */
 class AndroidSmsInbox(context: Context) : SmsInbox {
@@ -45,7 +47,16 @@ class SmsReceiver : BroadcastReceiver() {
         if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return
         val parts = Telephony.Sms.Intents.getMessagesFromIntent(intent) ?: return
         if (parts.none { part -> SmsRecord.SENDERS.any { part?.originatingAddress.equals(it, ignoreCase = true) } }) return
+        // The broadcast ends when the SMS is read or after [BUDGET], whichever comes first: a busy app would otherwise
+        // overrun the system's limit and show "not responding". What is not read by then is read when the app is free.
         val pending = goAsync()
-        context.controller.onBankSms().invokeOnCompletion { pending.finish() }
+        val finished = AtomicBoolean()
+        val finish = { if (finished.compareAndSet(false, true)) pending.finish() }
+        context.controller.onBankSms().invokeOnCompletion { finish() }
+        Handler(Looper.getMainLooper()).postDelayed({ finish() }, BUDGET.toMillis())
+    }
+
+    private companion object {
+        val BUDGET: Duration = Duration.ofSeconds(8)
     }
 }

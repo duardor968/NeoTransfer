@@ -12,6 +12,8 @@ import dev.duardo.neotransfer.core.ledger.Operation
 import dev.duardo.neotransfer.core.ledger.OperationState
 import dev.duardo.neotransfer.core.model.Bank
 import dev.duardo.neotransfer.core.model.Contact
+import dev.duardo.neotransfer.core.model.ContactRecord
+import dev.duardo.neotransfer.core.model.ContactSync
 import dev.duardo.neotransfer.core.model.Currency
 import dev.duardo.neotransfer.core.model.MiTransfer
 import dev.duardo.neotransfer.core.model.Money
@@ -684,6 +686,52 @@ class AppControllerTest {
         assertEquals(ImportSummary(0, 0, 0), restored.controller.importBackup("content://backup", "clave segura".toCharArray()))
         rig.controller.deleteContact(juan.id)
         assertEquals(listOf("Ana B."), rig.controller.contacts.value.map { it.name })
+    }
+
+    @Test fun `contacts sync with NeoTransfer+ both ways, deletions included`() = runTest {
+        val store = MemoryStore()
+        val rig = rig(store)
+        val juan = rig.controller.saveContact(Contact("", "Juan", listOf("50000009"), listOf(friend)))
+        assertEquals(ContactRecord(juan, now().toEpochMilli()), store.contacts.getValue(juan.id))
+        // Deleted: a tombstone no screen shows and the other app reads; saved again, it comes back.
+        wait(Duration.ofSeconds(1))
+        rig.controller.deleteContact(juan.id)
+        assertEquals(ContactSync.tombstone(juan, now().toEpochMilli()), store.contacts.getValue(juan.id))
+        assertTrue(rig.controller.contacts.value.isEmpty())
+        assertEquals(listOf(store.contacts.getValue(juan.id)), rig.controller.contactRecords())
+        wait(Duration.ofSeconds(1))
+        rig.controller.saveContact(juan)
+        assertEquals(ContactRecord(juan, now().toEpochMilli()), store.contacts.getValue(juan.id))
+
+        // NeoTransfer+ added Ana and deleted Juan after that: both arrive when the app comes to the front, with their times.
+        val ana = Contact("c-ana", "Ana", listOf("52222222"), listOf("9204990000000015"))
+        val later = now().toEpochMilli() + 1_000
+        rig.peer = { listOf(ContactRecord(ana, later), ContactSync.tombstone(juan, later)) }
+        rig.controller.onForeground()
+        runCurrent()
+        assertEquals(listOf("Ana"), rig.controller.contacts.value.map { it.name })
+        assertEquals(ContactRecord(ana, later), store.contacts.getValue(ana.id))
+        assertEquals(ContactSync.tombstone(juan, later), store.contacts.getValue(juan.id))
+        // Not installed, or not signed like this app: nothing changes.
+        rig.peer = { throw SecurityException() }
+        rig.controller.onForeground()
+        runCurrent()
+        assertEquals(listOf("Ana"), rig.controller.contacts.value.map { it.name })
+
+        // Moving Ana onto her address-book entry deletes the record kept only in the app: a tombstone too.
+        wait(Duration.ofSeconds(1))
+        rig.addressBook = listOf(PhoneContact("lookup-1", "Ana B.", listOf("52222222")))
+        rig.controller.onPermissionsChanged()
+        runCurrent()
+        assertEquals(ContactSync.tombstone(ana, now().toEpochMilli()), store.contacts.getValue(ana.id))
+        assertEquals(listOf("9204990000000015"), store.contacts.getValue("phone:lookup-1").contact.cards)
+
+        // A fresh install of the other app, read at start: it gets what this one keeps, and no tombstone shows.
+        val other = rig()
+        other.peer = { store.contacts.values.toList() }
+        runCurrent()
+        assertEquals(listOf("phone:lookup-1"), other.controller.contacts.value.map { it.id })
+        assertEquals(setOf("phone:lookup-1"), other.controller.contactRecords().map { it.contact.id }.toSet())
     }
 
     /** Local only: `NEOTRANSFER_TRM` = a real Transfermóvil backup. Prints counts, never contents. */

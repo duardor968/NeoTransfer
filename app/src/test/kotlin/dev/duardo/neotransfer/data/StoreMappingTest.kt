@@ -3,6 +3,8 @@ package dev.duardo.neotransfer.data
 import dev.duardo.neotransfer.core.ledger.Ledger
 import dev.duardo.neotransfer.core.model.Bank
 import dev.duardo.neotransfer.core.model.Contact
+import dev.duardo.neotransfer.core.model.ContactRecord
+import dev.duardo.neotransfer.core.model.ContactSync
 import dev.duardo.neotransfer.core.model.Currency
 import dev.duardo.neotransfer.core.model.MiTransfer
 import dev.duardo.neotransfer.core.model.Money
@@ -34,8 +36,10 @@ class StoreMappingTest {
         assertEquals(card, card.toEntity(3).toWalletCard())
         assertEquals(3, card.toEntity(3).position)
         val contact = Contact("c1", "Juan", listOf("50000009", "52222222"), listOf("9204990000000007", "9205990000000001"), mapOf("9204990000000007" to "Salario"))
-        assertEquals(contact, contact.toEntity().toContact())
-        assertEquals(Contact("c2", "Ana"), Contact("c2", "Ana").toEntity().toContact())
+        assertEquals(ContactRecord(contact, at.toEpochMilli()), ContactRecord(contact, at.toEpochMilli()).toEntity().toRecord())
+        assertEquals(ContactRecord(Contact("c2", "Ana"), 0), ContactRecord(Contact("c2", "Ana"), 0).toEntity().toRecord())
+        val tombstone = ContactSync.tombstone(contact, at.toEpochMilli())
+        assertEquals(tombstone, tombstone.toEntity().toRecord())
         val service = ServiceReference(ServiceKind.NAUTA, "usuario@nauta.com.cu", null)
         assertEquals(service, service.toEntity().toServiceReference())
     }

@@ -5,6 +5,9 @@ import android.database.sqlite.SQLiteDatabase
 import androidx.room.Room
 import dev.duardo.neotransfer.core.model.Agency
 import dev.duardo.neotransfer.core.model.Bank
+import dev.duardo.neotransfer.core.model.Contact
+import dev.duardo.neotransfer.core.model.ContactRecord
+import dev.duardo.neotransfer.core.model.ContactSync
 import dev.duardo.neotransfer.core.model.MiTransfer
 import dev.duardo.neotransfer.core.model.OwnCard
 import kotlinx.coroutines.runBlocking
@@ -19,19 +22,26 @@ import java.time.Instant
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-/** A database as version 2 left it opens as version 3: every row stays, and the Clásicas get their table. */
+/**
+ * Older databases open as the current version: every row stays; 2 → 3 gives the Clásicas their table, 3 → 4 the contacts
+ * the sync's columns.
+ */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = Application::class)
 class NeoDatabaseMigrationTest {
     private val context = RuntimeEnvironment.getApplication()
-    private val name = "migration-2-3.db"
+    private val name = "migration.db"
 
-    @Test fun `version 2 migrates to 3 keeping its rows`() = runBlocking {
+    @Test fun `version 2 migrates keeping its rows`() = runBlocking {
         context.deleteDatabase(name)
-        createVersion2()
+        create(2,
+            "INSERT INTO card VALUES ('9205000000000001', 'BPA', 'CUP', NULL, 'ANA PRUEBA', '03/29', 0)",
+            "INSERT INTO setting VALUES ('key.saved.BPA', '1700000000000')",
+            "INSERT INTO sms VALUES (7, 1700000000000, 1700000001000, 'Banco Popular de Ahorro: La consulta de saldo fue completada. Saldo Disponible: CR 1.00 CUP')",
+        )
         val database = Room.databaseBuilder(context, NeoDatabase::class.java, name).build()
         try {
-            // Room checks the migrated schema against version 3 as it opens.
+            // Room checks the migrated schema against the current one as it opens.
             val store = RoomStore(database.dao())
             val snapshot = store.load()
             assertEquals(listOf(WalletCard(OwnCard("9205000000000001", Bank.BPA), "ANA PRUEBA", "03/29")), snapshot.cards)
@@ -53,9 +63,25 @@ class NeoDatabaseMigrationTest {
         }
     }
 
-    /** The tables of the exported version 2 schema, as 1.1 created them, with a row in some of them. */
-    private fun createVersion2() {
-        val schema = JSONObject(File("schemas/dev.duardo.neotransfer.data.NeoDatabase/2.json").readText()).getJSONObject("database")
+    @Test fun `version 3 contacts migrate as never changed and not deleted`() = runBlocking {
+        context.deleteDatabase(name)
+        create(3, "INSERT INTO contact VALUES ('c1', 'Juan', '50000009', '9204990000000007', '9204990000000007\tSalario')")
+        val database = Room.databaseBuilder(context, NeoDatabase::class.java, name).build()
+        try {
+            val store = RoomStore(database.dao())
+            val juan = Contact("c1", "Juan", listOf("50000009"), listOf("9204990000000007"), mapOf("9204990000000007" to "Salario"))
+            assertEquals(listOf(ContactRecord(juan, 0)), store.load().contacts)
+            store.saveContacts(listOf(ContactSync.tombstone(juan, 1_792_000_000_000)))
+            assertEquals(listOf(ContactRecord(Contact("c1", "Juan"), 1_792_000_000_000, deleted = true)), store.load().contacts)
+        } finally {
+            database.close()
+            context.deleteDatabase(name)
+        }
+    }
+
+    /** The tables of an exported schema [version], as that release created them, with [rows] inserted. */
+    private fun create(version: Int, vararg rows: String) {
+        val schema = JSONObject(File("schemas/dev.duardo.neotransfer.data.NeoDatabase/$version.json").readText()).getJSONObject("database")
         val file = context.getDatabasePath(name).apply { parentFile?.mkdirs() }
         SQLiteDatabase.openOrCreateDatabase(file, null).use { db ->
             val entities = schema.getJSONArray("entities")
@@ -65,10 +91,8 @@ class NeoDatabaseMigrationTest {
             }
             val setup = schema.getJSONArray("setupQueries")
             for (i in 0 until setup.length()) db.execSQL(setup.getString(i))
-            db.execSQL("INSERT INTO card VALUES ('9205000000000001', 'BPA', 'CUP', NULL, 'ANA PRUEBA', '03/29', 0)")
-            db.execSQL("INSERT INTO setting VALUES ('key.saved.BPA', '1700000000000')")
-            db.execSQL("INSERT INTO sms VALUES (7, 1700000000000, 1700000001000, 'Banco Popular de Ahorro: La consulta de saldo fue completada. Saldo Disponible: CR 1.00 CUP')")
-            db.version = 2
+            rows.forEach(db::execSQL)
+            db.version = version
         }
     }
 }

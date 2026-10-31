@@ -19,6 +19,8 @@ import dev.duardo.neotransfer.core.model.Agency
 import dev.duardo.neotransfer.core.model.Bank
 import dev.duardo.neotransfer.core.model.Cards
 import dev.duardo.neotransfer.core.model.Contact
+import dev.duardo.neotransfer.core.model.ContactRecord
+import dev.duardo.neotransfer.core.model.ContactSync
 import dev.duardo.neotransfer.core.model.Currency
 import dev.duardo.neotransfer.core.model.MiTransfer
 import dev.duardo.neotransfer.core.model.Money
@@ -64,6 +66,7 @@ import dev.duardo.neotransfer.data.Settings
 import dev.duardo.neotransfer.data.Store
 import dev.duardo.neotransfer.data.StoredSms
 import dev.duardo.neotransfer.data.WalletCard
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -144,6 +147,7 @@ class AppController(
     private val notifier: Notifier,
     private val documents: Documents,
     private val phoneBook: PhoneBook,
+    private val peer: PeerContacts,
     private val clock: () -> Instant,
     /** Runs one coroutine at a time: all mutable state below is confined to it. */
     state: CoroutineDispatcher,
@@ -157,8 +161,10 @@ class AppController(
     private val records = mutableMapOf<Long, SmsRecord>()
     private var wallet = emptyList<WalletCard>()
     private var classicCards = emptyList<ClassicCard>()
-    /** Contacts as stored: address-book people only when the app keeps cards for them. */
-    private var stored = emptyList<Contact>()
+    /** Contacts as stored, by id, tombstones included: address-book people only when the app keeps cards for them. */
+    private val storedRecords = linkedMapOf<String, ContactRecord>()
+    /** The [storedRecords] not deleted. */
+    private val stored: List<Contact> get() = storedRecords.values.filterNot { it.deleted }.map { it.contact }
     /** The phone's address book; null while it cannot be read. */
     private var agenda: List<PhoneContact>? = null
     private var preferences = Preferences()
@@ -241,13 +247,14 @@ class AppController(
             snapshot.sms.forEach { sms[it.id] = it; records[it.id] = it.record() }
             wallet = snapshot.cards
             classicCards = snapshot.classics
-            stored = snapshot.contacts
+            snapshot.contacts.forEach { storedRecords[it.contact.id] = it }
             publishContacts()
             _services.value = snapshot.services
             preferences = snapshot.preferences
             startup.complete(Unit)
             publish()
             _loaded.value = true
+            pullPeer()
             readAddressBook()
             ingest()
         }
@@ -261,6 +268,7 @@ class AppController(
             foreground = true
             lockTimer?.cancel()
             startup.await()
+            pullPeer()
             readAddressBook()
             if (ingest() == 0 && view?.next?.operation?.request?.dialed == true) publish()
         }
@@ -293,12 +301,38 @@ class AppController(
         agenda = people
         if (people != null) {
             val (save, delete) = Directory.link(stored, people)
-            if (save.isNotEmpty()) store.saveContacts(save)
-            delete.forEach { store.deleteContact(it) }
-            val replaced = save.mapTo(hashSetOf()) { it.id } + delete
-            stored = stored.filterNot { it.id in replaced } + save
+            keepContacts(save, delete)
         }
         publishContacts()
+    }
+
+    /**
+     * Takes what the other app changed in its stored contacts ([ContactSync.merge]). Not installed, not signed like this
+     * app or failing: nothing changes, and nothing is logged.
+     */
+    private suspend fun pullPeer() {
+        val remote = try {
+            withContext(io) { peer.read() }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        } ?: return
+        val changes = ContactSync.merge(storedRecords.values, remote)
+        if (changes.isEmpty()) return
+        store.saveContacts(changes)
+        changes.forEach { storedRecords[it.contact.id] = it }
+        publishContacts()
+    }
+
+    /** Saves [contacts] and turns the [deleted] ids into tombstones, all stamped now for the other app to take. */
+    private suspend fun keepContacts(contacts: List<Contact>, deleted: List<String> = emptyList()) {
+        val at = clock().toEpochMilli()
+        val tombstones = deleted.mapNotNull { id -> storedRecords[id]?.takeUnless { it.deleted } }.map { ContactSync.tombstone(it.contact, at) }
+        val rows = contacts.map { ContactRecord(it, at) } + tombstones
+        if (rows.isEmpty()) return
+        store.saveContacts(rows)
+        rows.forEach { storedRecords[it.contact.id] = it }
     }
 
     private fun publishContacts() {
@@ -565,15 +599,17 @@ class AppController(
         }.toMap()
         require(clean.name.isNotEmpty()) { "Escribe un nombre" }
         val saved = clean.copy(labels = labels)
-        store.saveContacts(listOf(saved))
-        stored = stored.filterNot { it.id == saved.id } + saved
+        keepContacts(listOf(saved))
         publishContacts()
         saved
     }
 
+    /** Every stored contact, tombstones included, as the other app reads them ([dev.duardo.neotransfer.platform.ContactsProvider]). */
+    suspend fun contactRecords(): List<ContactRecord> = onState { storedRecords.values.toList() }
+
+    /** Keeps a tombstone, so the other app deletes it too; saving the id again brings it back. */
     suspend fun deleteContact(id: String) = onState {
-        store.deleteContact(id)
-        stored = stored.filterNot { it.id == id }
+        keepContacts(emptyList(), listOf(id))
         publishContacts()
     }
 
@@ -954,11 +990,10 @@ class AppController(
             .filter { service -> _services.value.none { it.kind == service.kind && it.value == service.value } }
         if (cards.isNotEmpty()) store.saveCards(wallet + cards)
         newClassics.forEach { store.saveClassic(it) }
-        if (contacts.isNotEmpty()) store.saveContacts(contacts)
+        keepContacts(contacts)
         if (services.isNotEmpty()) store.saveServices(services)
         wallet = wallet + cards
         classicCards = classicCards + newClassics
-        stored = stored.filterNot { contact -> contacts.any { it.id == contact.id } } + contacts
         readAddressBook()
         _services.value = _services.value + services
         publish()

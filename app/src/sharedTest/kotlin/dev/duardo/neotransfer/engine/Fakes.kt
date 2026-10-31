@@ -1,7 +1,7 @@
 package dev.duardo.neotransfer.engine
 
 import dev.duardo.neotransfer.core.ledger.Operation
-import dev.duardo.neotransfer.core.model.Contact
+import dev.duardo.neotransfer.core.model.ContactRecord
 import dev.duardo.neotransfer.core.model.ServiceReference
 import dev.duardo.neotransfer.core.protocol.UssdCommand
 import dev.duardo.neotransfer.data.ClassicCard
@@ -91,7 +91,8 @@ class MemoryStore : Store {
     val sms = ConcurrentHashMap<Long, StoredSms>()
     @Volatile var cards = emptyList<WalletCard>()
     val classics = CopyOnWriteArrayList<ClassicCard>()
-    val contacts = ConcurrentHashMap<String, Contact>()
+    /** Tombstones included. */
+    val contacts = ConcurrentHashMap<String, ContactRecord>()
     val services = CopyOnWriteArrayList<ServiceReference>()
     @Volatile var preferences = Preferences()
 
@@ -103,8 +104,7 @@ class MemoryStore : Store {
     override suspend fun deleteCard(number: String) { cards = cards.filterNot { it.card.number == number } }
     override suspend fun saveClassic(card: ClassicCard) { if (card !in classics) classics += card }
     override suspend fun deleteClassic(number: String) { classics.removeIf { it.number == number } }
-    override suspend fun saveContacts(contacts: List<Contact>) = contacts.forEach { this.contacts[it.id] = it }
-    override suspend fun deleteContact(id: String) { contacts.remove(id) }
+    override suspend fun saveContacts(contacts: List<ContactRecord>) = contacts.forEach { this.contacts[it.contact.id] = it }
     override suspend fun saveServices(services: List<ServiceReference>) {
         services.forEach { new -> this.services.removeIf { it.kind == new.kind && it.value == new.value }; this.services += new }
     }
@@ -126,7 +126,10 @@ class Rig(
     val documents = FakeDocuments()
     /** The phone's address book; null as if READ_CONTACTS were denied. */
     var addressBook: List<PhoneContact>? = emptyList()
-    val controller = AppController(store, modem, inbox, vault, notifier, documents, { addressBook ?: throw SecurityException() }, clock, state, io)
+    /** What NeoTransfer+ keeps; null as if it were not installed. */
+    var peer: () -> List<ContactRecord>? = { null }
+    val controller = AppController(store, modem, inbox, vault, notifier, documents, { addressBook ?: throw SecurityException() }, { peer() },
+        clock, state, io)
 
     fun status(id: String) = controller.operations.value.first { it.operation.id == id }
     fun state(id: String) = status(id).state
