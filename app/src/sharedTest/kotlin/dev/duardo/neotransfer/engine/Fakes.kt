@@ -4,6 +4,7 @@ import dev.duardo.neotransfer.core.ledger.Operation
 import dev.duardo.neotransfer.core.model.Contact
 import dev.duardo.neotransfer.core.model.ServiceReference
 import dev.duardo.neotransfer.core.protocol.UssdCommand
+import dev.duardo.neotransfer.data.ClassicCard
 import dev.duardo.neotransfer.data.Preferences
 import dev.duardo.neotransfer.data.Snapshot
 import dev.duardo.neotransfer.data.Store
@@ -34,7 +35,13 @@ class FakeModem(var latency: Long = 2_000) : UssdModem {
         return answer(command) ?: awaitCancellation()
     }
 
-    override fun dial(command: UssdCommand) { dialed += command }
+    /** What every dial answers: why nothing was dialed, or null. */
+    var dialFailure: String? = null
+
+    override fun dial(command: UssdCommand): String? {
+        dialed += command
+        return dialFailure
+    }
 }
 
 /** Inbox double: PAGOxMOVIL rows with increasing `_id`; remembers where each read started. */
@@ -83,15 +90,19 @@ class MemoryStore : Store {
     val operations = ConcurrentHashMap<String, Operation>()
     val sms = ConcurrentHashMap<Long, StoredSms>()
     @Volatile var cards = emptyList<WalletCard>()
+    val classics = CopyOnWriteArrayList<ClassicCard>()
     val contacts = ConcurrentHashMap<String, Contact>()
     val services = CopyOnWriteArrayList<ServiceReference>()
     @Volatile var preferences = Preferences()
 
-    override suspend fun load() = Snapshot(operations.values.toList(), sms.values.toList(), cards, contacts.values.toList(), services.toList(), preferences)
+    override suspend fun load() =
+        Snapshot(operations.values.toList(), sms.values.toList(), cards, contacts.values.toList(), services.toList(), preferences, classics.toList())
     override suspend fun saveOperation(operation: Operation) { operations[operation.id] = operation }
     override suspend fun saveSms(rows: List<StoredSms>) = rows.forEach { sms[it.id] = it }
     override suspend fun saveCards(cards: List<WalletCard>) { this.cards = cards }
     override suspend fun deleteCard(number: String) { cards = cards.filterNot { it.card.number == number } }
+    override suspend fun saveClassic(card: ClassicCard) { if (card !in classics) classics += card }
+    override suspend fun deleteClassic(number: String) { classics.removeIf { it.number == number } }
     override suspend fun saveContacts(contacts: List<Contact>) = contacts.forEach { this.contacts[it.id] = it }
     override suspend fun deleteContact(id: String) { contacts.remove(id) }
     override suspend fun saveServices(services: List<ServiceReference>) {
@@ -130,6 +141,8 @@ object BankSms {
     fun received(to: String, amount: String, ref: String, from: String = "5350000009") =
         "El titular del telefono $from le ha realizado una transferencia a la cuenta $to de $amount CUP. Nro. Transaccion $ref. Fecha: 15/10/2026."
     fun rejectedTransfer() = "Fallo la transferencia. Banco Bandec: LA CUENTA NO ESTA ASOCIADA A UNA TARJETA MAGNETICA"
+    fun transferDone(to: String, amount: String) = "Banco Bandec:  La Transferencia fue completada. \n Fecha: 15/10/2026 \n " +
+        "Beneficiario: ${to.take(4)}XXXXXXXX${to.takeLast(4)} \n Ordenante: CUP \n Monto: $amount CUP \n Nro. Transaccion: KW000TEST3 \n Saldo restante: CR 700.00 CUP "
     fun registration(key: String) =
         "Banco Bandec:  La operacion de registro fue completada. Bienvenido a Transfermovil.Clave de Autenticacion: $key Guarde esta clave."
 }

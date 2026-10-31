@@ -7,7 +7,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import dev.duardo.neotransfer.core.model.Money as CoreMoney
-import dev.duardo.neotransfer.core.protocol.QrPay
 import dev.duardo.neotransfer.core.qr.QrCode
 import dev.duardo.neotransfer.core.qr.QrContent
 import dev.duardo.neotransfer.core.qr.QrPayment
@@ -17,6 +16,8 @@ import dev.duardo.neotransfer.scanner.ScanMode
 import dev.duardo.neotransfer.scanner.ScanResult
 import dev.duardo.neotransfer.scanner.ScannerView
 import dev.duardo.neotransfer.ui.common.LightSystemBars
+import dev.duardo.neotransfer.ui.model.BANK_CARD_ONLY
+import dev.duardo.neotransfer.ui.model.Bank
 import dev.duardo.neotransfer.ui.model.DuplicateUi
 import dev.duardo.neotransfer.ui.model.PayQrUi
 import dev.duardo.neotransfer.ui.model.PayReviewUi
@@ -56,7 +57,12 @@ class PayDestination(
         problem?.let { return PayQrUi.Unsupported(it) }
         val payment = payment ?: return PayQrUi.Scanning
         val sources = sources(book, payment)
-        if (sources.isEmpty()) return PayQrUi.Unsupported("Para pagar este código hace falta una tarjeta en ${payment.amount.currency.name}", addCard = true)
+        if (sources.isEmpty()) {
+            val currency = payment.amount.currency.name
+            // The payment that leaves the card out (`aux` with `11200301`) does not say which card pays: only a bank's can.
+            val classic = book.wallet.any { it.card.bank == Bank.CLASSIC && it.card.currency == currency }
+            return PayQrUi.Unsupported(if (classic) BANK_CARD_ONLY else "Para pagar este código hace falta una tarjeta en $currency", addCard = true)
+        }
         val index = sources.indexOfFirst { it.card.id == source }.coerceAtLeast(0)
         val fixedDescription = payment.description.isNotEmpty()
         val (reference, label, editable) = when {
@@ -81,7 +87,7 @@ class PayDestination(
         )
     }
 
-    private fun sources(book: Book, payment: QrPayment) = book.wallet.filter { it.card.currency == payment.amount.currency.name }
+    private fun sources(book: Book, payment: QrPayment) = book.paySources(payment)
 
     private fun paidAmount(payment: QrPayment): BigDecimal? =
         if (!payment.editableAmount) payment.amount.amount
@@ -137,15 +143,18 @@ class PayDestination(
         }
     }
 
+    /** The bank's payment, or MiTransfer's with its PIN when the card is a Clásica: the controller's `qrPaymentRequest`. */
     private suspend fun send(payment: QrPayment, paid: BigDecimal, confirmed: Boolean) {
-        val book = app.book.value
-        val sources = sources(book, payment)
+        val sources = sources(app.book.value, payment)
         val chosen = sources.firstOrNull { it.card.id == source } ?: sources.firstOrNull() ?: return
-        val card = book.card(chosen.card.id)?.card?.card ?: return
-        val request = QrPay(
-            card.bank, app.controller.sourceFor(card.number), payment, CoreMoney(paid, payment.amount.currency),
-            description = payment.description.ifEmpty { description.trim() },
-        )
+        val request = try {
+            app.controller.qrPaymentRequest(
+                chosen.card.number, payment, CoreMoney(paid, payment.amount.currency),
+                description = payment.description.ifEmpty { description.trim() },
+            )
+        } catch (e: IllegalArgumentException) {
+            return app.message(e.message ?: "No se pudo pagar")
+        }
         duplicate = app.submit(request, this, confirmed)
     }
 }

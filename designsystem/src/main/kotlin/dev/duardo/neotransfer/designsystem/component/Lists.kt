@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.designsystem.theme.Neo
@@ -76,7 +77,8 @@ fun Modifier.groupItem(index: Int, count: Int): Modifier {
 /**
  * The single row of the system: leading slot (44 dp), title, optional supporting line, trailing slot.
  * Used by every list so spacing, ripple and alignment are identical everywhere. With [trailingBelowWhenLarge],
- * large font scales move the trailing element under the text so names keep the width.
+ * large font scales move the trailing element under the text so names keep the width. [wrapTitle] is for the title
+ * of an action, a phrase rather than a name: it takes a second line instead of shrinking and cutting.
  */
 @Composable
 fun NeoRow(
@@ -89,6 +91,7 @@ fun NeoRow(
     titleColor: Color = Color.Unspecified,
     supportingContent: (@Composable () -> Unit)? = null,
     trailingBelowWhenLarge: Boolean = false,
+    wrapTitle: Boolean = false,
 ) {
     val trailingBelow = trailingBelowWhenLarge && LocalDensity.current.fontScale >= 1.3f
     Row(
@@ -102,16 +105,17 @@ fun NeoRow(
     ) {
         leading?.invoke()
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            // One line: a name or a card number steps down before it ellipsizes, and never breaks inside a group.
-            FittedText(
-                title,
-                MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium),
-                color = if (titleColor.isSpecified) titleColor else LocalContentColor.current,
-                minScale = 0.8f,
-            )
+            val titleStyle = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium)
+            val color = if (titleColor.isSpecified) titleColor else LocalContentColor.current
+            if (wrapTitle) {
+                Text(title, style = titleStyle, color = color, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            } else {
+                // One line: a name or a card number steps down before it ellipsizes, and never breaks inside a group.
+                FittedText(title, titleStyle, color = color, minScale = 0.8f)
+            }
             when {
                 supportingContent != null -> supportingContent()
-                supporting != null -> Text(supporting, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                supporting != null -> SeparatedText(supporting, MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (trailingBelow) trailing?.invoke()
         }

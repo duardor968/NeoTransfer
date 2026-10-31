@@ -7,6 +7,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import dev.duardo.neotransfer.designsystem.component.LocalCaptureAllowed
 import dev.duardo.neotransfer.ui.common.NeoTransferTheme
 import dev.duardo.neotransfer.ui.model.Appearance
@@ -23,6 +24,10 @@ fun PreviewHost(appearance: Appearance, content: @Composable () -> Unit) {
         }
     }
 }
+
+/** The app's version as the app reads it, so previews never show a stale one. */
+@Composable
+fun appVersion(): String = LocalContext.current.let { it.packageManager.getPackageInfo(it.packageName, 0).versionName.orEmpty() }
 
 /** Actions that do nothing: previews are static. Identity answers like any object, so recomposition can compare it. */
 inline fun <reified T : Any> noop(): T =

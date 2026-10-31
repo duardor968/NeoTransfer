@@ -13,8 +13,8 @@ internal data class OcrWord(val text: String, val box: Box)
 internal data class OcrLine(val words: List<OcrWord>)
 
 /**
- * Finds Cuban card numbers (16 digits, IIN 92, Luhn) and mobiles (8 digits starting with 5 or 6, optional
- * `53`) in OCR text. Groups split across words, ML Kit blocks on the same row, or two stacked lines are joined
+ * Finds Cuban card numbers (16 digits, IIN 92 or Fincimex's personal Clásica `976003`, Luhn) and mobiles (8 digits
+ * starting with 5 or 6, optional `53`) in OCR text. Groups split across words, ML Kit blocks on the same row, or two stacked lines are joined
  * when the joined digits make a number that neither part makes alone.
  */
 internal object NumberReader {
@@ -36,7 +36,10 @@ internal object NumberReader {
         return sum % 10 == 0
     }
 
-    fun isCard(digits: String) = digits.length == 16 && digits.startsWith("92") && luhn(digits)
+    fun isCard(digits: String) = digits.length == 16 && cardPrefix(digits) && luhn(digits)
+
+    /** National cards (`92…`) and Fincimex's personal Clásica (`976003…`); not its business one (`976004…`). */
+    private fun cardPrefix(digits: String) = digits.startsWith("92") || digits.startsWith("976003")
 
     fun isPhone(digits: String) = digits.length == 8 && digits.all(Char::isDigit) && digits[0] in "56"
 
@@ -204,8 +207,8 @@ internal object NumberReader {
     }
 
     /**
-     * Consecutive groups holding exactly 16 digits that look like a card: Cuban IIN `92`, or the printed
-     * 4×4 layout on one row. Their digits never become phones, even when Luhn fails (a misread card).
+     * Consecutive groups holding exactly 16 digits that look like a card: a card's prefix ([cardPrefix]), or the
+     * printed 4×4 layout on one row. Their digits never become phones, even when Luhn fails (a misread card).
      */
     private fun cardWindows(groups: List<String>, layout: Boolean): List<IntRange> {
         val windows = mutableListOf<IntRange>()
@@ -215,7 +218,7 @@ internal object NumberReader {
             while (to < groups.size && sum < 16) sum += groups[to++].length
             if (sum != 16) continue
             val window = groups.subList(from, to)
-            if (window.joinToString("").startsWith("92") || (layout && window.size == 4 && window.all { it.length == 4 })) {
+            if (cardPrefix(window.joinToString("")) || (layout && window.size == 4 && window.all { it.length == 4 })) {
                 windows += from until to
             }
         }

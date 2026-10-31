@@ -35,6 +35,7 @@ import dev.duardo.neotransfer.designsystem.component.NeoIconButton
 import dev.duardo.neotransfer.designsystem.component.NeoKeypad
 import dev.duardo.neotransfer.designsystem.component.NeoRow
 import dev.duardo.neotransfer.designsystem.component.NeoSegmented
+import dev.duardo.neotransfer.designsystem.component.NeoTextButton
 import dev.duardo.neotransfer.designsystem.component.NeoTextField
 import dev.duardo.neotransfer.designsystem.component.NeoTopBar
 import dev.duardo.neotransfer.designsystem.component.PinDots
@@ -145,7 +146,7 @@ interface BankChoiceActions {
     fun back()
 }
 
-/** The two banks by their logos. */
+/** The three banks and the Clásica, by their logos. */
 @Composable
 fun BankChoiceScreen(state: BankChoiceUi, actions: BankChoiceActions, modifier: Modifier = Modifier, canGoBack: Boolean = false) {
     Scaffold(
@@ -169,37 +170,61 @@ fun BankChoiceScreen(state: BankChoiceUi, actions: BankChoiceActions, modifier: 
 interface BankKeyActions {
     fun key(key: KeypadKey)
     fun back()
+    /** Registering the line instead, for whoever has no key yet. */
+    fun register() {}
 }
 
-/** The bank's key, typed on our own keypad. Hidden from screenshots. */
+/**
+ * The bank's key, or MiTransfer's PIN for the Clásica, typed on our own keypad. Hidden from screenshots. While setting
+ * up ([canRegister]) it also leads to registering the line, for whoever has no key yet.
+ */
 @Composable
-fun BankKeyScreen(state: BankKeyUi, actions: BankKeyActions, modifier: Modifier = Modifier) {
+fun BankKeyScreen(state: BankKeyUi, actions: BankKeyActions, modifier: Modifier = Modifier, canRegister: Boolean = false) {
     SecureWindow()
+    val classic = state.bank == Bank.CLASSIC
     Scaffold(
         modifier,
         containerColor = MaterialTheme.colorScheme.background,
         topBar = { NeoTopBar(onBack = actions::back) },
     ) { padding ->
         Column(
-            Modifier.fillMaxSize().padding(padding).padding(horizontal = NeoSpace.gutter),
+            Modifier.fillMaxSize().padding(padding),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Column(Modifier.fillMaxWidth()) {
-                Text("Clave de ${state.bank.shortName}", style = MaterialTheme.typography.headlineMedium)
+            Column(Modifier.fillMaxWidth().padding(horizontal = NeoSpace.gutter), verticalArrangement = Arrangement.spacedBy(NeoSpace.s)) {
+                Text(if (classic) "PIN de MiTransfer" else "Clave de ${state.bank.shortName}", style = MaterialTheme.typography.headlineMedium)
+                if (classic) Text(
+                    "El de tu Clásica en Transfermóvil: ${"${state.length} dígitos".unbroken()}.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             Spacer(Modifier.weight(1f))
             PinDots(state.length, state.entered, error = state.error != null)
-            Box(Modifier.height(56.dp).padding(top = NeoSpace.l), contentAlignment = Alignment.TopCenter) {
+            Box(Modifier.height(56.dp).padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.l), contentAlignment = Alignment.TopCenter) {
                 when {
                     state.checking -> CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = Neo.colors.accentInk)
                     state.error != null -> Text(state.error, style = MaterialTheme.typography.bodyMedium, color = Neo.colors.danger)
                 }
             }
             Spacer(Modifier.weight(1f))
-            NeoKeypad(actions::key, Modifier.padding(bottom = NeoSpace.l), decimal = false)
+            PinKeypad(actions::key, Modifier.padding(bottom = if (canRegister) NeoSpace.s else NeoSpace.l))
+            if (canRegister) NeoTextButton(
+                if (classic) "No tengo PIN: registrar mi línea" else "No tengo clave: registrar mi línea",
+                actions::register,
+                Modifier.fillMaxWidth().padding(horizontal = NeoSpace.gutter).padding(bottom = NeoSpace.s),
+            )
         }
     }
 }
+
+/**
+ * The keypad of every key and PIN: placed edge to edge, it keeps the screen's gutter itself, so its columns fall in the
+ * same place on every screen that asks for one.
+ */
+@Composable
+fun PinKeypad(onKey: (KeypadKey) -> Unit, modifier: Modifier = Modifier) =
+    NeoKeypad(onKey, modifier.padding(horizontal = NeoSpace.gutter), decimal = false)
 
 // ---- Cards of a bank ----------------------------------------------------------------------------------------
 
@@ -250,8 +275,8 @@ fun CardSetupScreen(state: CardSetupUi, actions: CardSetupActions, modifier: Mod
                     )
                     NeoTextField(form.holder, actions::holder, "Titular (opcional)")
                     NeoTextField(
-                        form.expiry, actions::expiry, "Vence (opcional)",
-                        keyboardType = KeyboardType.Number, imeAction = ImeAction.Done, error = form.expiryError,
+                        form.expiry, actions::expiry, "Vencimiento (opcional)",
+                        keyboardType = KeyboardType.Number, imeAction = ImeAction.Done,
                         visualTransformation = ExpiryTransformation,
                     )
                     NeoSegmented(CardCurrencies, form.currency, { it }, actions::currency)

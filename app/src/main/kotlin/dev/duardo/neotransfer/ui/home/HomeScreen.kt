@@ -1,14 +1,18 @@
 package dev.duardo.neotransfer.ui.home
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -48,6 +52,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.designsystem.R as Ds
@@ -62,12 +67,15 @@ import dev.duardo.neotransfer.designsystem.component.NeoBottomSheet
 import dev.duardo.neotransfer.designsystem.component.NeoGroup
 import dev.duardo.neotransfer.designsystem.component.NeoIconButton
 import dev.duardo.neotransfer.designsystem.component.NeoRow
+import dev.duardo.neotransfer.designsystem.component.NeoTextButton
 import dev.duardo.neotransfer.designsystem.component.QuickActionGrid
 import dev.duardo.neotransfer.designsystem.component.QuickActionItem
 import dev.duardo.neotransfer.designsystem.component.SectionHeader
+import dev.duardo.neotransfer.designsystem.component.flushStart
 import dev.duardo.neotransfer.designsystem.component.glow
 import dev.duardo.neotransfer.designsystem.component.skeleton
 import dev.duardo.neotransfer.designsystem.component.spinning
+import dev.duardo.neotransfer.designsystem.format.formatCardNumber
 import dev.duardo.neotransfer.designsystem.theme.Neo
 import dev.duardo.neotransfer.designsystem.theme.NeoMotion
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
@@ -81,18 +89,29 @@ import dev.duardo.neotransfer.ui.common.icon
 import dev.duardo.neotransfer.ui.common.label
 import dev.duardo.neotransfer.ui.common.timeLabels
 import dev.duardo.neotransfer.ui.model.BalanceUi
+import dev.duardo.neotransfer.ui.model.Bank
+import dev.duardo.neotransfer.ui.model.CardUi
 import dev.duardo.neotransfer.ui.model.HomeUi
 import dev.duardo.neotransfer.ui.model.OperationStatus
 import dev.duardo.neotransfer.ui.model.OperationUi
 import dev.duardo.neotransfer.ui.model.RechargeTargetUi
 import dev.duardo.neotransfer.ui.model.ServiceKind
 import dev.duardo.neotransfer.ui.model.WalletCardUi
+import dev.duardo.neotransfer.ui.settings.Chevron
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 
 interface HomeActions {
     fun selectCard(index: Int)
     fun refreshBalance(cardId: String)
+    /** The last operations of [cardId]: a Clásica's come from MiTransfer as text, on a screen of their own. */
+    fun lastOperations(cardId: String)
+    /** The card's sheet: its number to copy, its movements and its settings. */
     fun openCard(cardId: String)
+    fun copyCard(cardId: String)
+    fun cardMovements(cardId: String)
+    fun cardSettings(cardId: String)
+    fun closeCard()
     fun addCard()
     fun transfer()
     fun pay()
@@ -109,14 +128,25 @@ interface HomeActions {
 
 private const val RecentLimit = 5
 
-/** Wallet: the card in hand, its balance, the four shortcuts, what is in flight and what just happened. */
+/** The narrowest a shortcut is in [QuickActionGrid]. */
+private val QuickActionMinWidth = 64.dp
+
+/**
+ * Wallet: the card in hand, its balance, the shortcuts (three on a Clásica, which does not recharge, with what it can
+ * transfer under them), what is in flight and what just happened.
+ */
 @Composable
 fun HomeScreen(state: HomeUi, actions: HomeActions, modifier: Modifier = Modifier) {
     val pages = state.cards.size + 1
     val pager = rememberPagerState(initialPage = state.selected.coerceIn(0, pages - 1)) { pages }
     val latest by rememberUpdatedState(state)
+    // The card in hand is the model's: one chosen elsewhere (a notification, a card just added) comes into view, also
+    // over the page this screen kept from its last visit. A swipe chooses another.
+    LaunchedEffect(state.selected, pages) {
+        if (state.selected < state.cards.size && state.selected != pager.currentPage) pager.animateScrollToPage(state.selected)
+    }
     LaunchedEffect(pager) {
-        snapshotFlow { pager.settledPage }.distinctUntilChanged().collect { page ->
+        snapshotFlow { pager.settledPage }.distinctUntilChanged().drop(1).collect { page ->
             if (page < latest.cards.size && page != latest.selected) actions.selectCard(page)
         }
     }
@@ -175,15 +205,35 @@ fun HomeScreen(state: HomeUi, actions: HomeActions, modifier: Modifier = Modifie
             }
         }
         item(key = "actions") {
-            QuickActionGrid(
-                listOf(
-                    QuickActionItem(Ds.drawable.ic_arrow_outward, "Transferir", actions::transfer, primary = true),
-                    QuickActionItem(Ds.drawable.ic_qr_code_scanner, "Pagar", actions::pay),
-                    QuickActionItem(Ds.drawable.ic_south_west, "Cobrar", actions::receive),
-                    QuickActionItem(Ds.drawable.ic_smartphone, "Recargar", actions::recharge),
-                ),
-                Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.xl),
-            )
+            val classic = current?.card?.bank == Bank.CLASSIC
+            Column(Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.xl)) {
+                AnimatedContent(
+                    classic,
+                    transitionSpec = { fadeIn(tween(NeoMotion.medium)) togetherWith fadeOut(tween(NeoMotion.short)) },
+                    label = "shortcuts",
+                ) { onClassic ->
+                    val shortcuts = listOf(
+                        QuickActionItem(Ds.drawable.ic_arrow_outward, "Transferir", actions::transfer, primary = true),
+                        QuickActionItem(Ds.drawable.ic_qr_code_scanner, "Pagar", actions::pay),
+                        QuickActionItem(Ds.drawable.ic_south_west, "Cobrar", actions::receive),
+                    )
+                    // The Clásica does not recharge: its three shortcuts keep the spacing of four, centred.
+                    if (onClassic) BoxWithConstraints {
+                        QuickActionGrid(shortcuts, Modifier.padding(horizontal = (maxWidth - QuickActionMinWidth) / 6), columns = 3)
+                    } else {
+                        QuickActionGrid(shortcuts + QuickActionItem(Ds.drawable.ic_smartphone, "Recargar", actions::recharge))
+                    }
+                }
+                AnimatedVisibility(classic, enter = fadeIn(tween(NeoMotion.medium)) + expandVertically(), exit = fadeOut(tween(NeoMotion.short)) + shrinkVertically()) {
+                    Text(
+                        "Transferir: solo a otra Clásica, en USD.",
+                        Modifier.fillMaxWidth().padding(top = NeoSpace.s),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
         }
         if (state.inProgress.isNotEmpty()) item(key = "progress") {
             Column(Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.m)) {
@@ -200,12 +250,13 @@ fun HomeScreen(state: HomeUi, actions: HomeActions, modifier: Modifier = Modifie
             val recent = state.recent
             Column(Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.m)) {
                 SectionHeader("Actividad reciente", action = if (!recent.isNullOrEmpty()) "Ver todo" else null, onAction = actions::allActivity)
-                // Nothing yet: one quiet line where the list will be, no box around it.
-                if (recent != null && recent.isEmpty()) Text(
-                    "Sin movimientos",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                ) else NeoGroup {
+                // Nothing yet: one quiet line where the list will be, no box around it; a Clásica offers to ask MiTransfer.
+                if (recent != null && recent.isEmpty()) {
+                    Text("Sin movimientos", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    current?.takeIf { it.card.bank == Bank.CLASSIC }?.let { classic ->
+                        NeoTextButton("Consultar últimas operaciones", { actions.lastOperations(classic.card.id) }, Modifier.flushStart())
+                    }
+                } else NeoGroup {
                     if (recent == null) {
                         repeat(3) { index ->
                             if (index > 0) GroupDivider()
@@ -214,7 +265,7 @@ fun HomeScreen(state: HomeUi, actions: HomeActions, modifier: Modifier = Modifie
                     } else {
                         recent.take(RecentLimit).forEachIndexed { index, operation ->
                             if (index > 0) GroupDivider()
-                            OperationRow(operation, labels.moment(operation.at), { actions.openOperation(operation.id) })
+                            OperationRow(operation, labels.moment(operation.at, operation.dateOnly), { actions.openOperation(operation.id) })
                         }
                     }
                 }
@@ -223,6 +274,7 @@ fun HomeScreen(state: HomeUi, actions: HomeActions, modifier: Modifier = Modifie
     }
 
     state.recharge?.let { targets -> RechargeSheet(targets, actions) }
+    state.card?.let { card -> CardSheet(card, actions) }
 }
 
 @Composable
@@ -232,6 +284,18 @@ private fun Balance(wallet: WalletCardUi, ago: (java.time.Instant) -> String, re
             is BalanceUi.Known -> {
                 MoneyText(balance.money.amount, balance.money.currency, style = MaterialTheme.typography.displayMedium, hero = true)
                 RefreshPill(if (wallet.refreshing) "Consultando saldo" else "Actualizado ${ago(balance.updatedAt)}", wallet.refreshing, refresh)
+            }
+            // The Clásica's: MiTransfer's words, never read into a figure.
+            is BalanceUi.Text -> {
+                Text(
+                    balance.text,
+                    Modifier.padding(horizontal = NeoSpace.gutter),
+                    style = MaterialTheme.typography.titleLarge,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                RefreshPill(if (wallet.refreshing) "Consultando saldo" else "Actualizado ${ago(balance.at)}", wallet.refreshing, refresh)
             }
             BalanceUi.Unknown -> RefreshPill(if (wallet.refreshing) "Consultando saldo" else "Consultar saldo", wallet.refreshing, refresh, prominent = true)
         }
@@ -310,7 +374,38 @@ private fun SkeletonRow() {
     }
 }
 
-/** Saved numbers and Nauta accounts, one tap from Home; then a new one of each kind, under its own glyph. */
+/** One of the person's cards: its number to copy, its movements in Activity and its settings. */
+@Composable
+private fun CardSheet(card: CardUi, actions: HomeActions) {
+    NeoBottomSheet(onDismissRequest = actions::closeCard, title = "Tarjeta ${card.bank.shortName}") {
+        Column(Modifier.padding(horizontal = NeoSpace.xl), verticalArrangement = Arrangement.spacedBy(NeoSpace.m)) {
+            NeoGroup {
+                NeoRow(
+                    formatCardNumber(card.number),
+                    supporting = listOfNotNull(card.currency, card.holder).joinToString(" · "),
+                    trailing = { NeoIconButton(Ds.drawable.ic_content_copy, "Copiar número", { actions.copyCard(card.id) }) },
+                )
+            }
+            NeoGroup {
+                NeoRow(
+                    "Movimientos de la tarjeta",
+                    leading = { IconAvatar(Ds.drawable.ic_receipt_long) },
+                    trailing = { Chevron() },
+                    onClick = { actions.cardMovements(card.id) },
+                )
+                GroupDivider()
+                NeoRow(
+                    "Ajustes de la tarjeta",
+                    leading = { IconAvatar(Ds.drawable.ic_settings) },
+                    trailing = { Chevron() },
+                    onClick = { actions.cardSettings(card.id) },
+                )
+            }
+        }
+    }
+}
+
+/** Saved numbers and Nauta accounts, one tap from Home; then a new one of each kind, under its own glyph and badge. */
 @Composable
 private fun RechargeSheet(targets: List<RechargeTargetUi>, actions: HomeActions) {
     NeoBottomSheet(onDismissRequest = actions::closeRecharge, title = "Recargar") {
@@ -319,18 +414,10 @@ private fun RechargeSheet(targets: List<RechargeTargetUi>, actions: HomeActions)
                 val kind = if (target.kind == ServiceKind.MobileTopUp) "Móvil" else target.kind.label
                 NeoRow(target.name, supporting = "$kind · ${target.value}", leading = { IconAvatar(target.kind.icon) }, onClick = { actions.rechargeTo(target.id) })
             }
-            val saved = targets.isNotEmpty()
             val added = AvatarBadge(Ds.drawable.ic_add, Neo.colors.accent, Neo.colors.onAccent)
-            NeoRow(
-                if (saved) "Otro móvil" else "Móvil",
-                leading = { IconAvatar(ServiceKind.MobileTopUp.icon, badge = added) },
-                onClick = { actions.rechargeNew(ServiceKind.MobileTopUp) },
-            )
-            NeoRow(
-                if (saved) "Otra cuenta Nauta" else "Cuenta Nauta",
-                leading = { IconAvatar(ServiceKind.NautaWifi.icon, badge = added) },
-                onClick = { actions.rechargeNew(ServiceKind.NautaWifi) },
-            )
+            listOf(ServiceKind.MobileTopUp to "Móvil", ServiceKind.NautaWifi to "Cuenta Nauta", ServiceKind.NautaHome to "Nauta Hogar").forEach { (kind, name) ->
+                NeoRow(name, leading = { IconAvatar(kind.icon, badge = added) }, onClick = { actions.rechargeNew(kind) })
+            }
         }
     }
 }

@@ -7,6 +7,8 @@ import dev.duardo.neotransfer.core.model.Money
 import dev.duardo.neotransfer.core.model.OwnCard
 import dev.duardo.neotransfer.core.protocol.BalanceQuery
 import dev.duardo.neotransfer.core.protocol.BankRequest
+import dev.duardo.neotransfer.core.protocol.ClassicQrPay
+import dev.duardo.neotransfer.core.protocol.ClassicTransfer
 import dev.duardo.neotransfer.core.protocol.ElectricityBill
 import dev.duardo.neotransfer.core.protocol.HistoryQuery
 import dev.duardo.neotransfer.core.protocol.MobileRecharge
@@ -15,6 +17,7 @@ import dev.duardo.neotransfer.core.protocol.PhoneBill
 import dev.duardo.neotransfer.core.protocol.QrPay
 import dev.duardo.neotransfer.core.protocol.Source
 import dev.duardo.neotransfer.core.protocol.Transfer
+import dev.duardo.neotransfer.core.protocol.UssdRequest
 import dev.duardo.neotransfer.core.protocol.WaterBill
 import dev.duardo.neotransfer.core.sms.PaidService
 import dev.duardo.neotransfer.core.sms.Receipt
@@ -43,6 +46,7 @@ data class Movement(
     val amount: Money,
     /** SMSC time of the receipt; start of the day in Cuba when [dateOnly]. */
     val at: Instant,
+    /** Null for MiTransfer, and for an incoming transfer to a card that is not the user's. */
     val bank: Bank?,
     /** Own card debited, when it can be told without ambiguity. */
     val debitCard: String?,
@@ -96,12 +100,14 @@ internal class Activity(
     private fun movement(records: List<SmsRecord>): Entry? {
         fun <T : SmsMessage> first(type: Class<T>) = records.firstOrNull { type.isInstance(it.message) }
         val primary = first(SmsMessage.TransferSent::class.java) ?: first(SmsMessage.PaymentCompleted::class.java)
+            ?: first(SmsMessage.WalletTransferSent::class.java) ?: first(SmsMessage.WalletPaymentCompleted::class.java)
             ?: first(SmsMessage.ServicePaid::class.java) ?: first(SmsMessage.TransferReceived::class.java)
             ?: first(SmsMessage.CardOperation::class.java)
             ?: return null // a copy alone is ambiguous: never attributed
         val messages = records.map { it.message }
         val operationId = operationOf[primary.id]
-        val source = (operationId?.let(operations::get)?.request as? BankRequest)?.let(::sourceOf)
+        val request = operationId?.let(operations::get)?.request
+        val source = (request as? BankRequest)?.let(::sourceOf)
         val at = primary.sentAt
         val movement = when (val m = primary.message) {
             is SmsMessage.TransferSent -> {
@@ -114,6 +120,11 @@ internal class Activity(
             }
             is SmsMessage.PaymentCompleted -> Movement("ref:${m.reference}", MovementKind.QR_PAYMENT, null, Direction.OUT, m.amount, at, m.bank,
                 debitCard(m.bank, source, null, m.amount.currency, at), null, m.merchant ?: m.purchaseId, m.reference, operationId, m.balance)
+            // MiTransfer: the Clásica that paid is the one the operation named; without it, unknown.
+            is SmsMessage.WalletTransferSent -> Movement("ref:${m.reference}", MovementKind.TRANSFER, null, Direction.OUT, m.amount, at, null,
+                request?.let(::classicCard), null, m.beneficiary, m.reference, operationId, null)
+            is SmsMessage.WalletPaymentCompleted -> Movement("ref:${m.reference}", MovementKind.QR_PAYMENT, null, Direction.OUT, m.amount, at, null,
+                request?.let(::classicCard), null, m.purchaseId, m.reference, operationId, null)
             is SmsMessage.ServicePaid -> Movement("ref:${m.reference}", MovementKind.SERVICE, m.service, Direction.OUT, m.amount, at, m.bank,
                 debitCard(m.bank, source, null, m.amount.currency, at), null,
                 m.account ?: messages.filterIsInstance<SmsMessage.ServiceNotice>().firstOrNull()?.account, m.reference, operationId, m.balance)
@@ -181,6 +192,12 @@ internal class Activity(
         else -> null
     }
 
+    private fun classicCard(request: UssdRequest): String? = when (request) {
+        is ClassicTransfer -> request.card
+        is ClassicQrPay -> request.card
+        else -> null
+    }
+
     /** Explicit card, then the receipt's mask, then the bank's default account when only one card can be it. */
     private fun debitCard(bank: Bank, source: Source?, mask: String?, currency: Currency, at: Instant): String? = when {
         source is Source.Card -> own(source.number)
@@ -192,7 +209,7 @@ internal class Activity(
     private fun defaultCard(bank: Bank, currency: Currency, at: Instant): String? {
         val candidates = cards.filter { it.bank == bank && it.currency == currency }
         if (bank != Bank.BANDEC) return candidates.singleOrNull()?.number
-        val active = sms.lastOrNull { it.sentAt <= at && (it.message as? SmsMessage.Authenticated)?.let { a -> a.bank == bank && a.cardMask != null } == true }
+        val active = sms.lastOrNull { it.sentAt <= at && (it.message as? SmsMessage.Authenticated)?.let { a -> a.agency == bank && a.cardMask != null } == true }
             ?.let { (it.message as SmsMessage.Authenticated).cardMask }
         return (if (active == null) candidates else candidates.filter { Cards.matches(active, it.number) }).singleOrNull()?.number
     }

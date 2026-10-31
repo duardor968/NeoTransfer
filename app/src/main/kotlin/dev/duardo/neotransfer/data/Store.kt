@@ -1,9 +1,12 @@
 package dev.duardo.neotransfer.data
 
 import dev.duardo.neotransfer.core.ledger.Operation
+import dev.duardo.neotransfer.core.model.Agency
 import dev.duardo.neotransfer.core.model.Bank
+import dev.duardo.neotransfer.core.model.Cards
 import dev.duardo.neotransfer.core.model.Contact
 import dev.duardo.neotransfer.core.model.Currency
+import dev.duardo.neotransfer.core.model.MiTransfer
 import dev.duardo.neotransfer.core.model.OwnCard
 import dev.duardo.neotransfer.core.model.ServiceKind
 import dev.duardo.neotransfer.core.model.ServiceReference
@@ -13,6 +16,14 @@ import java.time.Instant
 
 /** An own card plus what the wallet shows besides the number. */
 data class WalletCard(val card: OwnCard, val holder: String? = null, val expiry: String? = null)
+
+/**
+ * An own Clásica of Fincimex (`976003…`), always USD and of no bank: MiTransfer operates it with its PIN. Kept apart
+ * from [WalletCard] because [OwnCard] needs a bank; the wallet shows it after the bank cards.
+ */
+data class ClassicCard(val number: String) {
+    init { require(Cards.isClassic(number)) { "La Clásica tiene 16 dígitos y empieza por 976003" } }
+}
 
 /** One ingested bank SMS. [sentAt] orders it ([SmsRecord]), [receivedAt] is the inbox `date`. */
 data class StoredSms(val id: Long, val sentAt: Instant, val receivedAt: Instant, val body: String) {
@@ -24,14 +35,23 @@ enum class Theme { SYSTEM, LIGHT, DARK }
 data class Settings(val theme: Theme = Theme.SYSTEM, val creditNotifications: Boolean = true, val resultNotifications: Boolean = true)
 
 /**
- * User settings plus the engine's own facts: when each bank key was saved, how the inbox was last read in full
- * ([inboxVersion]: 0 never, 1 PAGOxMOVIL only, 2 with BANDEC's alerts), the last backup.
+ * A key the bank or MiTransfer took that the app has not saved yet: a registration's (`49`) or a key change's (`69`),
+ * confirmed [at] that time. [sms] is the inbox `_id` of the registration SMS that carries it, where it is read again to
+ * save it; null when the person typed it (a change, MiTransfer's PIN). The key itself is never stored here.
+ */
+data class PendingKey(val at: Instant, val sms: Long? = null)
+
+/**
+ * User settings plus the engine's own facts: when each key (a bank's, MiTransfer's PIN) was saved, the keys waiting
+ * to be saved ([pendingKeys]), how the inbox was last read in full ([inboxVersion]: 0 never, 1 PAGOxMOVIL only, 2 with
+ * BANDEC's alerts), the last backup.
  */
 data class Preferences(
     val settings: Settings = Settings(),
-    val keySavedAt: Map<Bank, Instant> = emptyMap(),
+    val keySavedAt: Map<Agency, Instant> = emptyMap(),
     val inboxVersion: Int = 0,
     val lastBackup: Instant? = null,
+    val pendingKeys: Map<Agency, PendingKey> = emptyMap(),
 )
 
 data class Snapshot(
@@ -41,6 +61,7 @@ data class Snapshot(
     val contacts: List<Contact>,
     val services: List<ServiceReference>,
     val preferences: Preferences,
+    val classics: List<ClassicCard>,
 )
 
 /** Durable state of the app. Each call is one write; the controller keeps the working copy in memory. */
@@ -51,6 +72,8 @@ interface Store {
     /** The whole wallet, in display order. */
     suspend fun saveCards(cards: List<WalletCard>)
     suspend fun deleteCard(number: String)
+    suspend fun saveClassic(card: ClassicCard)
+    suspend fun deleteClassic(number: String)
     suspend fun saveContacts(contacts: List<Contact>)
     suspend fun deleteContact(id: String)
     suspend fun saveServices(services: List<ServiceReference>)
@@ -66,12 +89,15 @@ class RoomStore(private val dao: NeoDao) : Store {
         dao.contacts().map { it.toContact() },
         dao.services().map { it.toServiceReference() },
         dao.settings().toPreferences(),
+        dao.classics().map { ClassicCard(it.number) },
     )
 
     override suspend fun saveOperation(operation: Operation) = dao.upsertOperation(operation.toEntity())
     override suspend fun saveSms(rows: List<StoredSms>) = dao.upsertSms(rows.map { it.toEntity() })
     override suspend fun saveCards(cards: List<WalletCard>) = dao.upsertCards(cards.mapIndexed { index, card -> card.toEntity(index) })
     override suspend fun deleteCard(number: String) = dao.deleteCard(number)
+    override suspend fun saveClassic(card: ClassicCard) = dao.upsertClassic(ClassicCardEntity(card.number))
+    override suspend fun deleteClassic(number: String) = dao.deleteClassic(number)
     override suspend fun saveContacts(contacts: List<Contact>) = dao.upsertContacts(contacts.map { it.toEntity() })
     override suspend fun deleteContact(id: String) = dao.deleteContact(id)
     override suspend fun saveServices(services: List<ServiceReference>) = dao.upsertServices(services.map { it.toEntity() })
@@ -80,7 +106,8 @@ class RoomStore(private val dao: NeoDao) : Store {
     override suspend fun savePreferences(preferences: Preferences) {
         val rows = preferences.toRows()
         dao.upsertSettings(rows)
-        dao.deleteSettings(Bank.entries.map { KEY_SAVED + it.name } + INBOX_IMPORTED - rows.map { it.key }.toSet())
+        dao.deleteSettings(AGENCIES.flatMap { listOf(KEY_SAVED + it.storageName, KEY_PENDING + it.storageName) } + INBOX_IMPORTED -
+            rows.map { it.key }.toSet())
     }
 }
 
@@ -108,6 +135,8 @@ private const val THEME = "theme"
 private const val CREDIT_NOTIFICATIONS = "notify.credits"
 private const val RESULT_NOTIFICATIONS = "notify.results"
 private const val KEY_SAVED = "key.saved."
+/** `<at millis>` or `<at millis>:<sms id>` ([PendingKey]). */
+private const val KEY_PENDING = "key.pending."
 /** Before [INBOX_VERSION]: `true` meant version 1. */
 private const val INBOX_IMPORTED = "inbox.imported"
 private const val INBOX_VERSION = "inbox.version"
@@ -119,7 +148,10 @@ internal fun Preferences.toRows(): List<SettingEntity> = listOf(
     SettingEntity(RESULT_NOTIFICATIONS, settings.resultNotifications.toString()),
     SettingEntity(INBOX_VERSION, inboxVersion.toString()),
 ) + listOfNotNull(lastBackup?.let { SettingEntity(LAST_BACKUP, it.toEpochMilli().toString()) }) +
-    keySavedAt.map { (bank, at) -> SettingEntity(KEY_SAVED + bank.name, at.toEpochMilli().toString()) }
+    keySavedAt.map { (agency, at) -> SettingEntity(KEY_SAVED + agency.storageName, at.toEpochMilli().toString()) } +
+    pendingKeys.map { (agency, key) ->
+        SettingEntity(KEY_PENDING + agency.storageName, listOfNotNull(key.at.toEpochMilli(), key.sms).joinToString(":"))
+    }
 
 internal fun List<SettingEntity>.toPreferences(): Preferences {
     val values = associate { it.key to it.value }
@@ -129,8 +161,21 @@ internal fun List<SettingEntity>.toPreferences(): Preferences {
             values[CREDIT_NOTIFICATIONS]?.toBooleanStrict() ?: true,
             values[RESULT_NOTIFICATIONS]?.toBooleanStrict() ?: true,
         ),
-        Bank.entries.mapNotNull { bank -> values[KEY_SAVED + bank.name]?.let { bank to Instant.ofEpochMilli(it.toLong()) } }.toMap(),
+        AGENCIES.mapNotNull { agency -> values[KEY_SAVED + agency.storageName]?.let { agency to Instant.ofEpochMilli(it.toLong()) } }.toMap(),
         values[INBOX_VERSION]?.toInt() ?: if (values[INBOX_IMPORTED]?.toBooleanStrict() == true) 1 else 0,
         values[LAST_BACKUP]?.let { Instant.ofEpochMilli(it.toLong()) },
+        AGENCIES.mapNotNull { agency ->
+            values[KEY_PENDING + agency.storageName]?.split(':')?.let { agency to PendingKey(Instant.ofEpochMilli(it[0].toLong()), it.getOrNull(1)?.toLong()) }
+        }.toMap(),
     )
 }
+
+/** Every agency with a key of its own: the banks and MiTransfer. */
+val AGENCIES: List<Agency> = Bank.entries + MiTransfer
+
+/** The agency's name where its key or key facts are stored: the bank's enum name, or `MITRANSFER`. */
+val Agency.storageName: String
+    get() = when (this) {
+        is Bank -> name
+        MiTransfer -> "MITRANSFER"
+    }

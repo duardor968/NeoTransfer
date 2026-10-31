@@ -1,5 +1,6 @@
 package dev.duardo.neotransfer.core.protocol
 
+import dev.duardo.neotransfer.core.model.Agency
 import dev.duardo.neotransfer.core.model.Bank
 import dev.duardo.neotransfer.core.model.Cards
 import dev.duardo.neotransfer.core.model.Currency
@@ -10,7 +11,6 @@ import dev.duardo.neotransfer.core.qr.QrPayment
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.time.Instant
-import java.time.ZoneOffset
 
 /** The account a bank operation debits or queries. */
 @Serializable
@@ -33,7 +33,14 @@ sealed interface Source {
 }
 
 /** Secret the integration must supply when building the commands; requests never store it. */
-enum class SecretKind { BANK_PIN, CUBACEL_PIN }
+enum class SecretKind {
+    /** The saved key of the request's [UssdRequest.agency]: a bank's, or MiTransfer's PIN. */
+    BANK_PIN,
+    /** Cubacel's transfer key, typed for each send. */
+    CUBACEL_PIN,
+    /** The value of the coordinates-card cell the request names (Metropolitano's `60`), typed for that send. */
+    COORDINATE,
+}
 
 /**
  * Something the app sends by USSD. Requests are plain data the integration persists with the
@@ -41,43 +48,68 @@ enum class SecretKind { BANK_PIN, CUBACEL_PIN }
  */
 @Serializable
 sealed interface UssdRequest {
+    /** What [commands] takes as `secret`. */
     val secret: SecretKind? get() = null
+
+    /**
+     * Length of the new key the person types twice for this request (a key change, MiTransfer's registration), which
+     * [commands] takes as `newKey`; null when it takes none. Save it as the agency's key once the change is confirmed.
+     */
+    val newKeyLength: Int? get() = null
+
+    /** Whose session it uses and whose saved key [SecretKind.BANK_PIN] is; null for Cubacel. */
+    val agency: Agency? get() = null
+
+    /** Sent only inside a session of [agency]: the ledger sends that agency's `40` first when there is none. */
+    val needsSession: Boolean get() = false
 
     /**
      * Wire strings for this request, in order. More than one only for an oversized payment
      * (Transfermóvil partial mode): send each after the previous one is acknowledged with
      * [BankResponse.PROCESSING]. [seed] is for tests; production leaves it random.
      */
-    fun commands(secret: CharArray? = null, at: Instant = Instant.now(), seed: Int? = null): List<UssdCommand>
+    fun commands(secret: CharArray? = null, at: Instant = Instant.now(), seed: Int? = null, newKey: CharArray? = null): List<UssdCommand>
 
     /** Identity of a money movement (origin, destination, amount) for the duplicate check; null for queries. */
     val duplicateKey: String? get() = null
+
+    /**
+     * Dialed ([UssdTransport.DIAL]) rather than requested: the bank asks to confirm it in the same USSD session, which
+     * only the system dialog can answer. The app never sees the reply, the SMS settles it, and it leaves only with
+     * the app in front.
+     */
+    val dialed: Boolean get() = false
 }
 
-/** Bank requests (`*444*…`). All but [Authenticate], [Disconnect] and [QrPay] need a valid session. */
+/**
+ * Bank requests (`*444*…`). All need a valid session but [Authenticate], [Disconnect], [QrPay] and the line services
+ * that carry a key or come before having one.
+ */
 @Serializable
 sealed interface BankRequest : UssdRequest {
     val bank: Bank
-    val needsSession: Boolean get() = true
+    override val agency: Bank get() = bank
+    override val needsSession: Boolean get() = true
 }
 
 @Serializable @SerialName("authenticate")
 data class Authenticate(override val bank: Bank) : BankRequest {
     override val secret get() = SecretKind.BANK_PIN
     override val needsSession get() = false
-    override fun commands(secret: CharArray?, at: Instant, seed: Int?) = listOf(encoded(40, listOf(bank.code, pin(bank, secret)), seed))
+    override fun commands(secret: CharArray?, at: Instant, seed: Int?, newKey: CharArray?) = listOf(encoded(40, listOf(bank.code, pin(bank, secret)), seed))
 }
 
+/** `70` ends whatever session the line holds, MiTransfer's included; [bank] is only where it was asked from. */
 @Serializable @SerialName("disconnect")
 data class Disconnect(override val bank: Bank) : BankRequest {
     override val needsSession get() = false
-    override fun commands(secret: CharArray?, at: Instant, seed: Int?) = listOf(plain(70))
+    override fun commands(secret: CharArray?, at: Instant, seed: Int?, newKey: CharArray?) = listOf(plain(70))
 }
 
 /** Balance `46`. BANDEC has no origin: it always answers for the card the session is on. */
 @Serializable @SerialName("balance")
 data class BalanceQuery(override val bank: Bank, val source: Source = Source.Default()) : BankRequest {
-    override fun commands(secret: CharArray?, at: Instant, seed: Int?) = listOf(
+    override fun commands(secret: CharArray?, at: Instant, seed: Int?, newKey: CharArray?) = listOf(
         if (bank == Bank.BANDEC) plain(46) else encoded(46, listOf(cardCurrency(bank, source), origin(source)), seed),
     )
 }
@@ -85,11 +117,14 @@ data class BalanceQuery(override val bank: Bank, val source: Source = Source.Def
 /** Last operations `48`. Metropolitano asks which kind first: `1` is all of them (GhhAuUBVrI). */
 @Serializable @SerialName("history")
 data class HistoryQuery(override val bank: Bank, val source: Source = Source.Default()) : BankRequest {
-    override fun commands(secret: CharArray?, at: Instant, seed: Int?) = listOf(encoded(48, listOf(if (bank == Bank.BANMET) "1" else "0",
+    override fun commands(secret: CharArray?, at: Instant, seed: Int?, newKey: CharArray?) = listOf(encoded(48, listOf(if (bank == Bank.BANMET) "1" else "0",
         if (bank == Bank.BANDEC) (if (source is Source.Default) "1" else "0") else cardCurrency(bank, source), origin(source)), seed))
 }
 
-/** Transfer `45` to a 16-digit card or account. [notifyPhone] receives the beneficiary's SMS. */
+/**
+ * Transfer `45` to a 16-digit card or account. [notifyPhone] receives the beneficiary's SMS. BANDEC answers it with
+ * "Indique 1 para Confirmar" in the same session (seen 2026-10-25): it is dialed, as Transfermóvil does.
+ */
 @Serializable @SerialName("transfer")
 data class Transfer(
     override val bank: Bank, val source: Source, val destination: String, val amount: Money, val notifyPhone: String? = null,
@@ -100,7 +135,8 @@ data class Transfer(
         require(notifyPhone == null || Phones.normalize(notifyPhone) == notifyPhone) { "El móvil debe tener 8 dígitos" }
     }
     override val duplicateKey get() = key("45", source, destination, amount)
-    override fun commands(secret: CharArray?, at: Instant, seed: Int?) = listOf(encoded(45, listOf(
+    override val dialed get() = true
+    override fun commands(secret: CharArray?, at: Instant, seed: Int?, newKey: CharArray?) = listOf(encoded(45, listOf(
         destination, amount.plain(),
         if (bank == Bank.BANDEC) "0" else amount.currency.wireCode,
         cardCurrency(bank, source), origin(source),
@@ -108,7 +144,7 @@ data class Transfer(
         "0", // do not reveal the sender's phone
         "0000", // no message
         "0", // keep "Saldo restante" in the receipt (1 = omit it)
-    ), seed))
+    ), seed, UssdTransport.DIAL))
 }
 
 /** QR / online payment `30`/`31`. Always carries the banking key; it does not need a session. */
@@ -127,7 +163,7 @@ data class QrPay(
     override val needsSession get() = false
     override val duplicateKey get() = key("${payment.service}:${payment.provider}", source, payment.transactionId, amount)
 
-    override fun commands(secret: CharArray?, at: Instant, seed: Int?): List<UssdCommand> {
+    override fun commands(secret: CharArray?, at: Instant, seed: Int?, newKey: CharArray?): List<UssdCommand> {
         val service = payment.service
         val special = service == 30 && payment.auxiliary.contains("11200301")
         val auxData = payment.qrId != null || notifyPhone != null
@@ -150,12 +186,7 @@ data class QrPay(
             val keep = if (service == 31 && !auxData) 8 else 15
             payload = codec.encode(parameters(payment.transactionId.takeLast(keep)), prefix)
         }
-        val wire = "*444*$service*$payload*$CLIENT_VERSION#"
-        if (wire.length <= USSD_MAX_LENGTH) return listOf(UssdCommand(service, wire, UssdTransport.REQUEST))
-        val time = at.atOffset(ZoneOffset.UTC)
-        return partialEncodedCommands(service, bank.code, payload, "${time.minute}${time.second.toString().padStart(2, '0')}").also { packets ->
-            require(packets.all { it.valueForTransport().length <= USSD_MAX_LENGTH }) { "La descripción es demasiado larga para enviarla" }
-        }
+        return fitted(service, bank.code, payload, at)
     }
 }
 
@@ -167,7 +198,7 @@ data class ElectricityBill(override val bank: Bank, val source: Source, val invo
         require(bank != Bank.BANMET || invoice.length == 13) { "Con Metropolitano, la factura eléctrica tiene 13 dígitos" }
     }
     override val duplicateKey get() = key("41", source, invoice, null)
-    override fun commands(secret: CharArray?, at: Instant, seed: Int?) = listOf(encoded(41, billParameters(bank, source, listOf(invoice, "0")), seed))
+    override fun commands(secret: CharArray?, at: Instant, seed: Int?, newKey: CharArray?) = listOf(encoded(41, billParameters(bank, source, listOf(invoice, "0")), seed))
 }
 
 /**
@@ -183,7 +214,7 @@ data class PhoneBill(override val bank: Bank, val source: Source, val invoice: S
         require(amount == null || amount.amount.signum() > 0) { "El importe debe ser mayor que cero" }
     }
     override val duplicateKey get() = key("42", source, invoice, amount)
-    override fun commands(secret: CharArray?, at: Instant, seed: Int?) =
+    override fun commands(secret: CharArray?, at: Instant, seed: Int?, newKey: CharArray?) =
         listOf(encoded(42, billParameters(bank, source, listOf(invoice, amount?.plain() ?: "0")), seed))
 }
 
@@ -194,7 +225,7 @@ enum class WaterRegion(val code: String, val service: Int) { HAVANA("1", 19), OT
 data class WaterBill(override val bank: Bank, val source: Source, val region: WaterRegion, val account: String) : BankRequest {
     init { require(account.isNotEmpty() && account.all { it in '0'..'9' }) { "Cuenta de agua no válida" } }
     override val duplicateKey get() = key("${region.service}", source, account, null)
-    override fun commands(secret: CharArray?, at: Instant, seed: Int?): List<UssdCommand> {
+    override fun commands(secret: CharArray?, at: Instant, seed: Int?, newKey: CharArray?): List<UssdCommand> {
         val type = if (region == WaterRegion.OTHER) "0" else "1"
         val parameters = when {
             bank != Bank.BANDEC -> listOf(region.code, account, "0.0", type, cardCurrency(bank, source), origin(source))
@@ -238,7 +269,7 @@ data class NautaPayment(
     }
     override val duplicateKey get() = key("${service.service}", source, account.address, amount)
     // PqTzgaEYF6: the amount travels as String.valueOf(float), e.g. "100.0".
-    override fun commands(secret: CharArray?, at: Instant, seed: Int?) = listOf(encoded(service.service, listOf(
+    override fun commands(secret: CharArray?, at: Instant, seed: Int?, newKey: CharArray?) = listOf(encoded(service.service, listOf(
         account.user, if (account.international) "1" else "2", amount.amount.toFloat().toString(), cardCurrency(bank, source),
         notifyPhone ?: "0000000", origin(source), service.suffix), seed))
 }
@@ -251,17 +282,19 @@ data class MobileRecharge(override val bank: Bank, val source: Source, val phone
         require(amount.amount >= java.math.BigDecimal.ONE) { "El importe mínimo es 1 CUP" }
     }
     override val duplicateKey get() = key("54", source, Phones.normalize(phone) ?: phone, amount)
-    override fun commands(secret: CharArray?, at: Instant, seed: Int?) =
+    override fun commands(secret: CharArray?, at: Instant, seed: Int?, newKey: CharArray?) =
         listOf(encoded(54, listOf(phone, amount.plain(), cardCurrency(bank, source), origin(source)), seed))
 }
 
-private fun encoded(service: Int, parameters: List<String>, seed: Int?): UssdCommand {
+internal fun encoded(service: Int, parameters: List<String>, seed: Int?, transport: UssdTransport = UssdTransport.REQUEST): UssdCommand {
     val codec = ParameterCodec()
     val payload = if (seed == null) codec.encode(parameters) else codec.encode(parameters, seed)
-    return UssdCommand(service, "*444*$service*$payload*$CLIENT_VERSION#", UssdTransport.REQUEST)
+    return UssdCommand(service, "*444*$service*$payload*$CLIENT_VERSION#", transport)
 }
 
-private fun plain(service: Int) = UssdCommand(service, "*444*$service#", UssdTransport.REQUEST)
+/** `*444*<service>#` with no parameters and no version; [suffix] adds plain fields such as `68*01`. */
+internal fun plain(service: Int, vararg suffix: String) =
+    UssdCommand(service, (listOf("*444*$service") + suffix).joinToString("*") + "#", UssdTransport.REQUEST)
 
 private fun origin(source: Source) = when (source) { is Source.Default -> "0000"; is Source.Card -> source.number }
 
@@ -277,9 +310,17 @@ private fun billParameters(bank: Bank, source: Source, values: List<String>) = w
     Bank.BANDEC -> if (source is Source.Card) values + source.number else values
 }
 
-private fun pin(bank: Bank, secret: CharArray?): String {
-    require(secret != null && secret.size == bank.pinLength && secret.all { it in '0'..'9' }) { "Clave bancaria no válida" }
+internal fun pin(agency: Agency, secret: CharArray?): String {
+    require(secret != null && secret.size == agency.pinLength && secret.all { it in '0'..'9' }) {
+        if (agency is Bank) "Clave bancaria no válida" else "PIN de MiTransfer no válido"
+    }
     return String(secret)
+}
+
+/** The new key of a key change or a MiTransfer registration: [Agency.pinLength] digits. */
+internal fun newPin(agency: Agency, newKey: CharArray?): String {
+    require(newKey != null && newKey.size == agency.pinLength && newKey.all { it in '0'..'9' }) { "La clave nueva tiene ${agency.pinLength} dígitos" }
+    return String(newKey)
 }
 
 private fun key(kind: String, source: Source, target: String, amount: Money?) =

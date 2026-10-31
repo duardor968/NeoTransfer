@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.duardo.neotransfer.designsystem.format.NoBreak
 import dev.duardo.neotransfer.designsystem.format.formatAmount
+import dev.duardo.neotransfer.engine.Submission
 import dev.duardo.neotransfer.ui.activity.ActivityActions
 import dev.duardo.neotransfer.ui.activity.ActivityScreen
 import dev.duardo.neotransfer.ui.contacts.ContactsActions
@@ -34,6 +35,7 @@ import java.text.Normalizer
 /** The four tabs under the bottom bar. */
 class Main(private val app: AppModel) : Destination(), HomeActions, ContactsActions, ServicesActions {
     private var recharge by mutableStateOf(false)
+    private var cardSheet by mutableStateOf<String?>(null)
 
     @Composable
     override fun Content(app: AppModel, book: Book) {
@@ -57,6 +59,7 @@ class Main(private val app: AppModel) : Destination(), HomeActions, ContactsActi
         inProgress = book.inProgress,
         recent = if (book.domain.loaded) book.recent else null,
         recharge = if (recharge) book.rechargeTargets else null,
+        card = cardSheet?.let { id -> book.wallet.firstOrNull { it.card.id == id }?.card },
     )
 
     private val selectedCard: String? get() = app.book.value.wallet.let { wallet -> wallet.firstOrNull { it.card.id == app.homeCard } ?: wallet.firstOrNull() }?.card?.id
@@ -66,8 +69,22 @@ class Main(private val app: AppModel) : Destination(), HomeActions, ContactsActi
     }
 
     override fun refreshBalance(cardId: String) = app.query { app.controller.refreshBalance(cardId) }
-    override fun openCard(cardId: String) {
-        val card = app.book.value.card(cardId) ?: return
+    override fun lastOperations(cardId: String) = app.activity.checkCard(cardId)
+    override fun openCard(cardId: String) { cardSheet = cardId }
+    override fun closeCard() { cardSheet = null }
+    override fun copyCard(cardId: String) {
+        app.book.value.wallet.firstOrNull { it.card.id == cardId }?.let { app.host?.copy(it.card.number) }
+    }
+    override fun cardMovements(cardId: String) {
+        cardSheet = null
+        app.activity.showCard(cardId)
+        app.tab = Tab.Activity
+    }
+    override fun cardSettings(cardId: String) {
+        cardSheet = null
+        val book = app.book.value
+        book.classic(cardId)?.let { return app.navigator.push(ClassicSettingsDestination(app, it.number)) }
+        val card = book.card(cardId) ?: return
         app.navigator.push(BankSettingsDestination(app, card.card.card.bank.ui()))
     }
     override fun addCard() = app.navigator.push(BankChoiceDestination(app, setup = false))
@@ -83,7 +100,7 @@ class Main(private val app: AppModel) : Destination(), HomeActions, ContactsActi
     }
     override fun rechargeNew(kind: ServiceKind) {
         recharge = false
-        app.navigator.push(ServiceDestination(app, kind))
+        app.navigator.push(if (kind == ServiceKind.MobileTopUp) PhonePickDestination(app, kind) else ServiceDestination(app, kind))
     }
     override fun closeRecharge() { recharge = false }
     override fun openOperation(id: String) = app.navigator.push(OperationDestination(app, id))
@@ -113,7 +130,11 @@ class Main(private val app: AppModel) : Destination(), HomeActions, ContactsActi
     // ---- Services ----
 
     override fun open(kind: ServiceKind) =
-        app.navigator.push(if (kind == ServiceKind.Cubacel) CubacelDestination(app) else ServiceDestination(app, kind))
+        app.navigator.push(when (kind) {
+            ServiceKind.Cubacel -> CubacelDestination(app)
+            ServiceKind.MobileTopUp -> PhonePickDestination(app, kind)
+            else -> ServiceDestination(app, kind)
+        })
 
     override fun pay(referenceId: String) {
         val reference = app.book.value.reference(referenceId) ?: return
@@ -143,6 +164,13 @@ class ActivityState(private val app: AppModel) : ActivityActions {
 
     override fun query(value: String) { query = value }
 
+    /** Opens on the movements of [cardId] alone. */
+    fun showCard(cardId: String) {
+        query = ""
+        filter = ActivityFilter.All
+        card = cardId
+    }
+
     /** Opens on what matches [value], with no other filter. */
     fun search(value: String) {
         query = value
@@ -169,9 +197,13 @@ class ActivityState(private val app: AppModel) : ActivityActions {
         }
     }
 
+    /** A bank answers with rows for this list; MiTransfer answers a Clásica with text, followed on a screen of its own. */
     override fun checkCard(cardId: String) {
         picking = false
-        app.query { app.controller.refreshHistory(cardId) }
+        val classic = app.book.value.classic(cardId) != null
+        app.query {
+            app.controller.refreshHistory(cardId).also { if (classic && it is Submission.Queued) app.navigator.push(classicHistoryRequest(app, cardId)) }
+        }
     }
 
     override fun closeCheck() { picking = false }

@@ -86,8 +86,15 @@ class FakeBank(private val context: Context) : PhoneLine, UssdModem, SmsInbox {
         return UssdReply.Text(ACK)
     }
 
-    override fun dial(command: UssdCommand) {
-        Toast.makeText(context, "Menú de paquetes (simulado)", Toast.LENGTH_SHORT).show()
+    /** A dialed transfer is answered as if the person typed the bank's "1"; anything else is Cubacel's menu. */
+    override fun dial(command: UssdCommand): String? {
+        val request = controller.operations.value.firstOrNull { it.state == OperationState.Sending }?.operation?.request
+        if (request is BankRequest) {
+            answer(request)?.let { body -> scope.launch { delay(2_500); deliver(body) } }
+        } else {
+            Toast.makeText(context, "Menú de paquetes (simulado)", Toast.LENGTH_SHORT).show()
+        }
+        return null
     }
 
     /** Writes [body] as a PAGOxMOVIL SMS received now. */

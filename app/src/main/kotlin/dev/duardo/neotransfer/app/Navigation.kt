@@ -20,6 +20,11 @@ abstract class Destination {
     }
 }
 
+/** A screen that follows one operation live: opening that operation from outside finds it there ([AppModel.show]). */
+interface Follows {
+    fun follows(id: String): Boolean
+}
+
 /** The back stack. Its first entry is never popped: back from there leaves the app. */
 class Navigator(root: Destination) {
     val stack = mutableStateListOf(root)

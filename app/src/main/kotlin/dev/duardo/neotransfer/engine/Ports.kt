@@ -9,8 +9,11 @@ interface UssdModem {
     /** Sends a `REQUEST` command and suspends until the network answers; the caller bounds the wait. */
     suspend fun request(command: UssdCommand): UssdReply
 
-    /** Dials a `DIAL` command: the system shows the interactive menu, the app never sees the reply. */
-    fun dial(command: UssdCommand)
+    /**
+     * Dials a `DIAL` command: the system shows the menu or the bank's question, the app never sees the reply.
+     * Returns why nothing was dialed, ready to show; null once the system took it.
+     */
+    fun dial(command: UssdCommand): String?
 }
 
 sealed interface UssdReply {

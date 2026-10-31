@@ -41,6 +41,10 @@ data class ContactEntity(
     @ColumnInfo(defaultValue = "") val labels: String,
 )
 
+/** An own Clásica ([ClassicCard]): only its number; it has no bank, and it is always USD. */
+@Entity(tableName = "classic_card")
+data class ClassicCardEntity(@PrimaryKey val number: String)
+
 @Entity(tableName = "service", primaryKeys = ["kind", "value"])
 data class ServiceEntity(val kind: String, val value: String, val label: String?)
 
@@ -59,6 +63,10 @@ interface NeoDao {
     @Upsert suspend fun upsertCards(rows: List<CardEntity>)
     @Query("DELETE FROM card WHERE number = :number") suspend fun deleteCard(number: String)
 
+    @Query("SELECT * FROM classic_card ORDER BY number") suspend fun classics(): List<ClassicCardEntity>
+    @Upsert suspend fun upsertClassic(row: ClassicCardEntity)
+    @Query("DELETE FROM classic_card WHERE number = :number") suspend fun deleteClassic(number: String)
+
     @Query("SELECT * FROM contact") suspend fun contacts(): List<ContactEntity>
     @Upsert suspend fun upsertContacts(rows: List<ContactEntity>)
     @Query("DELETE FROM contact WHERE id = :id") suspend fun deleteContact(id: String)
@@ -73,9 +81,13 @@ interface NeoDao {
 }
 
 @Database(
-    entities = [OperationEntity::class, SmsEntity::class, CardEntity::class, ContactEntity::class, ServiceEntity::class, SettingEntity::class],
-    version = 2,
-    autoMigrations = [AutoMigration(from = 1, to = 2)],
+    entities = [
+        OperationEntity::class, SmsEntity::class, CardEntity::class, ClassicCardEntity::class, ContactEntity::class, ServiceEntity::class,
+        SettingEntity::class,
+    ],
+    version = 3,
+    // 2 → 3 only adds `classic_card`.
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
 )
 abstract class NeoDatabase : RoomDatabase() {
     abstract fun dao(): NeoDao

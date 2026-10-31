@@ -42,25 +42,30 @@ import dev.duardo.neotransfer.designsystem.component.NeoTextField
 import dev.duardo.neotransfer.designsystem.component.NeoTopBar
 import dev.duardo.neotransfer.designsystem.component.SectionHeader
 import dev.duardo.neotransfer.designsystem.component.SecureWindow
+import dev.duardo.neotransfer.designsystem.component.StatusTone
 import dev.duardo.neotransfer.designsystem.component.flushEnd
+import dev.duardo.neotransfer.designsystem.format.NoBreak
 import dev.duardo.neotransfer.designsystem.format.formatCardNumber
-import dev.duardo.neotransfer.designsystem.format.formatMoney
 import dev.duardo.neotransfer.designsystem.theme.Neo
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
 import dev.duardo.neotransfer.ui.common.BankCardThumb
 import dev.duardo.neotransfer.ui.common.BrandMark
+import dev.duardo.neotransfer.ui.common.balanceLabel
 import dev.duardo.neotransfer.ui.common.timeLabels
 import dev.duardo.neotransfer.ui.model.Appearance
 import dev.duardo.neotransfer.ui.model.BackupUi
 import dev.duardo.neotransfer.ui.model.BalanceUi
 import dev.duardo.neotransfer.ui.model.Bank
+import dev.duardo.neotransfer.ui.model.BankLineUi
 import dev.duardo.neotransfer.ui.model.BankSettingsUi
+import dev.duardo.neotransfer.ui.model.ClassicSettingsUi
+import dev.duardo.neotransfer.ui.model.RemovalUi
 import dev.duardo.neotransfer.ui.model.SettingsUi
 import dev.duardo.neotransfer.ui.model.TransfermovilImportUi
 import dev.duardo.neotransfer.ui.onboarding.BottomAction
 
 @Composable
-private fun Chevron() {
+internal fun Chevron() {
     Icon(painterResource(Ds.drawable.ic_chevron_right), null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
@@ -100,12 +105,16 @@ fun SettingsScreen(state: SettingsUi, actions: SettingsActions, modifier: Modifi
             state.banks.forEachIndexed { index, summary ->
                 if (index > 0) GroupDivider()
                 val configured = summary.cards.isNotEmpty()
+                val classic = summary.bank == Bank.CLASSIC
                 NeoRow(
                     summary.bank.shortName,
                     supporting = if (configured) {
                         listOf(
                             if (summary.cards.size == 1) "1 tarjeta" else "${summary.cards.size} tarjetas",
-                            if (summary.keySaved) "Clave guardada" else "Sin clave",
+                            when {
+                                classic -> if (summary.keySaved) "PIN guardado" else "Sin PIN"
+                                else -> if (summary.keySaved) "Clave guardada" else "Sin clave"
+                            },
                         ).joinToString(" · ")
                     } else {
                         "Sin configurar"
@@ -159,26 +168,50 @@ fun SettingsScreen(state: SettingsUi, actions: SettingsActions, modifier: Modifi
 interface BankSettingsActions {
     fun back()
     fun addCard()
+    /** Asks first ([removingCard]); [confirmRemoveCard] takes it out. */
     fun removeCard(cardId: String)
+    fun confirmRemoveCard()
+    fun cancelRemoveCard()
+    /** Cambiar clave, `69`, or where the last change stands. */
     fun changeKey()
+    /** Clave guardada: the key the app keeps, typed again. */
+    fun savedKey()
+    fun accounts()
+    fun associate()
+    /** Eliminar el registro de la línea, `68`, or where the last removal stands. */
+    fun unregister()
+    fun removalField(id: String, value: String)
+    fun confirmUnregister()
+    fun cancelUnregister()
     fun removeBank()
     fun confirmRemoveBank()
     fun cancelRemoveBank()
 }
 
+/**
+ * Ajustes › banco: its cards, «Tu línea en X» with the line's services and the requests on their way, and apart, in
+ * red, removing the line's registration ([unregistering] is its confirmation) and taking the bank out of the app.
+ */
 @Composable
-fun BankSettingsScreen(state: BankSettingsUi, actions: BankSettingsActions, modifier: Modifier = Modifier, confirmingRemoval: Boolean = false) {
-    SettingsScaffold(state.bank.shortName, actions::back, modifier) {
+fun BankSettingsScreen(
+    state: BankSettingsUi,
+    actions: BankSettingsActions,
+    line: BankLineUi,
+    modifier: Modifier = Modifier,
+    confirmingRemoval: Boolean = false,
+    unregistering: RemovalUi? = null,
+    sending: Boolean = false,
+    removingCard: String? = null,
+) {
+    val name = state.bank.shortName
+    SettingsScaffold(name, actions::back, modifier) {
         SectionHeader("Tarjetas")
         NeoGroup {
             state.cards.forEach { wallet ->
                 val balance = wallet.balance
                 NeoRow(
                     formatCardNumber(wallet.card.number),
-                    supporting = listOfNotNull(
-                        wallet.card.currency,
-                        (balance as? BalanceUi.Known)?.let { "Saldo ${formatMoney(it.money.amount, it.money.currency)}" },
-                    ).joinToString(" · "),
+                    supporting = (balance as? BalanceUi.Known)?.money?.let(::balanceLabel) ?: wallet.card.currency,
                     leading = { BankCardThumb(wallet.card.bank) },
                     trailing = { NeoIconButton(Ds.drawable.ic_delete, "Quitar tarjeta", { actions.removeCard(wallet.card.id) }, Modifier.flushEnd()) },
                 )
@@ -186,17 +219,37 @@ fun BankSettingsScreen(state: BankSettingsUi, actions: BankSettingsActions, modi
             }
             NeoRow("Añadir tarjeta", leading = { IconAvatar(Ds.drawable.ic_add_card) }, onClick = actions::addCard)
         }
-        NeoGroup(Modifier.padding(top = NeoSpace.xxl)) {
-            NeoRow(
-                if (state.keySaved) "Cambiar clave" else "Guardar clave",
-                supporting = if (state.keySaved) "Guardada en este teléfono" else null,
-                leading = { IconAvatar(Ds.drawable.ic_key) },
-                trailing = { Chevron() },
-                onClick = actions::changeKey,
+        SectionHeader("Tu línea en $name", Modifier.padding(top = NeoSpace.l))
+        NeoGroup {
+            LineRow(
+                "Cambiar clave", LineService.KeyChange.icon(state.bank), "En el banco; la nueva queda guardada",
+                if (line.keyToSave != null) LineNote("Clave nueva por guardar", StatusTone.Warning) else line.keyChange?.rowNote,
+                actions::changeKey,
             )
             GroupDivider()
             NeoRow(
-                "Quitar ${state.bank.shortName}",
+                if (state.keySaved) "Clave guardada" else "Guardar clave",
+                supporting = if (state.keySaved) "Escríbela si la cambiaste en otro sitio" else null,
+                leading = { IconAvatar(Ds.drawable.ic_key) },
+                trailing = { Chevron() },
+                onClick = actions::savedKey,
+            )
+            GroupDivider()
+            LineRow(
+                "Cuentas en el banco", Ds.drawable.ic_list_alt, "Las que $name tiene a tu nombre",
+                line.accounts?.rowNote, actions::accounts,
+            )
+            GroupDivider()
+            LineRow("Asociar una tarjeta", LineService.Association.icon(state.bank), null, line.association?.rowNote, actions::associate)
+        }
+        NeoGroup(Modifier.padding(top = NeoSpace.xxl)) {
+            LineRow(
+                "Eliminar el registro de la línea", LineService.Removal.icon(state.bank), null, line.removal?.rowNote,
+                actions::unregister, danger = true,
+            )
+            GroupDivider()
+            NeoRow(
+                "Quitar $name de la app",
                 leading = { IconAvatar(Ds.drawable.ic_delete, tint = Neo.colors.danger) },
                 titleColor = Neo.colors.danger,
                 onClick = actions::removeBank,
@@ -204,7 +257,7 @@ fun BankSettingsScreen(state: BankSettingsUi, actions: BankSettingsActions, modi
         }
     }
     if (confirmingRemoval) NeoConfirmSheet(
-        title = "¿Quitar ${state.bank.shortName}?",
+        title = "¿Quitar $name?",
         text = "Se borran sus tarjetas y la clave guardada. La actividad se conserva.",
         confirm = "Quitar",
         dismiss = "Cancelar",
@@ -212,6 +265,99 @@ fun BankSettingsScreen(state: BankSettingsUi, actions: BankSettingsActions, modi
         onDismiss = actions::cancelRemoveBank,
         destructive = true,
     )
+    unregistering?.let { RemovalSheet(it, sending, actions::removalField, actions::confirmUnregister, actions::cancelUnregister) }
+    state.cards.firstOrNull { it.card.id == removingCard }?.let { wallet ->
+        NeoConfirmSheet(
+            title = "¿Quitar $name$NoBreak••••$NoBreak${wallet.card.number.takeLast(4)}?",
+            text = "Sale de la app hasta que la añadas otra vez. Tu actividad se conserva.",
+            confirm = "Quitar",
+            dismiss = "Cancelar",
+            onConfirm = actions::confirmRemoveCard,
+            onDismiss = actions::cancelRemoveCard,
+            destructive = true,
+        )
+    }
+}
+
+// ---- The Clásica --------------------------------------------------------------------------------------------
+
+interface ClassicSettingsActions {
+    fun back()
+    /** PIN guardado: MiTransfer's PIN typed again, or the one MiTransfer took saved. */
+    fun pin()
+    /** Quitar la asociación de la Clásica, `68`, or where the last one stands. */
+    fun unassociate()
+    fun removalField(id: String, value: String)
+    fun confirmUnassociate()
+    fun cancelUnassociate()
+    fun remove()
+    fun confirmRemove()
+    fun cancelRemove()
+}
+
+/**
+ * Ajustes › Clásica: the card with its balance as MiTransfer wrote it, «PIN guardado», and in red removing its
+ * association with MiTransfer ([unassociating] is its confirmation) and taking it out of the app. [removesPin]: it
+ * is the last Clásica, so the saved PIN goes with it.
+ */
+@Composable
+fun ClassicSettingsScreen(
+    state: ClassicSettingsUi,
+    actions: ClassicSettingsActions,
+    modifier: Modifier = Modifier,
+    unassociating: RemovalUi? = null,
+    confirmingRemoval: Boolean = false,
+    removesPin: Boolean = false,
+    sending: Boolean = false,
+) {
+    val card = state.card.card
+    SettingsScaffold(Bank.CLASSIC.shortName, actions::back, modifier) {
+        NeoGroup {
+            NeoRow(
+                formatCardNumber(card.number),
+                supporting = when (val balance = state.card.balance) {
+                    is BalanceUi.Text -> balance.text.trim()
+                    is BalanceUi.Known -> balanceLabel(balance.money)
+                    BalanceUi.Unknown -> card.currency
+                },
+                leading = { BankCardThumb(Bank.CLASSIC) },
+            )
+        }
+        SectionHeader("Tu línea en MiTransfer", Modifier.padding(top = NeoSpace.l))
+        NeoGroup {
+            NeoRow(
+                if (state.pinSaved) "PIN guardado" else "Guardar PIN",
+                supporting = if (state.keyToSave == null && state.pinSaved) "Escríbelo si lo cambiaste en otro sitio" else null,
+                supportingContent = state.keyToSave?.let { { NoteText(LineNote("PIN nuevo por guardar", StatusTone.Warning)) } },
+                leading = { IconAvatar(Ds.drawable.ic_key) },
+                trailing = { Chevron() },
+                onClick = actions::pin,
+            )
+        }
+        NeoGroup(Modifier.padding(top = NeoSpace.xxl)) {
+            LineRow(
+                "Quitar la asociación", LineService.Removal.icon(Bank.CLASSIC), null, state.removal?.rowNote,
+                actions::unassociate, danger = true,
+            )
+            GroupDivider()
+            NeoRow(
+                "Quitar la Clásica de la app",
+                leading = { IconAvatar(Ds.drawable.ic_delete, tint = Neo.colors.danger) },
+                titleColor = Neo.colors.danger,
+                onClick = actions::remove,
+            )
+        }
+    }
+    if (confirmingRemoval) NeoConfirmSheet(
+        title = "¿Quitar la Clásica de la app?",
+        text = if (removesPin) "Se borran la tarjeta y el PIN guardado. La actividad se conserva." else "Se borra la tarjeta. La actividad se conserva.",
+        confirm = "Quitar",
+        dismiss = "Cancelar",
+        onConfirm = actions::confirmRemove,
+        onDismiss = actions::cancelRemove,
+        destructive = true,
+    )
+    unassociating?.let { RemovalSheet(it, sending, actions::removalField, actions::confirmUnassociate, actions::cancelUnassociate) }
 }
 
 // ---- Backup -------------------------------------------------------------------------------------------------

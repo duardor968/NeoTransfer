@@ -30,7 +30,9 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,6 +42,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.designsystem.R
@@ -155,6 +158,81 @@ fun NeoTextField(
                 (error ?: supporting)?.let {
                     Text(it, Modifier.padding(start = NeoSpace.xxs), style = MaterialTheme.typography.bodySmall, color = if (error != null) colors.danger else scheme.onSurfaceVariant)
                 }
+            }
+        },
+    )
+}
+
+/**
+ * A code of fixed [length] digits, one box per digit, so its length shows before anything is typed. Digits stay
+ * hidden behind dots until the eye shows them. The label, focus and [error] behave as in [NeoTextField].
+ */
+@Composable
+fun NeoCodeField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    length: Int,
+    label: String,
+    modifier: Modifier = Modifier,
+    imeAction: ImeAction = ImeAction.Done,
+    error: String? = null,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val colors = Neo.colors
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    var visible by remember { mutableStateOf(false) }
+    val labelColor by animateColorAsState(
+        when {
+            error != null -> colors.danger
+            focused -> colors.accentInk
+            else -> scheme.onSurfaceVariant
+        },
+        tween(NeoMotion.short), label = "label",
+    )
+    val shape = RoundedCornerShape(NeoRadius.field)
+    BasicTextField(
+        value = value,
+        onValueChange = { typed -> onValueChange(typed.filter { it in '0'..'9' }.take(length)) },
+        modifier = modifier.fillMaxWidth(),
+        singleLine = true,
+        // The typed text is drawn by the boxes; the field itself only holds the keyboard and the focus.
+        textStyle = TextStyle(color = Color.Transparent),
+        cursorBrush = SolidColor(Color.Transparent),
+        visualTransformation = PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = imeAction),
+        interactionSource = interaction,
+        decorationBox = { field ->
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(label, Modifier.padding(start = NeoSpace.xxs), style = MaterialTheme.typography.labelMedium, color = labelColor, maxLines = 1)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(NeoSpace.xs)) {
+                    Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(NeoSpace.s)) {
+                        repeat(length) { index ->
+                            val next = focused && index == value.length.coerceAtMost(length - 1)
+                            val tone = if (error != null) colors.danger else if (next) colors.accentInk else colors.divider
+                            Box(
+                                Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 56.dp)
+                                    .clip(shape)
+                                    .background(colors.group)
+                                    .border(if (error != null || next) 2.dp else 1.dp, tone, shape),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                value.getOrNull(index)?.let { digit ->
+                                    Text(if (visible) digit.toString() else "•", style = MaterialTheme.typography.titleLarge, color = scheme.onSurface)
+                                }
+                            }
+                        }
+                    }
+                    NeoIconButton(
+                        if (visible) R.drawable.ic_visibility_off else R.drawable.ic_visibility,
+                        if (visible) "Ocultar" else "Mostrar",
+                        { visible = !visible },
+                    )
+                }
+                Box(Modifier.size(0.dp)) { field() }
+                error?.let { Text(it, Modifier.padding(start = NeoSpace.xxs), style = MaterialTheme.typography.bodySmall, color = colors.danger) }
             }
         },
     )

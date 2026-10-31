@@ -30,10 +30,10 @@ class RealSmsDumpTest {
         val counts = records.groupingBy { (record, _) -> label(record.message) }.eachCount().toSortedMap()
         println("PAGOxMOVIL: ${records.size}")
         counts.forEach { (type, count) -> println("  $count\t$type") }
-        val unknown = records.filter { (record, _) -> record.message == SmsMessage.Unrecognized ||
+        val unknown = records.filter { (record, _) -> record.message == SmsMessage.Unrecognized || record.message is SmsMessage.BankText ||
             (record.message as? SmsMessage.Rejected)?.operation == RejectedOperation.UNKNOWN }
         unknown.forEach { (_, body) -> println("  ? " + body.replace(Regex("[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+"), "<correo>").replace(Regex("[0-9]"), "9").replace("\n", " ")) }
-        assertEquals(0, records.count { it.first.message == SmsMessage.Unrecognized })
+        assertEquals(0, records.count { it.first.message == SmsMessage.Unrecognized || it.first.message is SmsMessage.BankText })
         replay(records.map { it.first })
     }
 
@@ -91,8 +91,8 @@ class RealSmsDumpTest {
         is SmsMessage.ServicePaid -> "ServicePaid/${message.service}"
         is SmsMessage.ServiceNotice -> "ServiceNotice/${message.service}"
         is SmsMessage.Balance -> "Balance/${message.bank}/${if (message.rows.first().account != null) "card" else if (message.rows.first().label != null) "table" else "plain"}"
-        is SmsMessage.Authenticated -> "Authenticated/${message.bank}"
-        is SmsMessage.AuthenticationFailed -> "AuthenticationFailed/${message.bank}/${if (message.wrongPin) "pin" else "other"}"
+        is SmsMessage.Authenticated -> "Authenticated/${message.agency}"
+        is SmsMessage.AuthenticationFailed -> "AuthenticationFailed/${message.agency}/${if (message.wrongPin) "pin" else "other"}"
         else -> message::class.simpleName!!
     }
 }

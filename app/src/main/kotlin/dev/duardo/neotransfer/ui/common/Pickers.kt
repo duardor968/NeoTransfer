@@ -37,6 +37,7 @@ import dev.duardo.neotransfer.designsystem.theme.NeoRadius
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
 import dev.duardo.neotransfer.ui.model.BalanceUi
 import dev.duardo.neotransfer.ui.model.CardUi
+import dev.duardo.neotransfer.ui.model.Money
 import dev.duardo.neotransfer.ui.model.WalletCardUi
 
 /**
@@ -92,9 +93,12 @@ fun SourceCardPicker(cards: List<WalletCardUi>, selected: Int, onSelect: (Int) -
 }
 
 private fun WalletCardUi.balanceLine(): String = when (val b = balance) {
-    is BalanceUi.Known -> "${card.bank.shortName} · Saldo ${formatMoney(b.money.amount, b.money.currency).unbroken()}"
-    BalanceUi.Unknown -> card.bank.shortName
+    is BalanceUi.Known -> "${card.bank.shortName} · ${balanceLabel(b.money)}"
+    is BalanceUi.Text, BalanceUi.Unknown -> card.bank.shortName
 }
+
+/** A balance beside its card or account, the same everywhere: «Saldo 12 480.50 CUP», the figure never split from its currency. */
+fun balanceLabel(money: Money): String = "Saldo ${formatMoney(money.amount, money.currency).unbroken()}"
 
 /** On/off choice sitting among fields, its words on the same edge as the fields' labels; the row toggles too. */
 @Composable

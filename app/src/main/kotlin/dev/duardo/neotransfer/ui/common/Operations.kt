@@ -2,7 +2,6 @@ package dev.duardo.neotransfer.ui.common
 
 import androidx.annotation.DrawableRes
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextDecoration
@@ -13,6 +12,7 @@ import dev.duardo.neotransfer.designsystem.component.MoneySign
 import dev.duardo.neotransfer.designsystem.component.MoneyText
 import dev.duardo.neotransfer.designsystem.component.NameAvatar
 import dev.duardo.neotransfer.designsystem.component.NeoRow
+import dev.duardo.neotransfer.designsystem.component.SeparatedText
 import dev.duardo.neotransfer.designsystem.component.StatusChip
 import dev.duardo.neotransfer.designsystem.component.StatusTone
 import dev.duardo.neotransfer.designsystem.component.content
@@ -27,7 +27,7 @@ val OperationStatus.label: String
         OperationStatus.Sent -> "Enviada"
         OperationStatus.Confirmed -> "Confirmada"
         OperationStatus.Rejected -> "Rechazada"
-        OperationStatus.NoResponse -> "Sin respuesta"
+        OperationStatus.NoResponse -> "Sin confirmar"
         OperationStatus.NotExecuted -> "No se ejecutó"
     }
 
@@ -76,7 +76,7 @@ val OperationKind.label: String
         OperationKind.Water -> "Agua"
         OperationKind.Landline -> "Teléfono fijo"
         OperationKind.NautaHome -> "Nauta Hogar"
-        OperationKind.NautaWifi -> "Nauta Wi‑Fi"
+        OperationKind.NautaWifi -> "Nauta"
         OperationKind.MobileTopUp -> "Recarga móvil"
         OperationKind.CubacelPlan -> "Paquete Cubacel"
         OperationKind.CubacelTransfer -> "Saldo Cubacel transferido"
@@ -147,8 +147,8 @@ fun OperationAmount(operation: OperationUi, modifier: Modifier = Modifier) {
 }
 
 /**
- * Row of a movement. [when] is the time label chosen by the list (clock time inside a day group, short date
- * elsewhere); the state is added unless the operation is confirmed.
+ * Row of a movement. [timeLabel] is chosen by the list (clock time inside a day group, short date elsewhere), empty for
+ * a day-only movement inside its day; the state is added unless the operation is confirmed.
  */
 @Composable
 fun OperationRow(operation: OperationUi, timeLabel: String, onClick: () -> Unit, modifier: Modifier = Modifier, title: String = operation.title) {
@@ -158,10 +158,10 @@ fun OperationRow(operation: OperationUi, timeLabel: String, onClick: () -> Unit,
         leading = { OperationAvatar(operation) },
         supportingContent = {
             val status = operation.status
-            val text = if (status == OperationStatus.Confirmed) timeLabel else "$timeLabel · ${status.label}"
-            Text(
+            val text = listOfNotNull(timeLabel.ifEmpty { null }, status.label.takeIf { status != OperationStatus.Confirmed }).joinToString(" · ")
+            if (text.isNotEmpty()) SeparatedText(
                 text,
-                style = MaterialTheme.typography.bodyMedium,
+                MaterialTheme.typography.bodyMedium,
                 color = if (status.tone == StatusTone.Danger || status.tone == StatusTone.Warning) status.tone.content() else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         },

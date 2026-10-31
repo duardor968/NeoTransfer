@@ -47,6 +47,7 @@ import dev.duardo.neotransfer.ui.model.OperationKind
 import dev.duardo.neotransfer.ui.model.OperationStatus
 import dev.duardo.neotransfer.ui.model.OperationUi
 import dev.duardo.neotransfer.ui.model.ServiceKind
+import dev.duardo.neotransfer.ui.model.issuerOf
 
 interface OperationActions {
     fun back()
@@ -120,15 +121,15 @@ private fun detailLines(operation: OperationUi): List<SummaryLine> {
     val labels = timeLabels
 
     val counterpart = when (val c = operation.counterpart) {
-        is CounterpartUi.Card -> SummaryLine("Tarjeta destino", formatCardNumber(c.number), c.bankName)
+        is CounterpartUi.Card -> SummaryLine("Tarjeta destino", formatCardNumber(c.number), c.issuer)
         is CounterpartUi.Phone -> SummaryLine("Teléfono", formatPhone(c.number))
         is CounterpartUi.Reference -> SummaryLine(referenceLabel(operation.kind), c.value)
         null -> null
     }?.takeIf { it.value != operation.title }
     return listOfNotNull(
         counterpart,
-        operation.card?.let { SummaryLine(if (operation.kind.incoming) "A tu tarjeta" else "Desde", formatCardNumber(it.number), it.bank.shortName) },
-        SummaryLine("Fecha", labels.stamp(operation.at)),
+        operation.card?.let { SummaryLine(if (operation.kind.incoming) "A tu tarjeta" else "Desde", formatCardNumber(it.number), issuerOf(it.bank, it.currency)) },
+        SummaryLine("Fecha", labels.stamp(operation.at, operation.dateOnly)),
         operation.transactionId?.let { SummaryLine("Transacción", it) },
         operation.balanceAfter?.let { SummaryLine("Saldo restante", formatMoney(it.amount, it.currency)) },
     )

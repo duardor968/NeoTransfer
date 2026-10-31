@@ -29,7 +29,7 @@ NeoTransfer es una app Android independiente. No está afiliada a ETECSA, a Tran
 - **Cobrar.** El QR de tu tarjeta, que también lee Transfermóvil, para mostrarlo o compartirlo con el importe que pides.
 - **Servicios** desde tu tarjeta: electricidad, teléfono fijo, agua, Nauta Hogar (recarga y deuda), cuenta Nauta y recarga móvil. Con el saldo del teléfono: consultar saldo, datos, minutos, SMS y bonos, comprar paquetes y transferir saldo.
 - **Actividad.** Todos tus movimientos con su comprobante, también los que hagas desde Transfermóvil. Al instalar la app, la arma con los SMS del banco que ya tienes.
-- **Contactos.** Tu agenda del teléfono, sin importar nada: la lista muestra a quien le mueves dinero, con su último movimiento, y le añades tarjetas a cualquiera. Cuando alguien te transfiere, la notificación dice quién y cuánto.
+- **Contactos.** Tu agenda del teléfono, sin importar nada: la lista muestra a quien le mueves dinero, con su último movimiento. En la ficha de cada persona añades, editas o quitas sus tarjetas, y el banco y la moneda salen del número. Cuando alguien te transfiere, la notificación dice quién y cuánto.
 - **Escáner.** Lee QR y números de tarjeta y de móvil, impresos o escritos a mano. Lo abres desde la app, con «Escanear» al mantener pulsado el icono o desde los Ajustes rápidos.
 - **Respaldo** cifrado con contraseña de tus tarjetas, contactos y servicios guardados, sin las claves del banco. También importa el respaldo `.trm` de Transfermóvil.
 

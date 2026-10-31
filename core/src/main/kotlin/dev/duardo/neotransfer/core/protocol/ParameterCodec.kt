@@ -22,6 +22,10 @@ class ParameterCodec {
         }.joinToString("*")
     }
 
+    /** Whether [value] can travel as one parameter: digits, or text of the protocol's dictionary. */
+    fun accepts(value: String): Boolean =
+        value.isNotEmpty() && (value.all { it in '0'..'9' } || value.all { it in textCodes })
+
     private fun encodeNumber(value: String, seed: Int): String {
         val substituted = buildString {
             var index = 0

@@ -50,12 +50,13 @@ val CardShape = RoundedCornerShape(percent = CornerPercent)
 @Immutable
 data class CardPrint(val x: Float, val baseline: Float, val size: Float, val maxWidth: Float)
 
+/** Null where the card prints none of it. */
 @Immutable
 data class CardFaceLayout(
     val number: CardPrint,
-    val holder: CardPrint,
-    val currency: CardPrint,
-    val expiry: CardPrint,
+    val holder: CardPrint?,
+    val currency: CardPrint?,
+    val expiry: CardPrint?,
 )
 
 /**
@@ -92,9 +93,9 @@ fun CardFace(
         Image(art, null, Modifier.matchParentSize(), contentScale = ContentScale.FillBounds)
         Canvas(Modifier.matchParentSize()) {
             if (number.isNotEmpty()) printLine(measurer, formatCardNumber(number), layout.number, ink)
-            holder?.takeIf { it.isNotBlank() }?.let { printLine(measurer, it.asPrinted(), layout.holder, ink) }
-            currency?.let { printLine(measurer, it, layout.currency, ink) }
-            expiry?.takeIf { it.isNotBlank() }?.let { printLine(measurer, "VENCE: $it", layout.expiry, ink) }
+            layout.holder?.let { spec -> holder?.takeIf { it.isNotBlank() }?.let { printLine(measurer, it.asPrinted(), spec, ink) } }
+            layout.currency?.let { spec -> currency?.let { printLine(measurer, it, spec, ink) } }
+            layout.expiry?.let { spec -> expiry?.takeIf { it.isNotBlank() }?.let { printLine(measurer, "VENCE: $it", spec, ink) } }
         }
         Box(Modifier.matchParentSize().cardFinish())
     }

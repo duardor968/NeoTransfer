@@ -3,6 +3,7 @@ package dev.duardo.neotransfer.platform
 import android.content.Context
 import android.net.Uri
 import android.provider.ContactsContract.CommonDataKinds.Phone
+import dev.duardo.neotransfer.core.model.Phones
 import dev.duardo.neotransfer.engine.Documents
 import dev.duardo.neotransfer.engine.PhoneBook
 import dev.duardo.neotransfer.engine.PhoneContact
@@ -48,15 +49,8 @@ class AndroidPhoneBook(context: Context) : PhoneBook {
     }
 }
 
-/** `5xxxxxxx`, with `+53`, `53` or `0053` tolerated; anything else (landlines, foreign numbers) is not a mobile. */
+/** `5xxxxxxx` or `6xxxxxxx`, with `+53`, `53` or `0053` tolerated; anything else (landlines, foreign numbers) is not a mobile. */
 internal fun cubanMobile(raw: String): String? {
-    if (raw.isBlank() || raw.any { !it.isDigit() && it !in "+ -()." }) return null
-    val digits = raw.filter(Char::isDigit)
-    val local = when {
-        digits.length == 8 -> digits
-        digits.length == 10 && digits.startsWith("53") -> digits.drop(2)
-        digits.length == 12 && digits.startsWith("0053") -> digits.drop(4)
-        else -> return null
-    }
-    return local.takeIf { it[0] == '5' }
+    if (raw.isBlank() || raw.any { it !in '0'..'9' && it !in "+ -()." }) return null
+    return Phones.normalize(raw)?.takeIf { it[0] in "56" }
 }

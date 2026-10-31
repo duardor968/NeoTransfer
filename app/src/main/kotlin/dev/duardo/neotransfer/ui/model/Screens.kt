@@ -34,7 +34,6 @@ data class CardFormUi(
     val expiry: String,
     val currency: String,
     val numberError: String? = null,
-    val expiryError: String? = null,
     val canSave: Boolean = false,
 )
 
@@ -52,6 +51,8 @@ data class HomeUi(
     val inProgress: List<OperationUi>,
     val recent: List<OperationUi>?,
     val recharge: List<RechargeTargetUi>? = null,
+    /** The card whose sheet is open. */
+    val card: CardUi? = null,
 )
 
 /** Saved destination for the Recharge shortcut. */
@@ -73,7 +74,9 @@ sealed interface ActivityContent {
 }
 
 @Immutable
-/** [checking]: last operations asked of the bank, answer pending. [pickCard]: which card to ask about. */
+/**
+ * [checking]: last operations asked of the bank, answer pending. [pickCard]: which card to ask about.
+ */
 data class ActivityUi(
     val query: String,
     val filter: ActivityFilter,
@@ -103,22 +106,26 @@ data class ContactsUi(val query: String, val content: ContactsContent, val every
 @Immutable
 data class AllContactsUi(val query: String, val contacts: List<ContactUi>)
 
+/** A card number as typed, with what it tells so far ([bank], [currency]) and what is wrong with it. */
 @Immutable
-data class EditableCardUi(val id: String, val number: String, val label: String, val bankName: String? = null, val error: String? = null)
+data class CardFieldUi(val number: String, val label: String, val bank: Bank? = null, val currency: String? = null, val error: String? = null)
 
 @Immutable
 data class EditablePhoneUi(val id: String, val number: String, val error: String? = null)
 
-/** [id] null when creating. [fromAddressBook]: only the cards are edited here; name and phones belong to the address book. */
+/** [id] null when creating, with the one [card] it starts with; a saved contact's cards are managed on its page. */
 @Immutable
 data class ContactEditUi(
     val id: String?,
     val name: String,
-    val cards: List<EditableCardUi>,
+    val card: CardFieldUi?,
     val phones: List<EditablePhoneUi>,
     val canSave: Boolean,
-    val fromAddressBook: Boolean = false,
 )
+
+/** One card of [contactName]: a new one, or [editing] a saved one. */
+@Immutable
+data class CardEditUi(val contactName: String, val editing: Boolean, val card: CardFieldUi, val canSave: Boolean)
 
 // ---- Services -----------------------------------------------------------------------------------------------
 
@@ -127,8 +134,8 @@ enum class ServiceKind(val label: String, val referenceLabel: String) {
     Electricity("Electricidad", "Código de cliente"),
     Water("Agua", "Cuenta"),
     Landline("Teléfono fijo", "ID de factura"),
-    NautaHome("Nauta Hogar", "Usuario"),
-    NautaWifi("Nauta Wi‑Fi", "Usuario"),
+    NautaWifi("Nauta", "Cuenta Nauta"),
+    NautaHome("Nauta Hogar", "Cuenta Nauta Hogar"),
     MobileTopUp("Recarga desde el banco", "Móvil"),
     Cubacel("Saldo Cubacel", "Móvil"),
 }
@@ -141,6 +148,19 @@ data class ServicesUi(val references: List<SavedReferenceUi>)
 
 enum class FieldInput { Number, Text, Phone, Secret }
 
+/** How a field shows its digits as they are typed, so a value it cannot take is never typed. */
+@Immutable
+sealed interface FieldShape {
+    /** A card number, grouped as printed. */
+    data object Card : FieldShape
+
+    /** Digits the value always starts with, shown and never typed: the field's value goes without them. */
+    data class Prefix(val digits: String) : FieldShape
+
+    /** A card's expiry as printed, `MM/AA`. */
+    data object Expiry : FieldShape
+}
+
 @Immutable
 data class FieldUi(
     val id: String,
@@ -148,17 +168,42 @@ data class FieldUi(
     val value: String,
     val input: FieldInput,
     val error: String? = null,
+    /** How many digits a [FieldInput.Secret] code has: one box each. */
+    val length: Int = 0,
     val suffix: String? = null,
     /** The camera can read it (a mobile number). */
     val scannable: Boolean = false,
+    val shape: FieldShape? = null,
 )
 
 /**
  * Payment of a service. [amount] null when the bank charges the whole bill as issued: there is no prior query, the
  * receipt brings what was paid.
- * [saveReference] null when paying a saved reference. [choices] splits one service in its variants (water by
- * region, Nauta Hogar recharge or debt).
+ * [saved] when paying a saved reference, which [edit] names or takes out of Guardados. [choices] splits one service in
+ * its variants (water by region, Nauta Hogar recharge or debt).
  */
+/** A saved reference being edited: the name it shows in Guardados, and [removing] once its removal is asked. */
+@Immutable
+data class SavedEditUi(val name: String, val removing: Boolean = false)
+
+/** A mobile, named after its saved reference or the contact that has it. */
+@Immutable
+data class PhoneTargetUi(val phone: String, val name: String? = null)
+
+/**
+ * Who a recharge or a balance transfer goes to. [typed] is a complete mobile typed or scanned that no listed contact
+ * has; [contacts] holds one row per mobile.
+ */
+@Immutable
+data class PhonePickUi(
+    val title: String,
+    val query: String,
+    val typed: String?,
+    val typedError: String?,
+    val recent: List<PhoneTargetUi>,
+    val contacts: List<PhoneTargetUi>,
+)
+
 @Immutable
 data class ServiceFormUi(
     val kind: ServiceKind,
@@ -170,7 +215,8 @@ data class ServiceFormUi(
     val currency: String,
     val cards: List<WalletCardUi> = emptyList(),
     val source: Int = 0,
-    val saveReference: Boolean? = null,
+    val saved: Boolean = false,
+    val edit: SavedEditUi? = null,
     val canContinue: Boolean = false,
     val action: String,
     val choices: List<String> = emptyList(),
@@ -261,6 +307,9 @@ sealed interface PayQrUi {
     data class Unsupported(val message: String, val addCard: Boolean = false) : PayQrUi
 }
 
+/** Why a Clásica cannot pay the special QR (`aux` with `11200301`): it does not say which card pays, so a bank's does. */
+const val BANK_CARD_ONLY = "Este tipo de pago solo se hace con una tarjeta de banco"
+
 @Immutable
 data class ReceiveUi(val cards: List<CardUi>, val selected: Int, val payload: String, val amount: Money? = null)
 
@@ -294,4 +343,144 @@ sealed interface TransfermovilImportUi {
     data class Preview(val fileName: String, val contacts: Int, val cards: Int, val references: Int, val busy: Boolean = false) : TransfermovilImportUi
     data class Done(val contacts: Int, val cards: Int, val references: Int) : TransfermovilImportUi
     data class Failed(val message: String) : TransfermovilImportUi
+}
+
+// ---- The line with each bank and the Clásica ----------------------------------------------------------------
+
+/** The last request of a line service and where it stands. [id] is its operation: open it, or retry it when not executed. */
+@Immutable
+data class LineRequestUi(val id: String, val sentAt: Instant, val state: LineStateUi)
+
+@Immutable
+sealed interface LineStateUi {
+    /** Waiting its turn, being sent, or acknowledged and waiting for the SMS. */
+    data object Sent : LineStateUi
+    data class Confirmed(val at: Instant) : LineStateUi
+    /** The bank or MiTransfer refused it; [reason] is ready to show. */
+    data class Rejected(val reason: String) : LineStateUi
+    /** It never reached them; [reason] is ready to show. */
+    data class NotExecuted(val reason: String) : LineStateUi
+    /** Fifteen minutes without an SMS; a late one still closes it. */
+    data object NoResponse : LineStateUi
+    /** MiTransfer answered in words the app does not know: [text] as it came, [at] when. */
+    data class Answered(val text: String, val at: Instant) : LineStateUi
+}
+
+/**
+ * A key the bank or MiTransfer ([Bank.CLASSIC]) took that the app has not saved: a registration's or a confirmed
+ * change's. Nothing that needs that key goes out until it is saved. [inHand]: the fingerprint alone saves it; otherwise
+ * the person types it.
+ */
+@Immutable
+data class KeyToSaveUi(val bank: Bank, val inHand: Boolean)
+
+/** A new key typed twice: a key change (`69`), or the PIN chosen at MiTransfer's registration. [repeat]: the second time. */
+@Immutable
+data class NewKeyUi(val bank: Bank, val length: Int, val repeat: Boolean, val entered: Int, val error: String? = null, val sending: Boolean = false)
+
+/**
+ * One account the bank listed (`58`). [account]: its card, whole or masked, when the bank gave it; [label] the bank's
+ * name for it («Ahorro»). [card]: the wallet's card it is. [addable]: its whole number, when it is not in the app yet.
+ */
+@Immutable
+data class LineAccountUi(val account: String?, val label: String?, val balance: Money, val card: CardUi?, val addable: String?)
+
+/**
+ * «Tu línea en X», in Ajustes › banco: the last request of each service, null while never asked. [keyChange] `69`, whose
+ * new key has [keyLength] digits; [accounts] `58`, with the rows of its answer in [accountList]; [association] `60`;
+ * [removal] `68`, apart and in red. Metropolitano ([coordinates]) asks the value of a coordinates-card cell for the
+ * association, and the identity card and Telebanca card for the removal.
+ */
+@Immutable
+data class BankLineUi(
+    val bank: Bank,
+    val keyLength: Int,
+    val keyChange: LineRequestUi?,
+    val accounts: LineRequestUi?,
+    val accountList: List<LineAccountUi>,
+    val association: LineRequestUi?,
+    val removal: LineRequestUi?,
+    val coordinates: Boolean,
+    val keyToSave: KeyToSaveUi?,
+)
+
+/**
+ * Associating a card with the line (`60`). Metropolitano asks the value of [cell] (letter A–J and number 1–10) of its
+ * coordinates card, [valueLength] characters, typed for this send only.
+ */
+@Immutable
+data class CardAssociationUi(
+    val bank: Bank,
+    val card: CardFieldUi,
+    val cell: String?,
+    val value: String,
+    val canSend: Boolean,
+    val request: LineRequestUi? = null,
+    val valueLength: Int = 2,
+)
+
+/**
+ * Removing a registration, `68`, destructive: the line's with a bank, or the Clásica's association with MiTransfer.
+ * [fields] what it asks: nothing for BPA and BANDEC; the identity card and Telebanca card for Metropolitano; the
+ * identity card for the Clásica.
+ */
+@Immutable
+data class RemovalUi(val bank: Bank, val fields: List<FieldUi>, val canSend: Boolean, val request: LineRequestUi? = null)
+
+/** Ajustes › Clásica: the card, «PIN guardado» and removing its association with MiTransfer ([removal]). */
+@Immutable
+data class ClassicSettingsUi(val card: WalletCardUi, val pinSaved: Boolean, val removal: LineRequestUi?, val keyToSave: KeyToSaveUi?)
+
+/** What a bank's registration (`49`) asks, in its order ([dev.duardo.neotransfer.app.registrationFields]). */
+enum class RegistrationField(val label: String, val shape: FieldShape? = null) {
+    Card("Número de tarjeta", FieldShape.Card),
+    /** Metropolitano's Telebanca card: 10 digits that start with 95; only the other 8 are typed. */
+    Telebanca("Tarjeta Telebanca", FieldShape.Prefix(TELEBANCA_PREFIX)),
+    Name("Nombre"),
+    /** BANDEC: name and surnames in one field. */
+    FullName("Nombre y apellidos"),
+    FirstSurname("Primer apellido"),
+    SecondSurname("Segundo apellido"),
+    Identity("Carné de identidad"),
+    /** BANDEC: the card's expiry as printed, `MMAA`; the bank takes it as `AAMM` ([dev.duardo.neotransfer.app.registration]). */
+    Expiry("Vencimiento", FieldShape.Expiry),
+}
+
+/** What every Telebanca card number starts with. */
+const val TELEBANCA_PREFIX = "95"
+
+/**
+ * Registering the line with [bank] (`49`), from its setup. [fields] in [RegistrationField] order, ids by their name.
+ * The bank answers with the key: [keyToSave] once it came; the card PIN of the same SMS is never read.
+ */
+@Immutable
+data class BankRegistrationUi(
+    val bank: Bank,
+    val fields: List<FieldUi>,
+    val canSend: Boolean,
+    val request: LineRequestUi? = null,
+    val keyToSave: KeyToSaveUi? = null,
+)
+
+/**
+ * Setting up the Clásica. With the line already in MiTransfer: its PIN ([BankKeyUi] of [Bank.CLASSIC]) and the
+ * card's number. Without: register the line (`49`: identity card and a new PIN, [NewKeyUi]) and associate the card
+ * (`111`: its number, and the authorization and terminal numbers of a POS receipt).
+ */
+@Immutable
+sealed interface ClassicSetupUi {
+    /** The card's number, `976003…`, for a line already registered. */
+    data class Number(val number: CardFieldUi, val canSave: Boolean) : ClassicSetupUi
+
+    /** MiTransfer's registration: [request] once sent, [keyToSave] once confirmed (the PIN chosen). */
+    data class Register(val identity: FieldUi, val canSend: Boolean, val request: LineRequestUi? = null, val keyToSave: KeyToSaveUi? = null) : ClassicSetupUi
+
+    /** The association (`111`): [authorization] 6 characters, [terminal] 8, both from a POS receipt of the card. */
+    data class Associate(
+        val number: CardFieldUi,
+        val authorization: FieldUi,
+        val terminal: FieldUi,
+        val canSend: Boolean,
+        val request: LineRequestUi? = null,
+    ) : ClassicSetupUi
 }

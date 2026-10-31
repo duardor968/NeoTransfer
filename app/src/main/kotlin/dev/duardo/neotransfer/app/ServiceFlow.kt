@@ -34,10 +34,15 @@ import dev.duardo.neotransfer.ui.model.DuplicateUi
 import dev.duardo.neotransfer.ui.model.FieldInput
 import dev.duardo.neotransfer.ui.model.FieldUi
 import dev.duardo.neotransfer.ui.model.Money
+import dev.duardo.neotransfer.ui.model.PhonePickUi
+import dev.duardo.neotransfer.ui.model.PhoneTargetUi
+import dev.duardo.neotransfer.ui.model.SavedEditUi
 import dev.duardo.neotransfer.ui.model.ServiceFormUi
 import dev.duardo.neotransfer.ui.model.ServiceKind
 import dev.duardo.neotransfer.ui.services.CubacelActions
 import dev.duardo.neotransfer.ui.services.CubacelScreen
+import dev.duardo.neotransfer.ui.services.PhonePickActions
+import dev.duardo.neotransfer.ui.services.PhonePickScreen
 import dev.duardo.neotransfer.ui.services.ServiceFormActions
 import dev.duardo.neotransfer.ui.services.ServiceFormScreen
 import dev.duardo.neotransfer.ui.transfer.DuplicateSheet
@@ -53,19 +58,27 @@ class ServiceDestination(
     private val kind: ServiceKind,
     reference: ServiceReference? = null,
     retry: CubacelTransfer? = null,
+    phone: String? = null,
+    /** Where the flow began; the result replaces everything from here up. */
+    private val origin: Destination? = null,
 ) : Destination(), ServiceFormActions {
     private var choice by mutableIntStateOf(0)
     private var selected by mutableStateOf(reference?.let(::referenceId))
     private val values = mutableStateMapOf<String, String>()
     private var amount by mutableStateOf(retry?.amount?.toString().orEmpty())
     private var source by mutableStateOf(app.homeCard)
-    private var save by mutableStateOf(false)
+    private var edit by mutableStateOf<SavedEditUi?>(null)
     private var sending by mutableStateOf(false)
     private var duplicate by mutableStateOf<DuplicateUi?>(null)
 
     init {
         reference?.let(::fill)
         retry?.let { values[PHONE] = it.phone }
+        phone?.let { number ->
+            values[PHONE] = number
+            if (kind == ServiceKind.MobileTopUp) selected = app.book.value.domain.services
+                .firstOrNull { it.kind == CoreKind.MOBILE && sameAccount(it.value, number) }?.let(::referenceId)
+        }
     }
 
     private val fields: List<Pair<String, String>>
@@ -73,7 +86,7 @@ class ServiceDestination(
             ServiceKind.Electricity -> listOf(CLIENT to "Código de cliente")
             ServiceKind.Landline -> listOf(INVOICE to "ID de factura")
             ServiceKind.Water -> listOf(ACCOUNT to "Cuenta")
-            ServiceKind.NautaHome, ServiceKind.NautaWifi -> listOf(USER to "Usuario")
+            ServiceKind.NautaHome, ServiceKind.NautaWifi -> listOf(USER to kind.referenceLabel)
             ServiceKind.MobileTopUp -> listOf(PHONE to "Móvil")
             ServiceKind.Cubacel -> listOf(PHONE to "Móvil", KEY to "Clave de transferencia")
         }
@@ -102,14 +115,16 @@ class ServiceDestination(
                     ServiceKind.Cubacel -> "Transferir saldo"
                     else -> kind.label
                 },
-                references = if (kind == ServiceKind.Cubacel) emptyList() else references,
+                // A mobile is chosen before the form ([PhonePickDestination]).
+                references = if (kind == ServiceKind.Cubacel || kind == ServiceKind.MobileTopUp) emptyList() else references,
                 selectedReference = selected,
                 fields = fields.map { (id, label) -> fieldUi(id, label) },
                 amount = if (hasAmount) amount else null,
                 currency = "CUP",
                 cards = cards,
                 source = cards.indexOfFirst { it.card.id == source }.coerceAtLeast(0),
-                saveReference = if (selected == null && kind != ServiceKind.Cubacel) save else null,
+                saved = selected != null,
+                edit = edit,
                 canContinue = request != null && !sending,
                 action = action(value),
                 choices = choices,
@@ -124,8 +139,8 @@ class ServiceDestination(
         val value = values[id].orEmpty()
         return when (id) {
             PHONE -> FieldUi(id, label, value, FieldInput.Phone,
-                error = if (value.length == 8 && !value.startsWith("5") && !value.startsWith("6")) "No es un móvil" else null, scannable = true)
-            KEY -> FieldUi(id, label, value, FieldInput.Secret)
+                error = Phones.mobileProblem(value), scannable = true)
+            KEY -> FieldUi(id, label, value, FieldInput.Secret, length = 4)
             USER -> FieldUi(id, label, value, FieldInput.Text, suffix = if ('@' in value) null else "@nauta.com.cu")
             else -> FieldUi(id, label, value, FieldInput.Number)
         }
@@ -204,7 +219,7 @@ class ServiceDestination(
 
     override fun field(id: String, value: String) {
         values[id] = when (id) {
-            PHONE -> (Phones.normalize(value) ?: value.filter(Char::isDigit)).take(8)
+            PHONE -> Phones.input(value)
             KEY -> value.filter(Char::isDigit).take(4)
             USER -> value.trim().take(40)
             CLIENT -> value.filter(Char::isDigit).take(13)
@@ -220,7 +235,28 @@ class ServiceDestination(
 
     override fun amount(value: String) { amount = value.filter { it.isDigit() || it == '.' || it == ',' }.take(12) }
     override fun source(index: Int) { source = app.book.value.wallet.filter { it.card.currency == "CUP" }.getOrNull(index)?.card?.id }
-    override fun saveReference(value: Boolean) { save = value }
+    override fun editSaved() {
+        val reference = selected?.let(app.book.value::reference) ?: return
+        edit = SavedEditUi(reference.label.orEmpty())
+    }
+    override fun savedName(value: String) { edit = edit?.copy(name = value.take(40)) }
+    override fun closeSaved() { edit = null }
+    override fun saveSaved() {
+        val reference = selected?.let(app.book.value::reference) ?: return
+        val name = edit?.name ?: return
+        edit = null
+        app.launch { runCatching { app.controller.saveService(reference.copy(label = name)) }.onFailure { app.message(it.message ?: "No se pudo guardar") } }
+    }
+    override fun removeSaved() { edit = edit?.copy(removing = true) }
+    override fun cancelRemoveSaved() { edit = null }
+    override fun confirmRemoveSaved() {
+        val reference = selected?.let(app.book.value::reference) ?: return
+        edit = null
+        app.launch {
+            app.controller.deleteService(reference)
+            app.navigator.remove(this@ServiceDestination)
+        }
+    }
 
     override fun submit() {
         val request = runCatching { request(app.book.value) }.getOrElse { app.message(it.message ?: "Revisa los datos"); return }
@@ -248,22 +284,12 @@ class ServiceDestination(
     }
 
     private suspend fun send(request: UssdRequest, confirmed: Boolean) {
-        if (save && selected == null) savedReference(request)?.let { runCatching { app.controller.saveService(it) } }
         val key = values[KEY]?.toCharArray()
         try {
-            duplicate = app.submit(request, this, confirmed, transferKey = if (request is CubacelTransfer) key else null)
+            duplicate = app.submit(request, origin ?: this, confirmed, secret = if (request is CubacelTransfer) key else null)
         } finally {
             key?.fill('\u0000')
         }
-    }
-
-    private fun savedReference(request: UssdRequest): ServiceReference? = when (request) {
-        is ElectricityBill -> ServiceReference(CoreKind.ELECTRICITY, request.invoice)
-        is PhoneBill -> ServiceReference(CoreKind.PHONE, request.invoice)
-        is WaterBill -> ServiceReference(waterKind(), request.account)
-        is NautaPayment -> ServiceReference(if (request.service == NautaService.RECHARGE) CoreKind.NAUTA else CoreKind.NAUTA_HOME, request.account.address)
-        is MobileRecharge -> ServiceReference(CoreKind.MOBILE, request.phone)
-        else -> null
     }
 
     private companion object {
@@ -274,6 +300,48 @@ class ServiceDestination(
         const val PHONE = "phone"
         const val KEY = "key"
     }
+}
+
+/** Which mobile a recharge ([ServiceKind.MobileTopUp]) or a Cubacel balance transfer goes to; the form follows. */
+class PhonePickDestination(private val app: AppModel, private val kind: ServiceKind) : Destination(), PhonePickActions {
+    private var query by mutableStateOf("")
+
+    @Composable
+    override fun Content(app: AppModel, book: Book) {
+        val digits = query.filter(Char::isDigit)
+        val numeric = digits.isNotEmpty() && query.all(Char::isDigit)
+        val phone = if (numeric) Phones.normalize(digits) else null
+        val contacts = book.contactPhones.filter { target ->
+            query.isBlank() || target.name?.contains(query.trim(), ignoreCase = true) == true || (numeric && digits.length >= 3 && digits in target.phone)
+        }
+        val typed = phone?.takeIf { it[0] in "56" && contacts.none { target -> target.phone == it } }
+        PhonePickScreen(
+            PhonePickUi(
+                title = if (kind == ServiceKind.Cubacel) "Transferir saldo" else "Recargar móvil",
+                query = query,
+                typed = typed,
+                typedError = if (phone != null && phone[0] !in "56") "No es un móvil cubano" else null,
+                recent = if (query.isBlank()) book.recentPhones else emptyList(),
+                contacts = contacts,
+            ),
+            this,
+        )
+    }
+
+    override fun back() { app.navigator.remove(this) }
+    /** A number keeps digits only, +53 included; the field groups them as printed. */
+    override fun query(value: String) {
+        query = if (value.isNotEmpty() && value.all { it.isDigit() || it in " -+()" }) Phones.input(value) else value
+    }
+
+    override fun scan() = app.navigator.push(ScanDestination(app, ScanMode.NUMBERS) { result ->
+        if (result is ScanResult.PhoneNumber) Phones.normalize(result.digits)?.let { choose(it) } ?: run { query = result.digits }
+    })
+
+    override fun pickTyped() { Phones.normalize(query)?.let(::choose) }
+    override fun pick(target: PhoneTargetUi) = choose(target.phone)
+
+    private fun choose(phone: String) = app.navigator.push(ServiceDestination(app, kind, phone = phone, origin = this))
 }
 
 /**
@@ -311,8 +379,8 @@ class CubacelDestination(private val app: AppModel) : Destination(), CubacelActi
     override fun query(kind: CubacelQuery) {
         app.launch { runCatching { app.controller.submit(CubacelRequest(kind.request())) }.onFailure { app.message(it.message ?: "No se pudo consultar") } }
     }
-    override fun plans() = app.controller.cubacelPackages()
-    override fun transferBalance() = app.navigator.push(ServiceDestination(app, ServiceKind.Cubacel))
+    override fun plans() { app.controller.cubacelPackages()?.let(app::message) }
+    override fun transferBalance() = app.navigator.push(PhonePickDestination(app, ServiceKind.Cubacel))
 
     private fun CubacelQuery.request() = when (this) {
         CubacelQuery.Balance -> CubacelQueryKind.BALANCE

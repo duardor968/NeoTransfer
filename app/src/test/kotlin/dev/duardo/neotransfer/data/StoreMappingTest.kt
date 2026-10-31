@@ -4,6 +4,7 @@ import dev.duardo.neotransfer.core.ledger.Ledger
 import dev.duardo.neotransfer.core.model.Bank
 import dev.duardo.neotransfer.core.model.Contact
 import dev.duardo.neotransfer.core.model.Currency
+import dev.duardo.neotransfer.core.model.MiTransfer
 import dev.duardo.neotransfer.core.model.Money
 import dev.duardo.neotransfer.core.model.OwnCard
 import dev.duardo.neotransfer.core.model.ServiceKind
@@ -41,9 +42,14 @@ class StoreMappingTest {
 
     @Test fun preferences() {
         val preferences = Preferences(Settings(Theme.DARK, creditNotifications = false, resultNotifications = true),
-            mapOf(Bank.BANDEC to at), inboxVersion = 2, lastBackup = at)
+            mapOf(Bank.BANDEC to at, MiTransfer to at), inboxVersion = 2, lastBackup = at,
+            pendingKeys = mapOf(Bank.BPA to PendingKey(at, 42), MiTransfer to PendingKey(at)))
         val millis = Instant.ofEpochMilli(at.toEpochMilli())
-        assertEquals(preferences.copy(keySavedAt = mapOf(Bank.BANDEC to millis), lastBackup = millis), preferences.toRows().toPreferences())
+        assertEquals(
+            preferences.copy(keySavedAt = mapOf(Bank.BANDEC to millis, MiTransfer to millis), lastBackup = millis,
+                pendingKeys = mapOf(Bank.BPA to PendingKey(millis, 42), MiTransfer to PendingKey(millis))),
+            preferences.toRows().toPreferences(),
+        )
         assertEquals(Preferences(), emptyList<SettingEntity>().toPreferences())
         // 1.0.1 only read PAGOxMOVIL and wrote a boolean.
         assertEquals(1, listOf(SettingEntity("inbox.imported", "true")).toPreferences().inboxVersion)

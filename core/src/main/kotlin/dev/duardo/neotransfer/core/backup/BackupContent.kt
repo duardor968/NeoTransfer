@@ -7,14 +7,19 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 /**
- * Backup content, format 4: own cards (with what the wallet prints on them), contacts and saved
- * service references. There is no field for banking keys, transfer keys or tokens.
+ * Backup content, format 4: own cards (with what the wallet prints on them), contacts, saved
+ * service references and the Clásicas. There is no field for banking keys, MiTransfer's PIN, transfer keys or tokens.
  */
 @Serializable
 data class BackupContent(
     val cards: List<BackupCard> = emptyList(),
     val contacts: List<Contact> = emptyList(),
     val services: List<ServiceReference> = emptyList(),
+    /**
+     * Numbers of the own Clásicas (`976003…`), which [OwnCard] cannot hold: they have no bank. Added within format 4:
+     * readers before it skip the field, and files without it read as none.
+     */
+    val classics: List<String> = emptyList(),
 )
 
 /** An own card plus the holder and expiry (`MM/AA`) printed on it, when the user gave them. */

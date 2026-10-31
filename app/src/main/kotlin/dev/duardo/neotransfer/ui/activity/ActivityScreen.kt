@@ -94,7 +94,7 @@ fun ActivityScreen(state: ActivityUi, actions: ActivityActions, modifier: Modifi
             )
             ActivityContent.Empty -> EmptyState(
                 Ds.drawable.ic_receipt_long, "Sin movimientos",
-                action = "Consultar al banco", onAction = actions::checkWithBank,
+                action = "Consultar últimas operaciones", onAction = actions::checkWithBank,
             )
             ActivityContent.NoResults -> EmptyState(Ds.drawable.ic_search, "Nada coincide con la búsqueda")
             is ActivityContent.Items -> {
@@ -115,7 +115,7 @@ fun ActivityScreen(state: ActivityUi, actions: ActivityActions, modifier: Modifi
                         itemsIndexed(operations, key = { _, it -> it.id }) { index, operation ->
                             Column(Modifier.groupItem(index, operations.size)) {
                                 if (index > 0) GroupDivider()
-                                OperationRow(operation, labels.clockTime(operation.at), { actions.open(operation.id) })
+                                OperationRow(operation, if (operation.dateOnly) "" else labels.clockTime(operation.at), { actions.open(operation.id) })
                             }
                         }
                     }

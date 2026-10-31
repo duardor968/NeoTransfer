@@ -5,9 +5,12 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-// Synthetic numbers only: 9204129951234568 and 9205990012345670 are Luhn-valid in the Cuban 92 range.
+// Synthetic numbers only: 9204129951234568 and 9205990012345670 are Luhn-valid in the Cuban 92 range,
+// 9760039900123455 and 9760037700543211 in Fincimex's personal Clásica (976003).
 private const val CARD = "9204129951234568"
 private const val CARD_2 = "9205990012345670"
+private const val CLASSIC = "9760039900123455"
+private const val CLASSIC_2 = "9760037700543211"
 private const val CHAR = 12f
 private const val HEIGHT = 24f
 
@@ -31,6 +34,27 @@ class NumberReaderTest {
         assertFalse(NumberReader.luhn("9204129951234567"))
         assertTrue(NumberReader.isCard(CARD))
         assertFalse(NumberReader.isCard("4539578763621486"), "Luhn-valid but outside the Cuban 92 range")
+    }
+
+    @Test
+    fun classicIsACardButNotTheBusinessOne() {
+        assertTrue(NumberReader.isCard(CLASSIC))
+        assertTrue(NumberReader.isCard(CLASSIC_2))
+        assertFalse(NumberReader.isCard("9760039900123456"), "a Clásica with a wrong check digit")
+        assertFalse(NumberReader.isCard("9760049900123454"), "Luhn-valid, but Fincimex's business card")
+    }
+
+    @Test
+    fun printedClassicInAnyGroupingOrOverTwoLines() {
+        assertEquals(listOf(CLASSIC), cards(line("Tarjeta: 9760 0399 0012 3455")))
+        assertEquals(listOf(CLASSIC), cards(line(CLASSIC)))
+        assertEquals(listOf(CLASSIC), cards(line("976003 9900 123455")))
+        assertEquals(listOf(CLASSIC_2), cards(line("9760 0377", y = 0f), line("0054 3211", y = 30f)))
+    }
+
+    @Test
+    fun misreadClassicOverTwoLinesProposesNothingInsteadOfAPhone() {
+        assertEquals(emptyList(), read(line("9760 0399", y = 0f), line("5123 4567", y = 30f)))
     }
 
     @Test

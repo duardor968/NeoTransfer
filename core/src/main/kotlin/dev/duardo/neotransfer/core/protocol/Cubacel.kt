@@ -16,7 +16,7 @@ enum class CubacelQueryKind(val code: String) {
 /** A Cubacel query; the reply text is the answer. */
 @Serializable @SerialName("cubacel.query")
 data class CubacelQuery(val kind: CubacelQueryKind) : CubacelRequest {
-    override fun commands(secret: CharArray?, at: Instant, seed: Int?) = listOf(UssdCommand(null, kind.code, UssdTransport.REQUEST))
+    override fun commands(secret: CharArray?, at: Instant, seed: Int?, newKey: CharArray?) = listOf(UssdCommand(null, kind.code, UssdTransport.REQUEST))
 }
 
 /** Transfer phone balance: `*234*1*<móvil>*<clave>*<monto>#`, whole CUP, 4-digit transfer key. */
@@ -28,7 +28,7 @@ data class CubacelTransfer(val phone: String, val amount: Int) : CubacelRequest 
     }
     override val secret get() = SecretKind.CUBACEL_PIN
     override val duplicateKey get() = "234|${Phones.normalize(phone)}|$amount"
-    override fun commands(secret: CharArray?, at: Instant, seed: Int?): List<UssdCommand> {
+    override fun commands(secret: CharArray?, at: Instant, seed: Int?, newKey: CharArray?): List<UssdCommand> {
         require(secret != null && secret.size == 4 && secret.all { it in '0'..'9' }) { "La clave de transferencia tiene 4 dígitos" }
         return listOf(UssdCommand(234, "*234*1*$phone*${String(secret)}*$amount#", UssdTransport.REQUEST))
     }

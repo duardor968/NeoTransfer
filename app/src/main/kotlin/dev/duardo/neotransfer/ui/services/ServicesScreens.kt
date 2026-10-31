@@ -20,10 +20,14 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -35,18 +39,27 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.duardo.neotransfer.designsystem.R as Ds
+import dev.duardo.neotransfer.designsystem.component.EmptyState
 import dev.duardo.neotransfer.designsystem.component.GroupDivider
 import dev.duardo.neotransfer.designsystem.component.IconAvatar
+import dev.duardo.neotransfer.designsystem.component.NameAvatar
+import dev.duardo.neotransfer.designsystem.component.NeoSearchField
+import dev.duardo.neotransfer.designsystem.component.groupItem
+import dev.duardo.neotransfer.designsystem.format.formatPhone
 import dev.duardo.neotransfer.designsystem.component.MoneyText
 import dev.duardo.neotransfer.designsystem.component.NeoAmountField
+import dev.duardo.neotransfer.designsystem.component.NeoBottomSheet
 import dev.duardo.neotransfer.designsystem.component.NeoButton
 import dev.duardo.neotransfer.designsystem.component.NeoChip
+import dev.duardo.neotransfer.designsystem.component.NeoCodeField
+import dev.duardo.neotransfer.designsystem.component.NeoConfirmSheet
 import dev.duardo.neotransfer.designsystem.component.NeoGroup
 import dev.duardo.neotransfer.designsystem.component.NeoIconButton
 import dev.duardo.neotransfer.designsystem.component.NeoRow
@@ -65,11 +78,14 @@ import dev.duardo.neotransfer.designsystem.theme.NeoRadius
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
 import dev.duardo.neotransfer.ui.common.PhoneTransformation
 import dev.duardo.neotransfer.ui.common.SourceCardPicker
-import dev.duardo.neotransfer.ui.common.SwitchRow
+import dev.duardo.neotransfer.ui.transfer.RecentChip
 import dev.duardo.neotransfer.ui.common.icon
 import dev.duardo.neotransfer.ui.model.CubacelQuery
 import dev.duardo.neotransfer.ui.model.CubacelUi
 import dev.duardo.neotransfer.ui.model.FieldInput
+import dev.duardo.neotransfer.ui.model.PhonePickUi
+import dev.duardo.neotransfer.ui.model.PhoneTargetUi
+import dev.duardo.neotransfer.ui.model.SavedEditUi
 import dev.duardo.neotransfer.ui.model.SavedReferenceUi
 import dev.duardo.neotransfer.ui.model.ServiceFormUi
 import dev.duardo.neotransfer.ui.model.ServiceKind
@@ -135,12 +151,12 @@ private fun SavedTile(reference: SavedReferenceUi, modifier: Modifier, onClick: 
     ) {
         IconAvatar(reference.kind.icon, size = 40.dp)
         Spacer(Modifier.height(NeoSpace.m).weight(1f, fill = false))
-        Text(reference.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        // A Nauta account under a Nauta tile needs no domain; references are identifiers and never wrap.
+        Text(reference.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        // A Nauta account under a Nauta tile needs no domain; references are identifiers: they shrink, never wrap or cut.
         reference.value.takeIf { it.isNotEmpty() }?.let {
             Text(
                 it.removeSuffix("@nauta.com.cu"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                softWrap = false, autoSize = TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = MaterialTheme.typography.bodySmall.fontSize),
             )
         }
         // The amount never splits; when the line is short it goes under its label.
@@ -163,8 +179,14 @@ interface ServiceFormActions {
     fun scan(fieldId: String)
     fun amount(value: String)
     fun source(index: Int)
-    fun saveReference(value: Boolean)
     fun submit()
+    fun editSaved()
+    fun savedName(value: String)
+    fun saveSaved()
+    fun closeSaved()
+    fun removeSaved()
+    fun confirmRemoveSaved()
+    fun cancelRemoveSaved()
 }
 
 /** One form for every service: saved references on top, the fields the bank asks for, the amount and the card. */
@@ -175,7 +197,11 @@ fun ServiceFormScreen(state: ServiceFormUi, actions: ServiceFormActions, modifie
     Scaffold(
         modifier.imePadding(),
         containerColor = MaterialTheme.colorScheme.background,
-        topBar = { NeoTopBar(state.title, onBack = actions::back) },
+        topBar = {
+            NeoTopBar(state.title, onBack = actions::back, actions = {
+                if (state.saved) NeoIconButton(Ds.drawable.ic_edit, "Editar guardado", actions::editSaved)
+            })
+        },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             Column(
@@ -194,19 +220,18 @@ fun ServiceFormScreen(state: ServiceFormUi, actions: ServiceFormActions, modifie
                     state.choices.forEachIndexed { index, choice -> NeoChip(choice, index == state.choice, { actions.choice(index) }) }
                 }
                 state.fields.forEach { field ->
+                    if (field.input == FieldInput.Secret) {
+                        NeoCodeField(field.value, { actions.field(field.id, it) }, field.length, field.label, error = field.error)
+                        return@forEach
+                    }
                     NeoTextField(
                         field.value, { actions.field(field.id, it) }, field.label,
                         keyboardType = when (field.input) {
-                            FieldInput.Number -> KeyboardType.Number
                             FieldInput.Phone -> KeyboardType.Phone
-                            FieldInput.Secret -> KeyboardType.NumberPassword
                             FieldInput.Text -> KeyboardType.Text
+                            else -> KeyboardType.Number
                         },
-                        visualTransformation = when (field.input) {
-                            FieldInput.Secret -> PasswordVisualTransformation()
-                            FieldInput.Phone -> PhoneTransformation
-                            else -> VisualTransformation.None
-                        },
+                        visualTransformation = if (field.input == FieldInput.Phone) PhoneTransformation else VisualTransformation.None,
                         error = field.error,
                         suffix = field.suffix,
                         trailing = if (field.scannable) ({ NeoIconButton(Ds.drawable.ic_photo_camera, "Escanear móvil", { actions.scan(field.id) }) }) else null,
@@ -214,11 +239,40 @@ fun ServiceFormScreen(state: ServiceFormUi, actions: ServiceFormActions, modifie
                 }
                 if (state.amount != null) NeoAmountField(state.amount, actions::amount, state.currency) else WholeBill()
                 if (state.cards.isNotEmpty()) SourceCardPicker(state.cards, state.source, actions::source, label = "Desde")
-                state.saveReference?.let { save -> SwitchRow("Guardar referencia", save, actions::saveReference) }
             }
             BottomAction {
                 NeoButton(state.action, actions::submit, enabled = state.canContinue, icon = if (state.cards.isNotEmpty()) Ds.drawable.ic_fingerprint else null)
             }
+        }
+    }
+    state.edit?.let { edit ->
+        if (edit.removing) NeoConfirmSheet(
+            title = "¿Quitar de Guardados?",
+            text = "Vuelve a aparecer si lo pagas otra vez.",
+            confirm = "Quitar",
+            dismiss = "Cancelar",
+            onConfirm = actions::confirmRemoveSaved,
+            onDismiss = actions::cancelRemoveSaved,
+            destructive = true,
+        ) else SavedSheet(edit, actions)
+    }
+}
+
+/** A saved reference: the name it shows in Guardados, or none, and the way out of Guardados. */
+@Composable
+private fun SavedSheet(edit: SavedEditUi, actions: ServiceFormActions) {
+    NeoBottomSheet(onDismissRequest = actions::closeSaved, title = "Editar guardado") {
+        Column(Modifier.padding(horizontal = NeoSpace.gutter), verticalArrangement = Arrangement.spacedBy(NeoSpace.l)) {
+            NeoTextField(edit.name, actions::savedName, "Nombre (opcional)", imeAction = ImeAction.Done)
+            NeoButton("Guardar", actions::saveSaved)
+        }
+        Column(Modifier.padding(horizontal = NeoSpace.xs).padding(top = NeoSpace.s)) {
+            NeoRow(
+                "Quitar de Guardados",
+                leading = { IconAvatar(Ds.drawable.ic_delete, tint = Neo.colors.danger) },
+                titleColor = Neo.colors.danger,
+                onClick = actions::removeSaved,
+            )
         }
     }
 }
@@ -232,6 +286,85 @@ private fun WholeBill() {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("Importe", Modifier.padding(start = NeoSpace.xxs), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("Factura completa", Modifier.padding(start = NeoSpace.xxs), style = MaterialTheme.typography.titleMedium)
+    }
+}
+
+// ---- Pick a mobile ------------------------------------------------------------------------------------------
+
+interface PhonePickActions {
+    fun back()
+    fun query(value: String)
+    fun scan()
+    fun pickTyped()
+    fun pick(target: PhoneTargetUi)
+}
+
+/** Which mobile a recharge or balance goes to: a recent one, a contact's or one typed or scanned. Like the transfer recipient. */
+@Composable
+fun PhonePickScreen(state: PhonePickUi, actions: PhonePickActions, modifier: Modifier = Modifier) {
+    Scaffold(
+        modifier.imePadding(),
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = { NeoTopBar(state.title, onBack = actions::back) },
+    ) { padding ->
+        LazyColumn(
+            Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(bottom = NeoSpace.xxl),
+        ) {
+            item(key = "search") {
+                Column(Modifier.padding(horizontal = NeoSpace.gutter), verticalArrangement = Arrangement.spacedBy(NeoSpace.s)) {
+                    NeoSearchField(
+                        state.query, actions::query, "Nombre o número de móvil",
+                        emptyAction = { NeoIconButton(Ds.drawable.ic_photo_camera, "Escanear móvil", actions::scan, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                        visualTransformation = if (state.query.isNotEmpty() && state.query.all(Char::isDigit)) PhoneTransformation else VisualTransformation.None,
+                    )
+                    state.typedError?.let { Text(it, Modifier.padding(start = NeoSpace.xxs), style = MaterialTheme.typography.bodySmall, color = Neo.colors.danger) }
+                }
+            }
+            if (state.recent.isNotEmpty()) item(key = "recent") {
+                Column(Modifier.padding(top = NeoSpace.l)) {
+                    SectionHeader("Recientes", Modifier.padding(horizontal = NeoSpace.gutter))
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = NeoSpace.gutter),
+                        horizontalArrangement = Arrangement.spacedBy(NeoSpace.s),
+                    ) {
+                        items(state.recent, key = { it.phone }) { target ->
+                            // A saved name can be "Mi móvil": two words on two lines, not the first one alone.
+                            val label = target.name?.split(' ')?.take(2)?.joinToString("\n") ?: formatPhone(target.phone)
+                            RecentChip(target.name, label, Ds.drawable.ic_smartphone) { actions.pick(target) }
+                        }
+                    }
+                }
+            }
+            val typed = state.typed
+            if (state.query.isBlank() && state.recent.isEmpty() && state.contacts.isEmpty()) item(key = "empty") {
+                EmptyState(Ds.drawable.ic_contacts, "Sin contactos con móvil")
+            }
+            val count = state.contacts.size + if (typed != null) 1 else 0
+            if (count > 0) {
+                item(key = "contacts-title") {
+                    if (state.contacts.isNotEmpty()) SectionHeader("Contactos", Modifier.padding(horizontal = NeoSpace.gutter).padding(top = NeoSpace.l))
+                    else Spacer(Modifier.height(NeoSpace.l))
+                }
+                if (typed != null) item(key = "typed") {
+                    Column(Modifier.padding(horizontal = NeoSpace.gutter).groupItem(0, count)) {
+                        NeoRow(formatPhone(typed), supporting = "Número nuevo", leading = { IconAvatar(Ds.drawable.ic_smartphone) }, onClick = actions::pickTyped)
+                    }
+                }
+                val offset = if (typed != null) 1 else 0
+                itemsIndexed(state.contacts, key = { _, it -> "${it.name}|${it.phone}" }) { index, target ->
+                    Column(Modifier.padding(horizontal = NeoSpace.gutter).groupItem(index + offset, count)) {
+                        if (index + offset > 0) GroupDivider()
+                        NeoRow(
+                            target.name.orEmpty(),
+                            supporting = formatPhone(target.phone),
+                            leading = { NameAvatar(target.name.orEmpty()) },
+                            onClick = { actions.pick(target) },
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

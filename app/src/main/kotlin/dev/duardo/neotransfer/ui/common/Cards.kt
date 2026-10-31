@@ -8,15 +8,19 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -28,6 +32,7 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -41,10 +46,12 @@ import dev.duardo.neotransfer.designsystem.card.CardAspectRatio
 import dev.duardo.neotransfer.designsystem.card.CardFace
 import dev.duardo.neotransfer.designsystem.card.CardFaceLayout
 import dev.duardo.neotransfer.designsystem.card.CardPrint
+import dev.duardo.neotransfer.designsystem.card.CardShape
 import dev.duardo.neotransfer.designsystem.component.StatusChip
 import dev.duardo.neotransfer.designsystem.component.StatusTone
 import dev.duardo.neotransfer.designsystem.component.pressScale
 import dev.duardo.neotransfer.designsystem.component.rim
+import dev.duardo.neotransfer.designsystem.format.NoBreak
 import dev.duardo.neotransfer.designsystem.format.formatCardNumber
 import dev.duardo.neotransfer.designsystem.theme.Neo
 import dev.duardo.neotransfer.designsystem.theme.NeoRadius
@@ -78,12 +85,24 @@ private val BanmetPrint = CardFaceLayout(
     expiry = CardPrint(x = 0.309f, baseline = 0.905f, size = 0.041f, maxWidth = 0.45f),
 )
 
+/**
+ * Fincimex's Clásica is impersonal: no holder and no currency, the number on its gold band and «VENCE:» already in
+ * the art. The app does not know its expiry, so it prints the number only.
+ */
+private val ClassicPrint = CardFaceLayout(
+    number = CardPrint(x = 0.446f, baseline = 0.809f, size = 0.0535f, maxWidth = 0.53f),
+    holder = null,
+    currency = null,
+    expiry = null,
+)
+
 @get:DrawableRes
 val Bank.art: Int
     get() = when (this) {
         Bank.BPA -> R.drawable.card_bpa_red
         Bank.BANDEC -> R.drawable.card_bandec_red
         Bank.BANMET -> R.drawable.card_banmet_red
+        Bank.CLASSIC -> R.drawable.card_clasica_red
     }
 
 /** The card's own colour, sampled from its art: the halo behind it in the wallet. */
@@ -92,6 +111,7 @@ val Bank.artColor: Color
         Bank.BPA -> Color(0xFF1E7A5E)
         Bank.BANDEC -> Color(0xFFCC2A45)
         Bank.BANMET -> Color(0xFF90D200)
+        Bank.CLASSIC -> Color(0xFF1F487B)
     }
 
 private val Bank.print: CardFaceLayout
@@ -99,6 +119,7 @@ private val Bank.print: CardFaceLayout
         Bank.BPA -> BpaPrint
         Bank.BANDEC -> BandecPrint
         Bank.BANMET -> BanmetPrint
+        Bank.CLASSIC -> ClassicPrint
     }
 
 /** The user's card, 1:1 with the plastic. */
@@ -124,16 +145,17 @@ private val Bank.logo: Int
         Bank.BPA -> R.drawable.bank_logo_bpa
         Bank.BANDEC -> R.drawable.bank_logo_bandec
         Bank.BANMET -> R.drawable.bank_logo_banmet
+        Bank.CLASSIC -> R.drawable.bank_logo_clasica
     }
 
 /**
  * What each bank prints its logo on: BPA's green logo on white, BANDEC's white logo on its red, Metropolitano's
- * black and white mark on its lime band.
+ * black and white mark on its lime band, the Clásica's gold lettering on its blue.
  */
 private val Bank.logoGround: Color
     get() = when (this) {
         Bank.BPA -> Color.White
-        Bank.BANDEC, Bank.BANMET -> artColor
+        Bank.BANDEC, Bank.BANMET, Bank.CLASSIC -> artColor
     }
 
 /** Heights that give the logos the same weight: BPA's heavy lettering goes smaller, Metropolitano's long name too. */
@@ -142,6 +164,7 @@ private val Bank.logoHeight: Dp
         Bank.BPA -> 44.dp
         Bank.BANDEC -> 56.dp
         Bank.BANMET -> 36.dp
+        Bank.CLASSIC -> 48.dp
     }
 
 /**
@@ -214,4 +237,46 @@ fun BankCardThumb(bank: Bank, modifier: Modifier = Modifier, width: Dp = 44.dp) 
             .border(1.dp, Neo.colors.divider, shape),
         contentScale = ContentScale.FillBounds,
     )
+}
+
+/** Someone else's card in a row: its bank's art when the number tells the bank, a blank card otherwise. */
+@Composable
+fun ForeignCardThumb(bank: Bank?, modifier: Modifier = Modifier, width: Dp = 44.dp) {
+    if (bank != null) return BankCardThumb(bank, modifier, width)
+    val shape = RoundedCornerShape(percent = 10)
+    Box(
+        modifier.width(width).aspectRatio(CardAspectRatio).clip(shape).background(Neo.colors.neutralContainer),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(painterResource(Ds.drawable.ic_credit_card), null, Modifier.size(width * 0.4f), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** Someone else's card as it will look: its bank's face once the number tells the bank, a blank card until then. */
+@Composable
+fun ForeignCardFace(number: String, bank: Bank?, currency: String?, modifier: Modifier = Modifier) {
+    if (bank != null) {
+        CardFace(
+            art = painterResource(bank.art),
+            layout = bank.print,
+            number = number,
+            currency = currency,
+            contentDescription = "Tarjeta ${bank.shortName} ${formatCardNumber(number)}",
+            modifier = modifier,
+            elevation = 6.dp,
+        )
+        return
+    }
+    BoxWithConstraints(
+        modifier.fillMaxWidth().aspectRatio(CardAspectRatio).clip(CardShape).background(Neo.colors.neutralContainer).clearAndSetSemantics { },
+    ) {
+        val print = BpaPrint.number
+        Text(
+            formatCardNumber(number).ifEmpty { List(4) { "••••" }.joinToString(NoBreak.toString()) },
+            Modifier.padding(start = maxWidth * print.x).align(Alignment.CenterStart),
+            style = MaterialTheme.typography.titleLarge.copy(fontSize = with(LocalDensity.current) { (maxWidth * print.size).toSp() }),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (number.isEmpty()) 0.4f else 1f),
+            maxLines = 1,
+        )
+    }
 }

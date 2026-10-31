@@ -1,20 +1,34 @@
 package dev.duardo.neotransfer.core.ledger
 
+import dev.duardo.neotransfer.core.model.Agency
 import dev.duardo.neotransfer.core.model.Bank
 import dev.duardo.neotransfer.core.model.Cards
+import dev.duardo.neotransfer.core.model.MiTransfer
 import dev.duardo.neotransfer.core.model.OwnCard
 import dev.duardo.neotransfer.core.model.Phones
+import dev.duardo.neotransfer.core.protocol.AccountsQuery
 import dev.duardo.neotransfer.core.protocol.Authenticate
 import dev.duardo.neotransfer.core.protocol.BalanceQuery
+import dev.duardo.neotransfer.core.protocol.BankRegistration
 import dev.duardo.neotransfer.core.protocol.BankRequest
 import dev.duardo.neotransfer.core.protocol.BankResponse
+import dev.duardo.neotransfer.core.protocol.CardAssociation
+import dev.duardo.neotransfer.core.protocol.ClassicAssociation
+import dev.duardo.neotransfer.core.protocol.ClassicBalanceQuery
+import dev.duardo.neotransfer.core.protocol.ClassicHistoryQuery
+import dev.duardo.neotransfer.core.protocol.ClassicQrPay
+import dev.duardo.neotransfer.core.protocol.ClassicTransfer
 import dev.duardo.neotransfer.core.protocol.Disconnect
 import dev.duardo.neotransfer.core.protocol.ElectricityBill
 import dev.duardo.neotransfer.core.protocol.HistoryQuery
+import dev.duardo.neotransfer.core.protocol.MiTransferAuthenticate
+import dev.duardo.neotransfer.core.protocol.MiTransferRegistration
+import dev.duardo.neotransfer.core.protocol.MiTransferRequest
 import dev.duardo.neotransfer.core.protocol.MobileRecharge
 import dev.duardo.neotransfer.core.protocol.NautaPayment
 import dev.duardo.neotransfer.core.protocol.NautaService
 import dev.duardo.neotransfer.core.protocol.PhoneBill
+import dev.duardo.neotransfer.core.protocol.PinChange
 import dev.duardo.neotransfer.core.protocol.QrPay
 import dev.duardo.neotransfer.core.protocol.Transfer
 import dev.duardo.neotransfer.core.protocol.UssdRequest
@@ -27,9 +41,12 @@ import dev.duardo.neotransfer.core.sms.SmsRecord
 import java.time.Duration
 import java.time.Instant
 
-/** The bank session the app believes valid: one bank at a time, 60 minutes from the `40`. */
-data class Session(val bank: Bank, val since: Instant) {
+/** The session the app believes valid: one bank or MiTransfer at a time, 60 minutes from the `40`. */
+data class Session(val agency: Agency, val since: Instant) {
     val until: Instant get() = since + Ledger.SESSION_TTL
+
+    /** Null when the session is MiTransfer's. */
+    val bank: Bank? get() = agency as? Bank
 }
 
 /**
@@ -48,13 +65,16 @@ class LedgerView internal constructor(
     /** When to evaluate again if nothing else happens (retry, acknowledgement or 15-minute deadline). */
     val wakeAt: Instant?,
     val session: Session?,
-    /** Banks whose saved key was rejected; nothing goes out for them until the key is saved again. */
-    val blockedBanks: Set<Bank>,
+    /** Banks and MiTransfer whose saved key was rejected; nothing goes out for them until the key is saved again. */
+    val blocked: Set<Agency>,
     /** Activity: receipts, then last-operations rows no receipt reported; newest first. Authentications never appear. */
     val movements: List<Movement>,
     /** Balance per own card number. */
     val balances: Map<String, CardBalance>,
 ) {
+    /** The banks among [blocked]. */
+    val blockedBanks: Set<Bank> get() = blocked.filterIsInstance<Bank>().toSet()
+
     fun status(id: String): OperationStatus? = operations.firstOrNull { it.operation.id == id }
 
     /**
@@ -70,6 +90,7 @@ class LedgerView internal constructor(
 /**
  * The operation book: a pure function of what was sent, what the bank answered by SMS, the
  * user's cards and the clock. Nothing waits on an SMS; the result applies whenever it arrives.
+ * It only ever sends on its own a `40` before a request that needs it, and resends only a query the bank found busy.
  */
 object Ledger {
     val ACK_TIMEOUT: Duration = Duration.ofSeconds(45)
@@ -88,15 +109,15 @@ object Ledger {
     /**
      * @param operations every stored operation, automatic authentications included
      * @param messages every ingested PAGOxMOVIL record (order does not matter)
-     * @param pinSavedAt when each bank key was last saved; clears a [LedgerView.blockedBanks] entry
+     * @param pinSavedAt when each bank or MiTransfer key was last saved; clears a [LedgerView.blocked] entry
      */
     fun evaluate(
         operations: List<Operation>, messages: List<SmsRecord>, cards: List<OwnCard>, now: Instant,
-        pinSavedAt: Map<Bank, Instant> = emptyMap(),
+        pinSavedAt: Map<out Agency, Instant> = emptyMap(),
     ): LedgerView {
         val sms = messages.distinctBy { it.id }.sortedWith(compareBy({ it.sentAt }, { it.id }))
         val book = Book(operations.sortedBy { it.createdAt }, sms, now)
-        val blocked = book.blockedBanks(pinSavedAt)
+        val blocked = book.blocked(pinSavedAt)
         val session = book.session()
         val statuses = book.ops.filter { it.unlocks == null }.map { OperationStatus(it, book.state(it, pinSavedAt)) }
         val activity = Activity(sms, book.operationOf, book.byId, cards)
@@ -104,11 +125,29 @@ object Ledger {
             activity.movements, activity.balances())
     }
 
+    /** The agency a `40` authenticates with; null for any other request. */
+    private fun authenticates(request: UssdRequest): Agency? = when (request) {
+        is Authenticate -> request.bank
+        is MiTransferAuthenticate -> MiTransfer
+        else -> null
+    }
+
+    private fun authentication(agency: Agency): UssdRequest = when (agency) {
+        is Bank -> Authenticate(agency)
+        is MiTransfer -> MiTransferAuthenticate
+    }
+
+    /** Queries the ledger may send once more when the bank was busy; never money nor a line service. */
+    private fun isQuery(request: UssdRequest) = request is BalanceQuery || request is HistoryQuery || request is AccountsQuery ||
+        request is ClassicBalanceQuery || request is ClassicHistoryQuery
+
     private sealed interface AuthStatus {
         data object Unsent : AuthStatus
         data object InFlight : AuthStatus
         data class Accepted(val at: Instant) : AuthStatus
         data class Failed(val detail: String?) : AuthStatus
+        /** The modem refused to send it ([reason]): nothing left the phone. */
+        data class NotSent(val reason: String) : AuthStatus
         data object Busy : AuthStatus
         data class Rejected(val at: Instant, val reason: String, val wrongPin: Boolean) : AuthStatus
     }
@@ -123,7 +162,7 @@ object Ledger {
         init { correlate() }
 
         private fun refused(op: Operation, attempt: Attempt) =
-            op.request is BankRequest && attempt.reply != null && BankResponse.parse(attempt.reply) == BankResponse.OTHER
+            op.request.agency != null && attempt.reply != null && BankResponse.parse(attempt.reply) == BankResponse.OTHER
 
         private fun usable(op: Operation, attempt: Attempt) = attempt.failure == null && !refused(op, attempt)
 
@@ -155,7 +194,11 @@ object Ledger {
                         val first = candidates.minBy { it.attempts.first().sentAt }
                         candidates.filter { it.request == first.request }
                     }
-                    message is SmsMessage.Rejected && message.operation == RejectedOperation.UNKNOWN -> listOfNotNull(candidates.singleOrNull())
+                    // What does not say what it answers goes only where it cannot be anything else.
+                    message is SmsMessage.Rejected && message.operation == RejectedOperation.UNKNOWN ||
+                        message is SmsMessage.WalletText || message is SmsMessage.BankText ||
+                        message is SmsMessage.Registration && message.agency == null ->
+                        listOfNotNull(candidates.singleOrNull())
                     else -> listOf(candidates.minWith(compareBy<Operation>({ !preferred(it.request, message) }, { busyMarked(it) },
                         { it.attempts.first().sentAt })))
                 }
@@ -185,7 +228,7 @@ object Ledger {
             }
             val last = auth.attempts.lastOrNull() ?: return AuthStatus.Unsent
             return when {
-                last.failure != null -> AuthStatus.Failed(last.failure)
+                last.failure != null -> AuthStatus.NotSent(last.failure)
                 last.reply == null -> if (now < last.sentAt + ACK_TIMEOUT) AuthStatus.InFlight else AuthStatus.Failed(null)
                 BankResponse.parse(last.reply) == BankResponse.OTHER -> AuthStatus.Failed(last.reply)
                 (auth.id to auth.attempts.lastIndex) in busy -> AuthStatus.Busy
@@ -193,102 +236,108 @@ object Ledger {
             }
         }
 
-        /** When the bank rejected the saved key ("Clave incorrecta" answering one of our `40`). */
-        val wrongPin: List<Pair<Bank, Instant>> = ops.filter { it.request is Authenticate }.mapNotNull { auth ->
-            (authStatus(auth) as? AuthStatus.Rejected)?.takeIf { it.wrongPin }?.let { (auth.request as Authenticate).bank to it.at }
+        /** When the bank or MiTransfer rejected the saved key ("Clave incorrecta" answering one of our `40`). */
+        val wrongPin: List<Pair<Agency, Instant>> = ops.mapNotNull { auth ->
+            val agency = authenticates(auth.request) ?: return@mapNotNull null
+            (authStatus(auth) as? AuthStatus.Rejected)?.takeIf { it.wrongPin }?.let { agency to it.at }
         }
 
-        /** Rejected keys block automatic authentication of that bank until the key is saved again. */
-        fun blockedBanks(pinSavedAt: Map<Bank, Instant>): Set<Bank> =
-            wrongPin.filter { (bank, at) -> pinSavedAt[bank]?.isAfter(at) != true }.mapTo(mutableSetOf()) { it.first }
+        /** Rejected keys block automatic authentication of that agency until the key is saved again. */
+        fun blocked(pinSavedAt: Map<out Agency, Instant>): Set<Agency> =
+            wrongPin.filter { (agency, at) -> pinSavedAt[agency]?.isAfter(at) != true }.mapTo(mutableSetOf()) { it.first }
 
         /**
-         * An unsent operation of a bank whose key was rejected after it was created, or while it was
+         * An unsent operation of an agency whose key was rejected after it was created, or while it was
          * created, never goes out later on its own: saving the key again does not revive it.
          */
-        fun stoppedByWrongPin(op: Operation, bank: Bank, pinSavedAt: Map<Bank, Instant>) = wrongPin.any { (rejected, at) ->
-            rejected == bank && (at >= op.createdAt || pinSavedAt[bank]?.let { it.isAfter(at) && it <= op.createdAt } != true)
+        fun stoppedByWrongPin(op: Operation, agency: Agency, pinSavedAt: Map<out Agency, Instant>) = wrongPin.any { (rejected, at) ->
+            rejected == agency && (at >= op.createdAt || pinSavedAt[agency]?.let { it.isAfter(at) && it <= op.createdAt } != true)
         }
 
         /**
-         * One active bank: a `40` accepted starts a session; sending a `40` for the other bank, a
+         * One session: a `40` accepted starts it; sending a `40` for another bank or MiTransfer, a
          * disconnect or a foreign authentication failure ends it; a foreign successful
          * authentication (made from another app) starts one too.
          */
         fun session(): Session? {
-            data class Event(val at: Instant, val bank: Bank?, val kind: Int) // 0 auth sent, 1 start, 2 end
+            data class Event(val at: Instant, val agency: Agency?, val kind: Int) // 0 auth sent, 1 start, 2 end
             val events = mutableListOf<Event>()
             for (op in ops) {
-                when (val request = op.request) {
-                    is Authenticate -> {
-                        op.attempts.forEach { events += Event(it.sentAt, request.bank, 0) }
-                        (authStatus(op) as? AuthStatus.Accepted)?.let { events += Event(it.at, request.bank, 1) }
-                        resolved[op.id]?.takeIf { it.message is SmsMessage.Authenticated }?.let { events += Event(it.sentAt, request.bank, 1) }
-                    }
-                    is Disconnect -> op.attempts.lastOrNull()?.takeIf { it.reply != null }?.let { events += Event(it.repliedAt ?: it.sentAt, null, 2) }
-                    else -> Unit
+                val agency = authenticates(op.request)
+                if (agency != null) {
+                    op.attempts.forEach { events += Event(it.sentAt, agency, 0) }
+                    (authStatus(op) as? AuthStatus.Accepted)?.let { events += Event(it.at, agency, 1) }
+                    resolved[op.id]?.takeIf { it.message is SmsMessage.Authenticated }?.let { events += Event(it.sentAt, agency, 1) }
+                } else if (op.request is Disconnect) {
+                    op.attempts.lastOrNull()?.takeIf { it.reply != null }?.let { events += Event(it.repliedAt ?: it.sentAt, null, 2) }
                 }
             }
             for (record in foreign) when (val message = record.message) {
-                is SmsMessage.Authenticated -> events += Event(record.sentAt, message.bank, 1)
-                is SmsMessage.AuthenticationFailed -> events += Event(record.sentAt, message.bank, 2)
+                is SmsMessage.Authenticated -> events += Event(record.sentAt, message.agency, 1)
+                is SmsMessage.AuthenticationFailed -> events += Event(record.sentAt, message.agency, 2)
                 else -> Unit
             }
             var session: Session? = null
             for (event in events.sortedWith(compareBy({ it.at }, { it.kind }))) {
                 session = when (event.kind) {
-                    0 -> session?.takeIf { it.bank == event.bank }
-                    1 -> Session(event.bank!!, event.at)
-                    else -> session?.takeUnless { event.bank == null || it.bank == event.bank }
+                    0 -> session?.takeIf { it.agency == event.agency }
+                    1 -> Session(event.agency!!, event.at)
+                    else -> session?.takeUnless { event.agency == null || it.agency == event.agency }
                 }
             }
             return session?.takeIf { now < it.until }
         }
 
-        fun state(op: Operation, pinSavedAt: Map<Bank, Instant>): OperationState {
+        fun state(op: Operation, pinSavedAt: Map<out Agency, Instant>): OperationState {
             resolved[op.id]?.let { record ->
                 return when (val message = record.message) {
                     is SmsMessage.Rejected -> OperationState.Rejected(record.sentAt, message.reason)
                     is SmsMessage.AuthenticationFailed -> OperationState.Rejected(record.sentAt, message.reason)
+                    // Unknown wording: shown as it came, neither a success nor a refusal.
+                    is SmsMessage.WalletText -> OperationState.Answered(record.sentAt, message.text)
+                    is SmsMessage.BankText -> OperationState.Answered(record.sentAt, message.text)
                     else -> OperationState.Confirmed(record.sentAt, message)
                 }
             }
             val request = op.request
+            val agency = request.agency
             val auths = authsFor(op.id)
             val last = op.attempts.lastOrNull()
             if (last == null) {
-                val bank = (request as? BankRequest)?.bank
-                val needsSession = (request as? BankRequest)?.needsSession == true
                 when (val auth = auths.lastOrNull()?.let(::authStatus)) {
                     is AuthStatus.Rejected -> return OperationState.NotExecuted(
                         if (auth.wrongPin) NotExecutedReason.WRONG_PIN else NotExecutedReason.AUTHENTICATION, auth.reason)
                     is AuthStatus.Failed -> return OperationState.NotExecuted(NotExecutedReason.AUTHENTICATION, auth.detail)
+                    is AuthStatus.NotSent -> return OperationState.NotExecuted(NotExecutedReason.SEND_FAILED, auth.reason)
                     AuthStatus.Busy -> if (auths.count { authStatus(it) == AuthStatus.Busy } >= 2) return OperationState.NotExecuted(NotExecutedReason.BUSY)
                     AuthStatus.Unsent, AuthStatus.InFlight, is AuthStatus.Accepted -> return OperationState.Sending
                     null -> Unit
                 }
-                if (needsSession && bank != null && stoppedByWrongPin(op, bank, pinSavedAt)) return OperationState.NotExecuted(NotExecutedReason.WRONG_PIN, "Clave incorrecta")
+                if (request.needsSession && agency != null && stoppedByWrongPin(op, agency, pinSavedAt)) {
+                    return OperationState.NotExecuted(NotExecutedReason.WRONG_PIN, "Clave incorrecta")
+                }
                 return OperationState.Queued
             }
             if (last.failure != null) return OperationState.NotExecuted(NotExecutedReason.SEND_FAILED, last.failure)
-            if (last.reply == null && now < last.sentAt + ACK_TIMEOUT) return OperationState.Sending
-            if (request !is BankRequest || request is Disconnect) {
+            // A dialed request has no acknowledgement to wait for: the system dialog took it.
+            if (last.reply == null && !request.dialed && now < last.sentAt + ACK_TIMEOUT) return OperationState.Sending
+            if (agency == null || request is Disconnect) {
                 return if (last.reply != null) OperationState.Answered(last.repliedAt ?: last.sentAt, last.reply)
                 else OperationState.NoResponse(last.sentAt + ACK_TIMEOUT)
             }
             if (refused(op, last)) return OperationState.NotExecuted(NotExecutedReason.REFUSED, last.reply)
             busy[op.id to op.attempts.lastIndex]?.let { record ->
-                val query = request is BalanceQuery || request is HistoryQuery
-                if (!query || op.attempts.size >= 2) return OperationState.NotExecuted(NotExecutedReason.BUSY)
+                if (!isQuery(request) || op.attempts.size >= 2) return OperationState.NotExecuted(NotExecutedReason.BUSY)
                 // The single retry may need a new `40`; if that one fails, or the key was rejected meanwhile, stop.
                 when (val auth = auths.lastOrNull { it.createdAt >= last.sentAt }?.let(::authStatus)) {
                     is AuthStatus.Rejected -> return OperationState.NotExecuted(
                         if (auth.wrongPin) NotExecutedReason.WRONG_PIN else NotExecutedReason.AUTHENTICATION, auth.reason)
                     is AuthStatus.Failed -> return OperationState.NotExecuted(NotExecutedReason.AUTHENTICATION, auth.detail)
+                    is AuthStatus.NotSent -> return OperationState.NotExecuted(NotExecutedReason.SEND_FAILED, auth.reason)
                     AuthStatus.Busy -> return OperationState.NotExecuted(NotExecutedReason.BUSY)
                     else -> Unit
                 }
-                if (stoppedByWrongPin(op, request.bank, pinSavedAt)) return OperationState.NotExecuted(NotExecutedReason.WRONG_PIN, "Clave incorrecta")
+                if (stoppedByWrongPin(op, agency, pinSavedAt)) return OperationState.NotExecuted(NotExecutedReason.WRONG_PIN, "Clave incorrecta")
                 return OperationState.Retrying(record.receivedAt + BUSY_RETRY_DELAY)
             }
             // The key turned out wrong after the operation already left: report the refusal on it.
@@ -299,18 +348,25 @@ object Ledger {
             return if (now < since + NO_RESPONSE_AFTER) OperationState.Sent(since) else OperationState.NoResponse(since + NO_RESPONSE_AFTER)
         }
 
-        /** One USSD in flight per SIM; the next leaves after the previous acknowledgement. */
+        /**
+         * One USSD in flight per SIM; the next leaves after the previous acknowledgement, or once an SMS answered it (a
+         * dialed request never has one).
+         */
         fun dispatch(statuses: List<OperationStatus>, session: Session?): Dispatch? {
-            if (ops.any { op -> op.attempts.lastOrNull()?.let { it.reply == null && it.failure == null && now < it.sentAt + ACK_TIMEOUT } == true }) return null
+            if (ops.any { op ->
+                    op.id !in resolved && (op.id to op.attempts.lastIndex) !in busy &&
+                        op.attempts.lastOrNull()?.let { it.reply == null && it.failure == null && now < it.sentAt + ACK_TIMEOUT } == true
+                }) return null
             val candidate = statuses.firstOrNull { (op, state) ->
                 (op.attempts.isEmpty() && (state == OperationState.Queued || state == OperationState.Sending)) ||
                     (state is OperationState.Retrying && state.at <= now)
             }?.operation ?: return null
             val request = candidate.request
-            if (request is BankRequest && request.needsSession && session?.bank != request.bank) {
+            val agency = request.agency
+            if (agency != null && request.needsSession && session?.agency != agency) {
                 val auths = authsFor(candidate.id)
                 auths.lastOrNull()?.takeIf { it.attempts.isEmpty() }?.let { return Dispatch(it, false) }
-                return Dispatch(Operation("${candidate.id}#auth${auths.size + 1}", Authenticate(request.bank), now, unlocks = candidate.id), true)
+                return Dispatch(Operation("${candidate.id}#auth${auths.size + 1}", authentication(agency), now, unlocks = candidate.id), true)
             }
             return Dispatch(candidate, false)
         }
@@ -328,23 +384,36 @@ object Ledger {
 
         /** For QR receipts, an operation whose transaction id agrees with "Id Compra" goes first. */
         private fun preferred(request: UssdRequest, message: SmsMessage): Boolean {
-            if (request !is QrPay || message !is SmsMessage.PaymentCompleted) return false
-            val purchase = message.purchaseId ?: return false
-            val id = request.payment.transactionId
+            val (purchase, id) = when {
+                request is QrPay && message is SmsMessage.PaymentCompleted -> message.purchaseId to request.payment.transactionId
+                request is ClassicQrPay && message is SmsMessage.WalletPaymentCompleted -> message.purchaseId to request.payment.transactionId
+                else -> return false
+            }
+            if (purchase == null) return false
             return purchase == id || id.endsWith(purchase) || purchase.endsWith(id)
         }
     }
 
     internal fun matches(request: UssdRequest, message: SmsMessage): Boolean = when (message) {
-        is SmsMessage.Authenticated -> request is Authenticate && request.bank == message.bank
-        is SmsMessage.AuthenticationFailed -> request is Authenticate && (message.bank == null || message.bank == request.bank)
-        is SmsMessage.Balance -> request is BalanceQuery && request.bank == message.bank
+        is SmsMessage.Authenticated -> authenticates(request) == message.agency
+        is SmsMessage.AuthenticationFailed -> authenticates(request)?.let { message.agency == null || message.agency == it } == true
+        is SmsMessage.Balance -> (request is BalanceQuery || request is AccountsQuery) && request.bank == message.bank
         is SmsMessage.History -> request is HistoryQuery && request.bank == message.bank
         is SmsMessage.TransferSent -> request is Transfer && request.bank == message.bank && request.amount == message.amount &&
             Cards.matches(message.beneficiaryMask, request.destination)
         is SmsMessage.PaymentCompleted -> request is QrPay && request.bank == message.bank && request.amount == message.amount
         is SmsMessage.ServicePaid -> request is BankRequest && request.bank == message.bank && servicePaid(request, message)
-        is SmsMessage.Rejected -> request is BankRequest && (message.bank == null || message.bank == request.bank) && rejection(request, message)
+        is SmsMessage.WalletTransferSent -> request is ClassicTransfer && request.amount == message.amount &&
+            Cards.matches(message.beneficiary, request.destination)
+        is SmsMessage.WalletPaymentCompleted -> request is ClassicQrPay && request.amount == message.amount
+        is SmsMessage.Registration -> (request is BankRegistration || request is MiTransferRegistration) &&
+            (message.agency == null || message.agency == request.agency)
+        // Money waits for a receipt or a refusal it can be sure of: unknown wording never closes it.
+        is SmsMessage.WalletText -> request is MiTransferRequest && request !is MiTransferAuthenticate &&
+            request !is ClassicTransfer && request !is ClassicQrPay
+        // Unknown bank wording answers a key change only, of the bank it names; naming none, only a lone one.
+        is SmsMessage.BankText -> request is PinChange && (message.bank == null || message.bank == request.bank)
+        is SmsMessage.Rejected -> request.agency != null && (message.agency == null || message.agency == request.agency) && rejection(request, message)
         else -> false
     }
 
@@ -366,10 +435,10 @@ object Ledger {
         }
     }
 
-    private fun rejection(request: BankRequest, message: SmsMessage.Rejected): Boolean = when (message.operation) {
-        RejectedOperation.BALANCE -> request is BalanceQuery
-        RejectedOperation.TRANSFER -> request is Transfer
-        RejectedOperation.PAYMENT -> request is QrPay
+    private fun rejection(request: UssdRequest, message: SmsMessage.Rejected): Boolean = when (message.operation) {
+        RejectedOperation.BALANCE -> request is BalanceQuery || request is AccountsQuery || request is ClassicBalanceQuery
+        RejectedOperation.TRANSFER -> request is Transfer || request is ClassicTransfer
+        RejectedOperation.PAYMENT -> request is QrPay || request is ClassicQrPay
         RejectedOperation.MOBILE_RECHARGE -> request is MobileRecharge &&
             (message.detail == null || Phones.normalize(message.detail) == Phones.normalize(request.phone))
         RejectedOperation.NAUTA_RECHARGE -> request is NautaPayment && request.service == NautaService.RECHARGE
@@ -378,7 +447,10 @@ object Ledger {
         RejectedOperation.ELECTRICITY -> request is ElectricityBill
         RejectedOperation.PHONE -> request is PhoneBill
         RejectedOperation.WATER -> request is WaterBill
-        RejectedOperation.CARD_ASSOCIATION, RejectedOperation.OTHER -> false
+        RejectedOperation.CARD_ASSOCIATION -> request is CardAssociation
+        RejectedOperation.REGISTRATION -> request is BankRegistration || request is MiTransferRegistration
+        RejectedOperation.CLASSIC_ASSOCIATION -> request is ClassicAssociation
+        RejectedOperation.OTHER -> false
         RejectedOperation.UNKNOWN -> true
     }
 }

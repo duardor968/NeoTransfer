@@ -5,6 +5,7 @@ import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import dev.duardo.neotransfer.designsystem.format.formatCardNumber
+import dev.duardo.neotransfer.designsystem.format.phoneSplit
 
 /** `9204123456789012` shown as `9204 1234 5678 9012` while the field keeps digits only. */
 val CardNumberTransformation = VisualTransformation { text ->
@@ -32,15 +33,16 @@ val ExpiryTransformation = VisualTransformation { text ->
     )
 }
 
-/** `53124578` shown as `5312 4578`, the way numbers are written everywhere else. */
+/** `53124578` shown as `5 3124578`, the way numbers are written everywhere else ([phoneSplit]). */
 val PhoneTransformation = VisualTransformation { text ->
     val d = text.text
-    val out = if (d.length > 4) d.substring(0, 4) + " " + d.substring(4) else d
+    val split = phoneSplit(d).takeIf { it in 1 until d.length } ?: 0
+    val out = if (split > 0) d.substring(0, split) + " " + d.substring(split) else d
     TransformedText(
         AnnotatedString(out),
         object : OffsetMapping {
-            override fun originalToTransformed(offset: Int) = if (offset > 4) offset + 1 else offset
-            override fun transformedToOriginal(offset: Int) = (if (offset > 4) offset - 1 else offset).coerceIn(0, d.length)
+            override fun originalToTransformed(offset: Int) = if (split > 0 && offset > split) offset + 1 else offset
+            override fun transformedToOriginal(offset: Int) = (if (split > 0 && offset > split) offset - 1 else offset).coerceIn(0, d.length)
         },
     )
 }

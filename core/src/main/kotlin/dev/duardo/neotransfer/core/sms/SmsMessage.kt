@@ -1,20 +1,23 @@
 package dev.duardo.neotransfer.core.sms
 
+import dev.duardo.neotransfer.core.model.Agency
 import dev.duardo.neotransfer.core.model.Bank
 import dev.duardo.neotransfer.core.model.Money
 import java.time.Instant
 import java.time.LocalDate
 
 /**
- * Meaning of one bank SMS: PAGOxMOVIL's, or a bank's own alert ([CardOperation]). Messages are backend data: the UI never shows their text.
+ * Meaning of one bank SMS: PAGOxMOVIL's (MiTransfer's included), or a bank's own alert ([CardOperation]). Messages are
+ * backend data: the UI never shows their text, except an unknown MiTransfer one ([WalletText]) and an unknown one that
+ * answers a key change ([BankText]).
  * Masks (`920406XXXXXX1234`) are kept as sent; balances written `DB x` in receipts are the balance x.
  */
 sealed interface SmsMessage {
     /** "Usted se ha autenticado…"; BANDEC names the card the session is on. */
-    data class Authenticated(val bank: Bank, val cardMask: String?) : SmsMessage
+    data class Authenticated(val agency: Agency, val cardMask: String?) : SmsMessage
 
     /** Authentication refused. [wrongPin] only for an explicit "Clave incorrecta". */
-    data class AuthenticationFailed(val bank: Bank?, val wrongPin: Boolean, val reason: String) : SmsMessage
+    data class AuthenticationFailed(val agency: Agency?, val wrongPin: Boolean, val reason: String) : SmsMessage
 
     /** "Usted tiene una solicitud en proceso…": the last request sent was not executed. */
     data object Busy : SmsMessage
@@ -51,8 +54,8 @@ sealed interface SmsMessage {
     /** Impersonal copy of a Nauta receipt ("Se ha pagado/recargado la cuenta …"). */
     data class ServiceNotice(val service: PaidService, val account: String, override val amount: Money, override val reference: String) : Receipt
 
-    /** The bank refused an operation; [reason] is ready to show. */
-    data class Rejected(val bank: Bank?, val operation: RejectedOperation, val reason: String, val detail: String? = null) : SmsMessage
+    /** The bank or MiTransfer refused an operation; [reason] is ready to show. */
+    data class Rejected(val agency: Agency?, val operation: RejectedOperation, val reason: String, val detail: String? = null) : SmsMessage
 
     /**
      * A bank's own alert of a card operation made outside the app ("BANDEC >> Operacion en Linea Sucursal por …"):
@@ -66,8 +69,30 @@ sealed interface SmsMessage {
     /** Cubacel phone balance received from another number; not bank money. */
     data class MobileBalanceReceived(val amount: Money, val fromPhone: String) : SmsMessage
 
-    /** Registration welcome; it carries secrets, so nothing is extracted. */
-    data object Registration : SmsMessage
+    /**
+     * "La operacion de registro fue completada": the welcome of a new registration, which carries the key and the card
+     * PIN in clear. Only the key is read, into [key]; the PIN is never read and nothing else of the text is kept.
+     */
+    data class Registration(val agency: Agency?, val key: ReceivedKey?) : SmsMessage
+
+    /** MiTransfer's transfer receipt (`Monedero Mi Transfer: La Transferencia fue completada…`): the beneficiary in full. */
+    data class WalletTransferSent(val beneficiary: String, override val amount: Money, override val reference: String) : Receipt
+
+    /** MiTransfer's purchase receipt (`Monedero Mi Transfer: Pago completado… Id Compra…`). */
+    data class WalletPaymentCompleted(val purchaseId: String?, override val amount: Money, override val reference: String) : Receipt
+
+    /**
+     * Any other MiTransfer SMS. Its templates are unknown, so the text is kept as it came, to show. It answers the one
+     * pending MiTransfer request it can belong to, never a money one.
+     */
+    data class WalletText(val text: String) : SmsMessage
+
+    /**
+     * Any other PAGOxMOVIL SMS: its wording is unknown, so the text is kept as it came; [bank] when it names one. It
+     * answers only a pending key change (`69`) of that bank, so that the person reads it and decides whether the change
+     * went through. It may carry the new key: the app masks it before keeping or showing the text.
+     */
+    data class BankText(val bank: Bank?, val text: String) : SmsMessage
 
     data object Unrecognized : SmsMessage
 }
@@ -82,12 +107,28 @@ enum class PaidService { NAUTA_RECHARGE, NAUTA_HOME, MOBILE_RECHARGE, ELECTRICIT
 
 enum class RejectedOperation {
     BALANCE, TRANSFER, PAYMENT, MOBILE_RECHARGE, NAUTA_RECHARGE, NAUTA_HOME, NAUTA_HOME_DEBT, ELECTRICITY, PHONE, WATER,
-    /** Card association (`60`); the app never sends it. */
+    /** Card association `60`. */
     CARD_ASSOCIATION,
+    /** Registration `49`. */
+    REGISTRATION,
+    /** A Clásica's association with MiTransfer, `111`. */
+    CLASSIC_ASSOCIATION,
     /** Out-of-scope operations (fixed-term deposits…). */
     OTHER,
     /** A refusal that does not say what it refuses. */
     UNKNOWN,
+}
+
+/**
+ * A key read from an SMS. It never prints; [take] hands the digits over once, for the app to store them encrypted
+ * and wipe them, and keeps nothing.
+ */
+class ReceivedKey internal constructor(digits: CharArray) {
+    private var digits: CharArray? = digits
+
+    @Synchronized fun take(): CharArray? = digits.also { digits = null }
+
+    override fun toString(): String = "ReceivedKey(****)"
 }
 
 /** One balance line. BANDEC gives the card mask and both balances; BPA only the available one. */

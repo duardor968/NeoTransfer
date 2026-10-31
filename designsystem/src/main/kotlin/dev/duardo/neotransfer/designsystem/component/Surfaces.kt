@@ -59,6 +59,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.text
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -129,6 +132,39 @@ fun FittedText(
         autoSize = TextAutoSize.StepBased(minFontSize = style.fontSize * minScale, maxFontSize = style.fontSize, stepSize = 0.5.sp),
     )
 }
+
+/**
+ * Data joined by « · » («BPA · CUP · Predeterminada»), side by side while they fit. The one that does not fit goes down
+ * to the next line without its dot, and one wider than the whole line breaks inside itself: a dot never ends or starts
+ * a line. A dot between no-break spaces belongs to its datum and never splits (the issuer, «BANDEC · CUP»).
+ * Accessibility reads [text] as given, one string.
+ */
+@Composable
+fun SeparatedText(
+    text: String,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+    color: Color = LocalContentColor.current,
+    textAlign: TextAlign? = null,
+) {
+    val resolved = style.copy(color = color, textAlign = textAlign ?: style.textAlign)
+    val parts = text.split(Separator)
+    if (parts.size == 1) {
+        BasicText(text, modifier, resolved)
+        return
+    }
+    val measurer = rememberTextMeasurer()
+    BoxWithConstraints(modifier.clearAndSetSemantics { this.text = AnnotatedString(text) }) {
+        val lines = mutableListOf(parts.first())
+        parts.drop(1).forEach { part ->
+            val joined = lines.last() + Separator + part
+            if (measurer.measure(joined, resolved).size.width <= constraints.maxWidth) lines[lines.lastIndex] = joined else lines += part
+        }
+        BasicText(lines.joinToString("\n"), style = resolved)
+    }
+}
+
+private const val Separator = " · "
 
 /** Modal sheet with the system's surface and handle. */
 @OptIn(ExperimentalMaterial3Api::class)

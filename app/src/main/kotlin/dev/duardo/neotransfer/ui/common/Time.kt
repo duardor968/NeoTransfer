@@ -37,8 +37,9 @@ class TimeLabels(private val clock: Clock) {
 
     fun clockTime(at: Instant): String = hourMinute.format(zoned(at))
 
-    /** "Hoy, 14:32", "Ayer, 09:10", "12 oct, 18:20". */
-    fun moment(at: Instant): String = "${shortDay(at).replaceFirstChar { it.uppercase() }}, ${clockTime(at)}"
+    /** "Hoy, 14:32", "Ayer, 09:10", "12 oct, 18:20"; only the day ("Hoy") when [dateOnly]. */
+    fun moment(at: Instant, dateOnly: Boolean = false): String =
+        shortDay(at).replaceFirstChar { it.uppercase() } + if (dateOnly) "" else ", ${clockTime(at)}"
 
     /** "hoy", "ayer", "12 oct", "12 oct 2025". */
     fun shortDay(at: Instant): String = when (val day = date(at)) {
@@ -54,8 +55,8 @@ class TimeLabels(private val clock: Clock) {
         else -> (if (day.year == today.year) weekdayLong.format(day) else dateLong.format(day)).replaceFirstChar { it.uppercase() }
     }
 
-    /** Full stamp for receipts: "13 de octubre de 2026, 14:32". */
-    fun stamp(at: Instant): String = "${dateLong.format(zoned(at))}, ${clockTime(at)}"
+    /** Full stamp for receipts: "13 de octubre de 2026, 14:32"; only the date when [dateOnly]. */
+    fun stamp(at: Instant, dateOnly: Boolean = false): String = dateLong.format(zoned(at)) + if (dateOnly) "" else ", ${clockTime(at)}"
 }
 
 val timeLabels: TimeLabels

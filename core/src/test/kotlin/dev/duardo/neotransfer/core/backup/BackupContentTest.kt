@@ -21,6 +21,7 @@ class BackupContentTest {
         cards = listOf(BackupCard(OwnCard("9204000000000001", Bank.BANDEC, alias = "Nómina"), "ANA PRUEBA", "03/29"), BackupCard(OwnCard("9205000000000001", Bank.BPA))),
         contacts = listOf(Contact("c1", "Ana Prueba", listOf("50000001"), listOf("9204990000000007"), mapOf("9204990000000007" to "Salario"))),
         services = listOf(ServiceReference(ServiceKind.NAUTA_HOME, "usuario@nauta.com.cu", "Casa"), ServiceReference(ServiceKind.ELECTRICITY, "0000000000001")),
+        classics = listOf("9760030000000001"),
     )
 
     @Test fun `format 4 round trip has no secret fields`() {

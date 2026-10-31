@@ -27,7 +27,8 @@ enum class OperationKind(val incoming: Boolean = false) {
 /** The other side of an operation, as identified by the bank's receipt. */
 @Immutable
 sealed interface CounterpartUi {
-    data class Card(val number: String, val bankName: String? = null) : CounterpartUi
+    /** [issuer]: `BANDEC · CUP`, as far as the number tells. */
+    data class Card(val number: String, val issuer: String? = null) : CounterpartUi
     data class Phone(val number: String) : CounterpartUi
     /** Service reference (client code, account, phone) or merchant payment ID. */
     data class Reference(val value: String) : CounterpartUi
@@ -35,7 +36,8 @@ sealed interface CounterpartUi {
 
 /**
  * A movement or an operation in flight. [title] is already human: contact name, merchant, saved reference
- * name, or the counterpart itself when nothing better is known.
+ * name, or the counterpart itself when nothing better is known. [dateOnly]: [at] is only its day, as the bank's last
+ * operations give it.
  */
 @Immutable
 data class OperationUi(
@@ -51,4 +53,5 @@ data class OperationUi(
     val reason: String? = null,
     val transactionId: String? = null,
     val balanceAfter: Money? = null,
+    val dateOnly: Boolean = false,
 )

@@ -1,7 +1,9 @@
 package dev.duardo.neotransfer.core.sms
 
+import dev.duardo.neotransfer.core.model.Agency
 import dev.duardo.neotransfer.core.model.Bank
 import dev.duardo.neotransfer.core.model.Currency
+import dev.duardo.neotransfer.core.model.MiTransfer
 import dev.duardo.neotransfer.core.model.Money
 import dev.duardo.neotransfer.core.sms.SmsMessage.*
 import java.text.Normalizer
@@ -11,7 +13,8 @@ import java.time.format.ResolverStyle
 
 /**
  * Reads PAGOxMOVIL bodies and BANDEC's own alerts. Tolerates accents, case, repeated spaces and line breaks, missing
- * "Fecha", and labels with or without colon. Unknown wording becomes [Unrecognized], never a guess.
+ * "Fecha", and labels with or without colon. Unknown wording is never guessed: a MiTransfer one becomes [WalletText],
+ * any other PAGOxMOVIL one [BankText], and a known kind that does not read, or a BANDEC alert, [Unrecognized].
  */
 object SmsParser {
     fun parse(body: String): SmsMessage {
@@ -19,10 +22,12 @@ object SmsParser {
             .replace(Regex("\\s+"), " ").trim()
         return when {
             text.startsWith("BANDEC >>", ignoreCase = true) -> cardOperation(text)
-            has(text, "operacion de registro fue completada") -> Registration
+            has(text, "operacion de registro fue completada") -> registration(text)
+            walletName.containsMatchIn(text) -> wallet(text, body.trim())
             has(text, "Usted se ha autenticado") -> authenticated(text)
-            has(text, "Error de autenticacion") || has(text, "AUTENTICACION HA FALLADO") || has(text, "Clave incorrecta") -> authenticationFailed(text)
+            authenticationFailure(text) -> AuthenticationFailed(bank(text), has(text, "Clave incorrecta"), authenticationReason(text))
             has(text, "solicitud en proceso") -> Busy
+            has(text, "ya tiene una cuenta asociada") -> Rejected(bank(text), RejectedOperation.REGISTRATION, "El teléfono ya tiene una cuenta asociada.")
             has(text, "Ultimas operaciones") -> history(text)
             has(text, "consulta de saldo fue completada") -> balance(text)
             rejection.containsMatchIn(text) -> rejected(text)
@@ -33,7 +38,7 @@ object SmsParser {
             has(text, "pago externo fue completado") -> externalPayment(text)
             has(text, "Se ha pagado la cuenta") || has(text, "Se ha recargado la cuenta") -> serviceNotice(text)
             has(text, "recibido una recarga de saldo movil") -> mobileBalance(text)
-            else -> serviceReceipt(text)
+            else -> serviceReceipt(text) ?: BankText(bank(text), body.trim())
         } ?: Unrecognized
     }
 
@@ -44,8 +49,10 @@ object SmsParser {
     private fun rx(pattern: String) = Regex(pattern, options)
     private fun has(text: String, phrase: String) = text.contains(phrase, ignoreCase = true)
 
-    private val rejection = rx("^(?:Banco [A-Za-z ]+?:? )?(?:Fallo|Error)\\b|vuelva a intentarlo")
+    private val rejection = rx("^(?:(?:Banco [A-Za-z ]+?|(?:Monedero|Bolsa) Mi Transfer):? )?(?:Fallo|Error)\\b|vuelva a intentarlo")
     private val bankName = rx("Banco:? (Popular de Ahorros?|BPA|Bandec|Metropolitano)\\b")
+    /** MiTransfer's prefix, `Monedero Mi Transfer:`, formerly `Bolsa Mi Transfer:` (TM g0xM9kQCsqu:239-244). */
+    private val walletName = rx("(?:Monedero|Bolsa) Mi Transfer\\b ?:?")
 
     private fun bank(text: String): Bank? = bankName.find(text)?.groupValues?.get(1)?.let(::bankOf)
 
@@ -88,9 +95,49 @@ object SmsParser {
         return Authenticated(bankOf(match.groupValues[1]), match.groupValues[2].ifEmpty { null })
     }
 
-    private fun authenticationFailed(text: String): SmsMessage {
-        val wrongPin = has(text, "Clave incorrecta")
-        return AuthenticationFailed(bank(text), wrongPin, if (wrongPin) "Clave incorrecta" else "No se pudo autenticar")
+    private fun authenticationFailure(text: String) =
+        has(text, "Error de autenticacion") || has(text, "AUTENTICACION HA FALLADO") || has(text, "Clave incorrecta")
+
+    private fun authenticationReason(text: String) = if (has(text, "Clave incorrecta")) "Clave incorrecta" else "No se pudo autenticar"
+
+    /**
+     * The key follows "Clave de Autenticacion" with the agency's length; the card PIN, later in the text, is never read.
+     * Without a key of that shape, [Registration.key] is null.
+     */
+    private fun registration(text: String): SmsMessage {
+        val agency: Agency? = if (walletName.containsMatchIn(text)) MiTransfer else bank(text)
+        val key = rx("Clave de Autenticacion ?:? ?([0-9]{4,5})(?![0-9])").find(text)?.groupValues?.get(1)
+            ?.takeIf { agency == null || it.length == agency.pinLength }
+        return Registration(agency, key?.let { ReceivedKey(it.toCharArray()) })
+    }
+
+    /**
+     * MiTransfer's SMS. Read: what Transfermóvil's own reader documents (transfer and purchase receipts) and the shared
+     * phrases of authentication, busy and refusals. Anything else is kept as [body], to show.
+     */
+    private fun wallet(text: String, body: String): SmsMessage = when {
+        has(text, "Usted se ha autenticado") -> Authenticated(MiTransfer, null)
+        authenticationFailure(text) -> AuthenticationFailed(MiTransfer, has(text, "Clave incorrecta"), authenticationReason(text))
+        has(text, "solicitud en proceso") -> Busy
+        // The wallet's own USD and CUP accounts (TM g0xM9kQCsqu:743-761) are out of scope.
+        has(text, "actualizacion de las cuentas virtuales") -> Unrecognized
+        rejection.containsMatchIn(text) -> rejected(text)
+        has(text, "La Transferencia fue completada") -> walletTransfer(text)
+        has(text, "Pago completado") -> walletPayment(text)
+        else -> null
+    } ?: WalletText(body)
+
+    /** TM g0xM9kQCsqu:282-293: the beneficiary goes unmasked. */
+    private fun walletTransfer(text: String): SmsMessage? {
+        val beneficiary = token(text, "Beneficiario")?.takeIf { it.matches(Regex("[0-9Xx*]{16}")) } ?: return null
+        val amount = labeled(text, "Monto") ?: return null
+        return WalletTransferSent(beneficiary, amount, reference(text) ?: return null)
+    }
+
+    /** TM g0xM9kQCsqu:334-384. */
+    private fun walletPayment(text: String): SmsMessage? {
+        val paid = labeled(text, "Importe pagado") ?: labeled(text, "Importe") ?: return null
+        return WalletPaymentCompleted(token(text, "Id Compra"), paid, reference(text) ?: return null)
     }
 
     private fun balance(text: String): SmsMessage? {
@@ -203,8 +250,9 @@ object SmsParser {
     }
 
     private fun rejected(text: String): SmsMessage {
-        val bank = bank(text)
-        fun r(operation: RejectedOperation, reason: String, detail: String? = null) = Rejected(bank, operation, reason, detail)
+        val fincimex = has(text, "tarjeta Fincimex")
+        val agency: Agency? = if (fincimex || walletName.containsMatchIn(text)) MiTransfer else bank(text)
+        fun r(operation: RejectedOperation, reason: String, detail: String? = null) = Rejected(agency, operation, reason, detail)
         rx("Fallo la recarga del movil ([0-9]+) alcanzo el monto limite de recarga permitido en ([0-9]+) dias \\($AMOUNT ?$UNIT\\),? puede recargar posterior al dia ([0-9-/]+)")
             .find(text)?.let {
                 return r(RejectedOperation.MOBILE_RECHARGE, "El móvil llegó al límite de recarga de ${it.groupValues[2]} días " +
@@ -212,6 +260,8 @@ object SmsParser {
             }
         return when {
             has(text, "consulta de saldo") -> r(RejectedOperation.BALANCE, "El banco no pudo consultar el saldo.")
+            // Seen in public in 2025, sender unknown: "Error en la asociacion de tarjeta Fincimex: No existe registro de la tarjeta."
+            fincimex -> r(RejectedOperation.CLASSIC_ASSOCIATION, humanize(text.replace(rx("^.*?tarjeta Fincimex ?:? ?"), "")))
             has(text, "asociacion de tarjeta") -> r(RejectedOperation.CARD_ASSOCIATION, humanize(text))
             has(text, "deuda de la cuenta Nauta Hogar") ->
                 r(RejectedOperation.NAUTA_HOME_DEBT, if (has(text, "no tiene deuda")) "La cuenta Nauta Hogar no tiene deuda." else humanize(text))
@@ -246,10 +296,10 @@ object SmsParser {
         val core = text
             .replace(rx("vuelva a intentarlo,? si persiste el problema,? contacte con (?:su proveedor de servicios|ETECSA)\\.?"), " ")
             .replace(rx("^(?:Fallo|Error) [^.:]*?[.:] ?(?=Banco )"), "")
-            .replace(bankName, " ").replace(Regex("^[ :.]+"), "")
+            .replace(bankName, " ").replace(walletName, " ").replace(Regex("^[ :.]+"), "")
             .replace(Regex("\\s+"), " ").trim().trimEnd('.')
         known[core.lowercase()]?.let { return it }
         val reason = core.ifEmpty { "El banco no pudo completar la operación" }
-        return reason.lowercase().replaceFirstChar { it.uppercase() } + "."
+        return reason.lowercase().split(". ").joinToString(". ") { it.replaceFirstChar(Char::uppercase) } + "."
     }
 }

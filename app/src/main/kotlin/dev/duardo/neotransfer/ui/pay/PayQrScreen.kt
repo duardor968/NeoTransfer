@@ -142,12 +142,12 @@ private fun Review(review: PayReviewUi, actions: PayQrActions) {
         if (review.amountEditable) {
             NeoAmountField(review.amountInput, actions::amount, review.currency)
         } else {
-            val amount = review.amountInput.toBigDecimalOrNull() ?: BigDecimal.ZERO
+            val amount = review.amountInput.replace(',', '.').toBigDecimalOrNull() ?: BigDecimal.ZERO
             MoneyText(amount, review.currency, style = MaterialTheme.typography.displayMedium, hero = true)
         }
         if (review.referenceEditable) NeoTextField(review.reference, actions::reference, review.referenceLabel)
         SourceCardPicker(review.sources, review.source, actions::source, label = "Desde")
-        val amount = review.amountInput.toBigDecimalOrNull()
+        val amount = review.amountInput.replace(',', '.').toBigDecimalOrNull()
         NeoButton(
             if (amount != null && amount.signum() > 0) "Pagar ${formatMoney(amount, review.currency)}" else "Pagar",
             actions::pay,

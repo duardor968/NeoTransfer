@@ -1,5 +1,6 @@
 package dev.duardo.neotransfer.core.ledger
 
+import dev.duardo.neotransfer.core.model.Agency
 import dev.duardo.neotransfer.core.model.Bank
 import dev.duardo.neotransfer.core.model.OwnCard
 import dev.duardo.neotransfer.core.protocol.SecretKind
@@ -16,7 +17,7 @@ class Phone(var cards: List<OwnCard>) {
     var now: Instant = Instant.parse("2026-10-15T10:00:00Z")
     val operations = mutableListOf<Operation>()
     private val messages = mutableListOf<SmsRecord>()
-    val pinSavedAt = mutableMapOf<Bank, Instant>()
+    val pinSavedAt = mutableMapOf<Agency, Instant>()
     /** Wire strings handed to the modem, in order. */
     val wire = mutableListOf<String>()
     /** Service numbers handed to the modem, in order. */
@@ -38,11 +39,13 @@ class Phone(var cards: List<OwnCard>) {
             val sending = dispatch.operation.sending(now)
             save(sending)
             val pin = when (sending.request.secret) {
-                SecretKind.BANK_PIN -> if ((sending.request as? dev.duardo.neotransfer.core.protocol.BankRequest)?.bank == Bank.BANDEC) "12345" else "1234"
+                SecretKind.BANK_PIN -> if (sending.request.agency == Bank.BANDEC) "12345" else "1234"
                 SecretKind.CUBACEL_PIN -> "1234"
+                SecretKind.COORDINATE -> "42"
                 null -> null
             }
-            sending.request.commands(pin?.toCharArray(), now, 0).forEach {
+            val newKey = sending.request.newKeyLength?.let { "9".repeat(it) }
+            sending.request.commands(pin?.toCharArray(), now, 0, newKey?.toCharArray()).forEach {
                 wire += it.valueForTransport()
                 sentRequests += sending.id to it.service
             }

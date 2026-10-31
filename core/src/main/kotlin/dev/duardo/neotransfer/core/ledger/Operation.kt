@@ -76,14 +76,17 @@ sealed interface OperationState {
     /** It never reached the bank (busy, refused, could not be sent or authenticated). Money can be retried by the user. */
     data class NotExecuted(val reason: NotExecutedReason, val detail: String? = null) : OperationState
 
-    /** USSD-only operations (Cubacel, disconnect): the reply text is the answer. */
+    /**
+     * USSD-only operations (Cubacel, disconnect): the reply text is the answer. Also a MiTransfer request other than money
+     * answered by an SMS of unknown wording: [text] is that SMS, to show as it came.
+     */
     data class Answered(val at: Instant, val text: String) : OperationState
 }
 
 enum class NotExecutedReason {
     /** "Usted tiene una solicitud en proceso…". */
     BUSY,
-    /** The modem could not send it. */
+    /** The modem could not send it, or the automatic `40` before it: nothing left the phone. */
     SEND_FAILED,
     /** The network answered without "siendo procesada". */
     REFUSED,

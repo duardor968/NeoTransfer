@@ -1,12 +1,11 @@
 package dev.duardo.neotransfer.app
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.duardo.neotransfer.core.model.Cards
-import dev.duardo.neotransfer.core.model.Money as CoreMoney
-import dev.duardo.neotransfer.core.protocol.Transfer
 import dev.duardo.neotransfer.core.qr.QrCode
 import dev.duardo.neotransfer.core.qr.QrContent
 import dev.duardo.neotransfer.designsystem.component.KeypadKey
@@ -16,6 +15,8 @@ import dev.duardo.neotransfer.scanner.QrVerdict
 import dev.duardo.neotransfer.scanner.ScanMode
 import dev.duardo.neotransfer.scanner.ScanResult
 import dev.duardo.neotransfer.ui.model.BalanceUi
+import dev.duardo.neotransfer.ui.model.Bank
+import dev.duardo.neotransfer.ui.model.ContactUi
 import dev.duardo.neotransfer.ui.model.CounterpartUi
 import dev.duardo.neotransfer.ui.model.DuplicateUi
 import dev.duardo.neotransfer.ui.model.Money
@@ -25,6 +26,7 @@ import dev.duardo.neotransfer.ui.model.RecipientUi
 import dev.duardo.neotransfer.ui.model.TransferAmountUi
 import dev.duardo.neotransfer.ui.model.TransferResultUi
 import dev.duardo.neotransfer.ui.model.TransferReviewUi
+import dev.duardo.neotransfer.ui.model.WalletCardUi
 import dev.duardo.neotransfer.ui.transfer.AmountActions
 import dev.duardo.neotransfer.ui.transfer.RecipientActions
 import dev.duardo.neotransfer.ui.transfer.RecipientScreen
@@ -62,8 +64,17 @@ class TransferFlow(val app: AppModel, sourceCard: String?) {
 
     fun amount(): BigDecimal? = input.toBigDecimalOrNull()?.takeIf { it.signum() > 0 && it.scale() <= 2 }
 
-    fun sourceIndex(book: Book): Int = book.wallet.indexOfFirst { it.card.id == source }.coerceAtLeast(0)
+    /** The cards that can send to the recipient ([Book.transferSources]). */
+    fun sources(book: Book): List<WalletCardUi> = recipient?.let { book.transferSources(it.card.number) }.orEmpty()
+
+    fun sourceIndex(book: Book): Int = sources(book).indexOfFirst { it.card.id == source }.coerceAtLeast(0)
+
+    /** Sending from a Clásica: only another Clásica can receive. */
+    fun classicOnly(book: Book): Boolean = (book.wallet.firstOrNull { it.card.id == source } ?: book.wallet.firstOrNull())?.card?.bank == Bank.CLASSIC
 }
+
+/** Why a Clásica cannot send to a bank card. */
+private const val CLASSIC_ONLY = "La Clásica solo transfiere a otra Clásica"
 
 class RecipientDestination(private val flow: TransferFlow) : Destination(), RecipientActions {
     private val app = flow.app
@@ -72,25 +83,41 @@ class RecipientDestination(private val flow: TransferFlow) : Destination(), Reci
 
     @Composable
     override fun Content(app: AppModel, book: Book) {
+        val classicOnly = flow.classicOnly(book)
         val digits = query.filter(Char::isDigit)
         val numeric = digits.isNotEmpty() && query.all { it.isDigit() || it == ' ' || it == '-' }
         val known = book.contacts.any { contact -> contact.cards.any { it.number == digits } }
-        val typed = if (numeric && digits.length == 16 && luhn(digits) && !known) book.foreignCard(digits) else null
+        val receives = !classicOnly || Cards.isClassic(digits)
+        val typed = if (numeric && digits.length == 16 && luhn(digits) && !known && receives) book.foreignCard(digits) else null
         val error = when {
             !numeric -> null
             digits.length > 16 -> "La tarjeta tiene 16 dígitos"
             digits.length == 16 && !luhn(digits) -> "Revisa el número"
+            digits.length == 16 && !receives -> CLASSIC_ONLY
             else -> null
         }
         // Everyone money went to, newest first, whether sent from here or from another app.
         val recent = if (query.isNotBlank()) emptyList() else book.activity.asSequence()
             .filter { it.kind == OperationKind.Transfer }
             .mapNotNull { (it.counterpart as? CounterpartUi.Card)?.number?.takeIf(Cards::isNumber) }
+            .filter { !classicOnly || Cards.isClassic(it) }
             .distinct().take(8).map { number -> recipientFor(book, number) }.toList()
         // People with a card; while searching, the rest of the address book too (its card is asked for when chosen).
-        val contacts = book.contacts.filter { (it.cards.isNotEmpty() || query.isNotBlank()) && it.matchesRecipient(query, digits) }
+        // From a Clásica, only their Clásicas: someone with bank cards alone is left out.
+        val contacts = book.contacts.mapNotNull { contact -> eligible(contact, classicOnly) }
+            .filter { (it.cards.isNotEmpty() || query.isNotBlank()) && it.matchesRecipient(query, digits) }
             .sortedBy { it.cards.isEmpty() }
-        RecipientScreen(RecipientPickUi(query, typed, error, recent, contacts, chooseCardOf?.let(book::contact)), this)
+        RecipientScreen(
+            RecipientPickUi(query, typed, error, recent, contacts, chooseCardOf?.let(book::contact)?.let { eligible(it, classicOnly) }),
+            this, classicOnly = classicOnly,
+        )
+    }
+
+    /** [contact] with the cards that can receive; null when it has cards and none can. */
+    private fun eligible(contact: ContactUi, classicOnly: Boolean): ContactUi? {
+        if (!classicOnly) return contact
+        val classics = contact.cards.filter { Cards.isClassic(it.number) }
+        return if (classics.isEmpty() && contact.cards.isNotEmpty()) null else contact.copy(cards = classics)
     }
 
     override fun back() { app.navigator.remove(this) }
@@ -118,10 +145,11 @@ class RecipientDestination(private val flow: TransferFlow) : Destination(), Reci
     override fun pick(recipient: RecipientUi) = choose(recipient)
 
     override fun pickContact(contactId: String) {
-        val contact = app.book.value.contact(contactId) ?: return
+        val book = app.book.value
+        val contact = book.contact(contactId)?.let { eligible(it, flow.classicOnly(book)) } ?: return
         when (contact.cards.size) {
-            0 -> app.navigator.push(ContactEditDestination(app, contactId) { saved ->
-                saved.cards.firstOrNull()?.let { number -> choose(RecipientUi(app.book.value.foreignCard(number, saved.labels[number]), saved.name, saved.id)) }
+            0 -> app.navigator.push(CardEditDestination(app, contactId) { saved ->
+                saved.cards.lastOrNull()?.let { number -> choose(RecipientUi(app.book.value.foreignCard(number, saved.labels[number]), saved.name, saved.id)) }
             })
             1 -> choose(RecipientUi(contact.cards.single(), contact.name, contact.id))
             else -> chooseCardOf = contactId
@@ -129,7 +157,8 @@ class RecipientDestination(private val flow: TransferFlow) : Destination(), Reci
     }
 
     override fun pickContactCard(contactId: String, cardId: String) {
-        val contact = app.book.value.contact(contactId) ?: return
+        val book = app.book.value
+        val contact = book.contact(contactId)?.let { eligible(it, flow.classicOnly(book)) } ?: return
         chooseCardOf = null
         contact.cards.firstOrNull { it.id == cardId }?.let { choose(RecipientUi(it, contact.name, contact.id)) }
     }
@@ -137,6 +166,7 @@ class RecipientDestination(private val flow: TransferFlow) : Destination(), Reci
     override fun closeCards() { chooseCardOf = null }
 
     private fun choose(recipient: RecipientUi) {
+        if (flow.classicOnly(app.book.value) && !Cards.isClassic(recipient.card.number)) return app.message(CLASSIC_ONLY)
         flow.recipient = recipient
         app.navigator.push(AmountDestination(flow))
     }
@@ -155,7 +185,7 @@ internal fun recipientFor(book: Book, number: String): RecipientUi {
     return RecipientUi(card, contact?.name, contact?.id)
 }
 
-private fun dev.duardo.neotransfer.ui.model.ContactUi.matchesRecipient(query: String, digits: String): Boolean =
+private fun ContactUi.matchesRecipient(query: String, digits: String): Boolean =
     query.isBlank() || name.contains(query.trim(), ignoreCase = true) || (digits.length >= 3 && cards.any { digits in it.number })
 
 class AmountDestination(private val flow: TransferFlow) : Destination(), AmountActions {
@@ -164,19 +194,28 @@ class AmountDestination(private val flow: TransferFlow) : Destination(), AmountA
     @Composable
     override fun Content(app: AppModel, book: Book) {
         val recipient = flow.recipient ?: return
+        val sources = flow.sources(book)
+        if (sources.isEmpty()) {
+            // A bank card chosen elsewhere (a contact's page) with only Clásicas to send from.
+            LaunchedEffect(Unit) {
+                app.message(CLASSIC_ONLY)
+                app.navigator.remove(this@AmountDestination)
+            }
+            return
+        }
         val index = flow.sourceIndex(book)
-        val wallet = book.wallet.getOrNull(index) ?: return
+        val wallet = sources[index]
         val amount = flow.amount()
         val balance = (wallet.balance as? BalanceUi.Known)?.money?.amount
         TransferAmountScreen(
-            TransferAmountUi(recipient, flow.input, wallet.card.currency, book.wallet, index, amount != null && balance != null && amount > balance, amount != null),
+            TransferAmountUi(recipient, flow.input, wallet.card.currency, sources, index, amount != null && balance != null && amount > balance, amount != null),
             this,
         )
     }
 
     override fun back() { app.navigator.remove(this) }
     override fun key(key: KeypadKey) { flow.input = typeAmount(flow.input, key) }
-    override fun source(index: Int) { flow.source = app.book.value.wallet.getOrNull(index)?.card?.id }
+    override fun source(index: Int) { flow.source = flow.sources(app.book.value).getOrNull(index)?.card?.id }
     override fun next() {
         if (flow.amount() != null) app.navigator.push(ReviewDestination(flow))
     }
@@ -206,7 +245,7 @@ class ReviewDestination(private val flow: TransferFlow) : Destination(), ReviewA
     @Composable
     override fun Content(app: AppModel, book: Book) {
         val recipient = flow.recipient ?: return
-        val card = book.wallet.getOrNull(flow.sourceIndex(book))?.card ?: return
+        val card = flow.sources(book).getOrNull(flow.sourceIndex(book))?.card ?: return
         val amount = flow.amount() ?: return
         TransferReviewUi(
             recipient, Money(amount, card.currency), card,
@@ -240,14 +279,18 @@ class ReviewDestination(private val flow: TransferFlow) : Destination(), ReviewA
 
     override fun cancelDuplicate() { duplicate = null }
 
-    private fun currency(): String = app.book.value.wallet.getOrNull(flow.sourceIndex(app.book.value))?.card?.currency ?: "CUP"
+    private fun currency(): String = app.book.value.let { book -> flow.sources(book).getOrNull(flow.sourceIndex(book))?.card?.currency } ?: "CUP"
 
+    /** The bank's transfer, or MiTransfer's between Clásicas when the card is one: the controller's `transferRequest`. */
     private suspend fun send(confirmed: Boolean) {
         val book = app.book.value
         val recipient = flow.recipient ?: return
-        val card = book.card(book.wallet.getOrNull(flow.sourceIndex(book))?.card?.id ?: return)?.card?.card ?: return
-        val request = Transfer(card.bank, app.controller.sourceFor(card.number), recipient.card.number,
-            CoreMoney(flow.amount() ?: return, card.currency), flow.notifyPhone)
+        val card = flow.sources(book).getOrNull(flow.sourceIndex(book))?.card ?: return
+        val request = try {
+            app.controller.transferRequest(card.number, recipient.card.number, flow.amount() ?: return, flow.notifyPhone)
+        } catch (e: IllegalArgumentException) {
+            return app.message(e.message ?: "No se pudo enviar")
+        }
         val save = recipient.contactId == null && flow.saveContact
         duplicate = app.submit(request, flow.first, confirmed) {
             if (save) app.navigator.push(ContactEditDestination(app, null, card = recipient.card.number))
@@ -255,11 +298,21 @@ class ReviewDestination(private val flow: TransferFlow) : Destination(), ReviewA
     }
 }
 
-/** The operation after the bank's acknowledgement, live: Enviada until the SMS turns it into its result. */
-class ResultDestination(private val app: AppModel, private val id: String) : Destination(), ResultActions {
+/**
+ * The operation after the bank's acknowledgement, live: Enviada until the SMS turns it into its result. One that is not
+ * money, or no longer in the app, gives way to where it is shown ([AppModel.show]).
+ */
+class ResultDestination(private val app: AppModel, private val id: String) : Destination(), ResultActions, Follows {
+    /** Only while it shows the item: what is not one gives way to where it is shown ([AppModel.show]). */
+    override fun follows(id: String) = id == this.id && app.book.value.item(id) != null
+
     @Composable
     override fun Content(app: AppModel, book: Book) {
-        val item = book.item(id) ?: return
+        val item = book.item(id)
+        if (item == null) {
+            LaunchedEffect(Unit) { if (app.book.value.item(id) == null) app.show(id, live = true, replacing = this@ResultDestination) }
+            return
+        }
         TransferResultScreen(TransferResultUi(item), this)
     }
 

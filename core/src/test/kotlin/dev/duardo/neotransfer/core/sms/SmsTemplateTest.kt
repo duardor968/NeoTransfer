@@ -2,13 +2,17 @@ package dev.duardo.neotransfer.core.sms
 
 import dev.duardo.neotransfer.core.model.Bank
 import dev.duardo.neotransfer.core.model.Currency
+import dev.duardo.neotransfer.core.model.MiTransfer
 import dev.duardo.neotransfer.core.model.Money
 import dev.duardo.neotransfer.core.sms.SmsMessage.*
+import java.math.BigDecimal
 import java.time.LocalDate
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /** Synthetic bodies written with the observed PAGOxMOVIL templates; no real numbers, names or amounts. */
 class SmsTemplateTest {
@@ -150,11 +154,56 @@ class SmsTemplateTest {
         assertEquals(Rejected(null, RejectedOperation.UNKNOWN, "Fallo la operacion."), unknown)
     }
 
+    @Test fun `registration hands the key over once and never reads the PIN`() {
+        val message = parse("Banco Bandec:  La operacion de registro fue completada. \n Bienvenido a Transfermovil. Clave de Autenticacion: 98765 \n " +
+            "El PIN asociado a su tarjeta 920400XXXXXX0001 es 43210.")
+        val registration = assertIs<Registration>(message)
+        assertEquals(Bank.BANDEC, registration.agency)
+        assertTrue("98765" !in message.toString() && "43210" !in message.toString())
+        val key = assertNotNull(registration.key)
+        assertEquals("98765", String(key.take()!!))
+        assertNull(key.take()) // handed over once: nothing stays behind
+        // A key of another length than the bank's, or none: nothing is read, and the PIN never is.
+        assertNull((parse("Banco Popular de Ahorro: La operacion de registro fue completada. Bienvenido a Transfermovil. Clave de Autenticacion: 98765 " +
+            "El PIN asociado a su tarjeta 9212XXXXXXXX0001 es 4321") as Registration).key)
+        assertNull((parse("Banco Bandec:  La operacion de registro fue completada. El PIN asociado a su tarjeta es 43210") as Registration).key)
+        assertEquals(Bank.BPA, (parse("Banco Popular de Ahorro: La operacion de registro fue completada. Clave de Autenticacion:1234.") as Registration)
+            .let { assertEquals("1234", String(it.key!!.take()!!)); it.agency })
+        // What the app stores instead of the body.
+        assertEquals(Registration(null, null), parse("La operacion de registro fue completada."))
+    }
+
+    @Test fun `MiTransfer reads what Transfermovil documents and keeps the rest to show`() {
+        fun usd(value: String) = Money(BigDecimal(value), Currency.USD)
+        // Transfermóvil's own reader (g0xM9kQCsqu:239-244, 282-293, 334-384).
+        assertEquals(WalletTransferSent("9760030000000002", usd("10.50"), "MT000TEST1"),
+            parse("Monedero Mi Transfer:  La Transferencia fue completada. \n Fecha: 15/10/2026 \n Beneficiario: 9760030000000002 \n Monto: 10.50 USD \n Nro. Transaccion: MT000TEST1"))
+        assertEquals(WalletPaymentCompleted("1000000001", usd("25.00"), "MT000TEST2"),
+            parse("Monedero Mi Transfer: Pago completado. \n Fecha: 15/10/2026 \n Entidad: Tienda \n Id Compra: 1000000001 \n Importe: 25.00 USD \n No. Transaccion: MT000TEST2"))
+        assertIs<WalletTransferSent>(parse("Bolsa Mi Transfer:  La Transferencia fue completada. Beneficiario: 9760030000000002 Monto: 1.00 USD Nro. Transaccion: MT000TEST3"))
+        // The shared phrases, under MiTransfer's prefix.
+        assertEquals(Authenticated(MiTransfer, null), parse("Monedero Mi Transfer: Usted se ha autenticado en la plataforma de pagos moviles."))
+        assertEquals(AuthenticationFailed(MiTransfer, true, "Clave incorrecta"), parse("Monedero Mi Transfer: Clave incorrecta Error de autenticacion, intente nuevamente."))
+        assertEquals(Rejected(MiTransfer, RejectedOperation.TRANSFER, "Fallo la transferencia. Saldo insuficiente."),
+            parse("Monedero Mi Transfer: Fallo la transferencia. SALDO INSUFICIENTE"))
+        // Unknown wording, the Clásica's balance included: kept as it came, to show.
+        val balance = "Monedero Mi Transfer: La consulta de saldo fue completada.\nTarjeta: 9760030000000001 Saldo: 120.00 USD"
+        assertEquals(WalletText(balance), parse("  $balance\n"))
+        assertEquals(Unrecognized, parse("Monedero Mi Transfer: La actualizacion de las cuentas virtuales fue completada. Informacion: x Id Transaccion: 1 ID TM: 2"))
+        // Seen in public in 2025, sender unknown.
+        assertEquals(Rejected(MiTransfer, RejectedOperation.CLASSIC_ASSOCIATION, "No existe registro de la tarjeta."),
+            parse("Error en la asociación de tarjeta Fincimex: No existe registro de la tarjeta."))
+        assertEquals(Rejected(MiTransfer, RejectedOperation.CLASSIC_ASSOCIATION, "No existe registro de la tarjeta. Tarjeta habiente no esta en el fichero."),
+            parse("Error en la asociación de tarjeta Fincimex: No existe registro de la tarjeta.\nTarjeta habiente no está en el fichero."))
+        assertEquals(Rejected(Bank.BANDEC, RejectedOperation.REGISTRATION, "El teléfono ya tiene una cuenta asociada."),
+            parse("Banco Bandec: EL TELEFONO YA TIENE UNA CUENTA ASOCIADA"))
+    }
+
     @Test fun otherMessages() {
         assertEquals(MobileBalanceReceived(cup("360"), "5350000002"),
             parse("Usted ha recibido una recarga de saldo movil por un monto de 360 CUP del numero 5350000002. Monto restante a recargar para el periodo: 0 CUP. Para conocer su saldo principal consultelo a traves del *222#"))
-        assertEquals(Registration, parse("Banco Bandec:  La operacion de registro fue completada. \n Bienvenido a Transfermovil.Clave de Autenticacion: X"))
-        assertEquals(Unrecognized, parse("Mensaje sin plantilla conocida"))
+        assertEquals(BankText(null, "Mensaje sin plantilla conocida"), parse("Mensaje sin plantilla conocida"))
+        assertEquals(BankText(Bank.BANDEC, "Banco Bandec: Operación sin plantilla 12345"), parse(" Banco Bandec: Operación sin plantilla 12345 "))
         assertNull(SmsRecord.from(1, "ETECSA", 1000, 0, "Usted se ha autenticado en el Banco Bandec"))
         val record = SmsRecord.from(7, "PAGOxMOVIL", 5_000, 1_000, "Usted tiene una solicitud en proceso")!!
         assertEquals(1_000, record.sentAt.toEpochMilli())

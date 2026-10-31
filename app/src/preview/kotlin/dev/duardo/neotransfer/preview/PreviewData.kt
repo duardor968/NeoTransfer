@@ -1,5 +1,6 @@
 package dev.duardo.neotransfer.preview
 
+import dev.duardo.neotransfer.designsystem.format.formatPhone
 import dev.duardo.neotransfer.ui.model.BalanceUi
 import dev.duardo.neotransfer.ui.model.Bank
 import dev.duardo.neotransfer.ui.model.CardUi
@@ -36,10 +37,10 @@ object PreviewData {
 
     fun cup(value: String) = Money(BigDecimal(value), "CUP")
 
-    val bpa = CardUi("bpa-1", Bank.BPA, "9212060123456781", "CUP", holder = "LAURA MENDEZ SOTO", expiry = "03/29")
-    val bandec = CardUi("bandec-1", Bank.BANDEC, "9205129987654325", "CUP", holder = "LAURA MENDEZ SOTO", expiry = "11/30")
-    val bpaUsd = CardUi("bpa-2", Bank.BPA, "9212060155520199", "USD")
-    val banmet = CardUi("banmet-1", Bank.BANMET, "9225959800000000", "CUP", holder = "LAURA MENDEZ SOTO", expiry = "10/28")
+    val bpa = CardUi("bpa-1", Bank.BPA, "9212120123456783", "CUP", holder = "LAURA MENDEZ SOTO", expiry = "03/29")
+    val bandec = CardUi("bandec-1", Bank.BANDEC, "9205069987654323", "CUP", holder = "LAURA MENDEZ SOTO", expiry = "11/30")
+    val bpaUsd = CardUi("bpa-2", Bank.BPA, "9225120155520196", "USD")
+    val banmet = CardUi("banmet-1", Bank.BANMET, "9205959800000003", "CUP", holder = "LAURA MENDEZ SOTO", expiry = "10/28")
 
     val wallet = listOf(
         WalletCardUi(bpa, BalanceUi.Known(cup("12480.50"), ago(5))),
@@ -50,20 +51,20 @@ object PreviewData {
     val juan = ContactUi(
         "c-juan", "Juan Carlos Pérez",
         listOf(
-            ForeignCardUi("jc-1", "9205990144718265", "BANDEC", "Salario"),
-            ForeignCardUi("jc-2", "9212333188042154", "BPA"),
+            ForeignCardUi("jc-1", "9204069901447185", Bank.BANDEC, "CUP", "Salario"),
+            ForeignCardUi("jc-2", "9212129931880423", Bank.BPA, "CUP"),
         ),
         listOf("53124578", "78302214"),
         last = LastMovementUi(OperationKind.Transfer, cup("1500.00"), ago(13 * DAY)),
     )
-    val maria = ContactUi("c-maria", "María Fernanda Ruiz", listOf(ForeignCardUi("mf-1", "9205770422901639", "BANDEC")), listOf("52981134"),
+    val maria = ContactUi("c-maria", "María Fernanda Ruiz", listOf(ForeignCardUi("mf-1", "9224069922901638", Bank.BANDEC, "CUP")), listOf("52981134"),
         fromAddressBook = true, last = LastMovementUi(OperationKind.Incoming, cup("300.00"), ago(17 * DAY)))
-    val carmen = ContactUi("c-carmen", "Abuela Carmen", listOf(ForeignCardUi("ca-1", "9225950003124472", "BANMET")), listOf("54417720"))
-    val yunior = ContactUi("c-yunior", "Yunior Castillo", listOf(ForeignCardUi("yc-1", "9205112233445565", "BANDEC")), listOf("52990127"),
+    val carmen = ContactUi("c-carmen", "Abuela Carmen", listOf(ForeignCardUi("ca-1", "9205959803124479", Bank.BANMET, "CUP")), listOf("54417720"))
+    val yunior = ContactUi("c-yunior", "Yunior Castillo", listOf(ForeignCardUi("yc-1", "9204069912334455", Bank.BANDEC, "CUP")), listOf("52990127"),
         fromAddressBook = true, last = LastMovementUi(OperationKind.Incoming, cup("10000.00"), ago(2 * DAY + 190)))
-    val daniela = ContactUi("c-daniela", "Daniela Ortiz", listOf(ForeignCardUi("do-1", "9212077700319588", "BPA")), listOf("58337102"),
+    val daniela = ContactUi("c-daniela", "Daniela Ortiz", listOf(ForeignCardUi("do-1", "9212129977003195", Bank.BPA, "CUP")), listOf("58337102"),
         fromAddressBook = true, last = LastMovementUi(OperationKind.MobileTopUp, cup("500.00"), ago(4 * DAY)))
-    val mama = ContactUi("c-mama", "Mamá", listOf(ForeignCardUi("ma-1", "9205440012003318", "BANDEC")), listOf("53019944"),
+    val mama = ContactUi("c-mama", "Mamá", listOf(ForeignCardUi("ma-1", "9244069900123318", Bank.BANDEC, "CUP")), listOf("53019944"),
         fromAddressBook = true, last = LastMovementUi(OperationKind.Transfer, cup("2000.00"), ago(40)))
     val rafael = ContactUi("c-rafael", "Rafael Torres", emptyList(), listOf("53660981"), fromAddressBook = true)
     val mario = ContactUi("c-mario", "Mario Almeida", emptyList(), listOf("52339054"), fromAddressBook = true)
@@ -86,7 +87,7 @@ object PreviewData {
     // Operations ------------------------------------------------------------------------------------------------
     val sentToJuan = OperationUi(
         "op-sent", OperationKind.Transfer, "Juan Carlos Pérez", OperationStatus.Sent, ago(1),
-        amount = cup("300.00"), card = bpa, counterpart = CounterpartUi.Card("9205990144718265", "BANDEC"), contactId = juan.id,
+        amount = cup("300.00"), card = bpa, counterpart = CounterpartUi.Card("9204069901447185", "BANDEC · CUP"), contactId = juan.id,
     )
     val notExecuted = OperationUi(
         "op-busy", OperationKind.Electricity, "Casa", OperationStatus.NotExecuted, ago(4),
@@ -95,7 +96,7 @@ object PreviewData {
     )
     val confirmedToMaria = OperationUi(
         "op-maria", OperationKind.Transfer, "María Fernanda Ruiz", OperationStatus.Confirmed, ago(52),
-        amount = cup("1500.00"), card = bpa, counterpart = CounterpartUi.Card("9205770422901639", "BANDEC"), contactId = maria.id,
+        amount = cup("1500.00"), card = bpa, counterpart = CounterpartUi.Card("9224069922901638", "BANDEC · CUP"), contactId = maria.id,
         transactionId = "TRF8826104173", balanceAfter = cup("12780.50"),
     )
     val incomingFromDaniela = OperationUi(
@@ -110,7 +111,7 @@ object PreviewData {
     )
     val rejectedToYunior = OperationUi(
         "op-rejected", OperationKind.Transfer, "Yunior Castillo", OperationStatus.Rejected, at(1, 18, 47),
-        amount = cup("5000.00"), card = bandec, counterpart = CounterpartUi.Card("9205112233445565", "BANDEC"), contactId = yunior.id,
+        amount = cup("5000.00"), card = bandec, counterpart = CounterpartUi.Card("9204069912334455", "BANDEC · CUP"), contactId = yunior.id,
         reason = "Saldo insuficiente",
     )
     val noResponseNauta = OperationUi(
@@ -131,7 +132,7 @@ object PreviewData {
     )
     val toUnknownCard = OperationUi(
         "op-card", OperationKind.Transfer, "9212 3331 8804 2154", OperationStatus.Confirmed, at(6, 10, 41),
-        amount = cup("120.00"), card = bpa, counterpart = CounterpartUi.Card("9212333188042154", "BPA"), transactionId = "TRF8825990345",
+        amount = cup("120.00"), card = bpa, counterpart = CounterpartUi.Card("9212129931880423", "BPA · CUP"), transactionId = "TRF8825990345",
     )
     /** BANDEC's own alert of a withdrawal at a branch. */
     val branchWithdrawal = OperationUi(
@@ -144,7 +145,7 @@ object PreviewData {
         OperationUi("op-yc-in", OperationKind.Incoming, "Yunior Castillo", OperationStatus.Confirmed, at(2, 11, 29),
             amount = cup("10000.00"), card = bandec, counterpart = CounterpartUi.Phone("52990127"), contactId = yunior.id),
         OperationUi("op-yc-out", OperationKind.Transfer, "Yunior Castillo", OperationStatus.Confirmed, at(44, 16, 5),
-            amount = cup("800.00"), card = bpa, counterpart = CounterpartUi.Card("9205112233445565", "BANDEC"), contactId = yunior.id),
+            amount = cup("800.00"), card = bpa, counterpart = CounterpartUi.Card("9204069912334455", "BANDEC · CUP"), contactId = yunior.id),
     )
 
     val inProgress = listOf(sentToJuan, notExecuted)
@@ -154,16 +155,42 @@ object PreviewData {
     )
     val recent = listOf(confirmedToMaria, incomingFromDaniela, qrCafe, rejectedToYunior, electricity)
 
-    const val receivePayload = "TRANSFERMOVIL_ETECSA,TRANSFERENCIA,9212060123456781,LAURA MENDEZ SOTO"
+    const val receivePayload = "TRANSFERMOVIL_ETECSA,TRANSFERENCIA,9212120123456783,LAURA MENDEZ SOTO"
     const val merchantPayload = "{\"id_transaccion\":\"CLE-00417\",\"importe\":480.0,\"moneda\":\"CUP\",\"numero_proveedor\":\"0001234\"}"
+
+    // The Clásica -----------------------------------------------------------------------------------------------
+    fun usd(value: String) = Money(BigDecimal(value), "USD")
+
+    /** A Clásica of Fincimex: `976003…`, always USD, no holder; its balance is MiTransfer's text as it came. */
+    val classic = CardUi("classic-1", Bank.CLASSIC, "9760030312345679", "USD")
+    val classicWallet = WalletCardUi(classic, BalanceUi.Text("Su saldo es 86.40 USD", ago(12)))
+    val elena = ContactUi(
+        "c-elena", "Elena Soto", listOf(ForeignCardUi("es-1", "9760030155200783", Bank.CLASSIC, "USD")), listOf("53774410"),
+        last = LastMovementUi(OperationKind.Transfer, usd("20.00"), ago(3 * DAY)),
+    )
+    val elenaRecipient = RecipientUi(elena.cards.first(), elena.name, elena.id)
+    val classicFuel = OperationUi(
+        "op-fuel", OperationKind.QrPayment, "Servicentro La Rotonda", OperationStatus.Confirmed, at(0, 9, 12),
+        amount = usd("18.00"), card = classic, counterpart = CounterpartUi.Reference("SLR-20931"), transactionId = "MT000P1",
+    )
+    val classicToElena = OperationUi(
+        "op-elena", OperationKind.Transfer, "Elena Soto", OperationStatus.Confirmed, at(3, 17, 40),
+        amount = usd("20.00"), card = classic, counterpart = CounterpartUi.Card("9760030155200783", "Clásica · USD"), contactId = elena.id,
+        transactionId = "MT000T1",
+    )
+    val classicRecent = listOf(classicFuel, classicToElena)
+
+    /** MiTransfer's last operations (`48`) in invented wording: the app shows them as they come, never as rows. */
+    const val classicHistoryText = "Ultimas operaciones de la tarjeta 9760XXXXXXXX5679: 15/10/2026 Pago Servicentro La Rotonda 18.00 USD; " +
+        "12/10/2026 Transferencia a 9760XXXXXXXX0783 20.00 USD; 08/10/2026 Transferencia recibida 50.00 USD."
 
     // Services --------------------------------------------------------------------------------------------------
     val references = listOf(
         SavedReferenceUi("ref-casa", ServiceKind.Electricity, "Casa", "01234567891", cup("387.10")),
         SavedReferenceUi("ref-abuela", ServiceKind.Electricity, "Casa de la abuela", "01987654320", cup("142.60")),
-        SavedReferenceUi("ref-fijo", ServiceKind.Landline, "Fijo de la casa", "760412233100481"),
+        SavedReferenceUi("ref-fijo", ServiceKind.Landline, "Fijo de la casa", "760412233100481", cup("155.40")),
         SavedReferenceUi("ref-hogar", ServiceKind.NautaHome, "Nauta Hogar", "laura.mendez.hogar", cup("1000.00")),
         SavedReferenceUi("ref-wifi", ServiceKind.NautaWifi, "Nauta", "laura.mendez@nauta.com.cu", cup("250.00")),
-        SavedReferenceUi("ref-movil", ServiceKind.MobileTopUp, "Mi móvil", "53124578", cup("500.00")),
+        SavedReferenceUi("ref-movil", ServiceKind.MobileTopUp, "Mi móvil", formatPhone("53124578"), cup("500.00")),
     )
 }

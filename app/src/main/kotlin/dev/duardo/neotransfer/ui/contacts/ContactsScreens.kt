@@ -1,9 +1,8 @@
 package dev.duardo.neotransfer.ui.contacts
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,12 +16,24 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.designsystem.R as Ds
@@ -40,11 +51,11 @@ import dev.duardo.neotransfer.designsystem.component.NeoTextButton
 import dev.duardo.neotransfer.designsystem.component.NeoTextField
 import dev.duardo.neotransfer.designsystem.component.NeoTopBar
 import dev.duardo.neotransfer.designsystem.component.SectionHeader
+import dev.duardo.neotransfer.designsystem.component.SeparatedText
 import dev.duardo.neotransfer.designsystem.component.TabHeader
 import dev.duardo.neotransfer.designsystem.component.flushEnd
 import dev.duardo.neotransfer.designsystem.component.flushStart
 import dev.duardo.neotransfer.designsystem.component.groupItem
-import dev.duardo.neotransfer.designsystem.format.NoBreak
 import dev.duardo.neotransfer.designsystem.format.formatCardNumber
 import dev.duardo.neotransfer.designsystem.format.formatMoney
 import dev.duardo.neotransfer.designsystem.format.formatPhone
@@ -52,17 +63,22 @@ import dev.duardo.neotransfer.designsystem.format.unbroken
 import dev.duardo.neotransfer.designsystem.theme.Neo
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
 import dev.duardo.neotransfer.ui.common.CardNumberTransformation
+import dev.duardo.neotransfer.ui.common.ForeignCardFace
+import dev.duardo.neotransfer.ui.common.ForeignCardThumb
 import dev.duardo.neotransfer.ui.common.OperationRow
 import dev.duardo.neotransfer.ui.common.PhoneTransformation
 import dev.duardo.neotransfer.ui.common.TimeLabels
 import dev.duardo.neotransfer.ui.common.timeLabels
 import dev.duardo.neotransfer.ui.model.AllContactsUi
+import dev.duardo.neotransfer.ui.model.CardEditUi
+import dev.duardo.neotransfer.ui.model.CardFieldUi
 import dev.duardo.neotransfer.ui.model.ContactEditUi
 import dev.duardo.neotransfer.ui.model.ContactUi
 import dev.duardo.neotransfer.ui.model.ContactsContent
 import dev.duardo.neotransfer.ui.model.ContactsUi
 import dev.duardo.neotransfer.ui.model.OperationKind
 import dev.duardo.neotransfer.ui.model.OperationUi
+import dev.duardo.neotransfer.ui.model.issuerOf
 import java.text.Normalizer
 
 // ---- List ---------------------------------------------------------------------------------------------------
@@ -126,7 +142,7 @@ fun ContactsScreen(state: ContactsUi, actions: ContactsActions, modifier: Modifi
                     }
                 }
                 is ContactsContent.Results -> {
-                    section("people", "Con movimientos", content.people) { PersonRow(it, labels) { actions.open(it.id) } }
+                    section("people", "Con tarjeta o movimientos", content.people) { PersonRow(it, labels) { actions.open(it.id) } }
                     section("others", if (state.addressBook) "En tu agenda" else "Contactos", content.others) { ContactRow(it) { actions.open(it.id) } }
                 }
                 ContactsContent.NoResults -> item(key = "none") { EmptyState(Ds.drawable.ic_search, "Nada coincide con la búsqueda") }
@@ -154,10 +170,10 @@ private fun PersonRow(contact: ContactUi, labels: TimeLabels, onClick: () -> Uni
         contact.name,
         leading = { NameAvatar(contact.name) },
         supportingContent = {
-            Text(
-                last?.let { "${it.kind.verb()}${it.amount?.let { a -> " " + formatMoney(a.amount, a.currency).unbroken() }.orEmpty()}$NoBreak· " + labels.shortDay(it.at).unbroken() }
+            SeparatedText(
+                last?.let { "${it.kind.verb()}${it.amount?.let { a -> " " + formatMoney(a.amount, a.currency).unbroken() }.orEmpty()} · " + labels.shortDay(it.at).unbroken() }
                     ?: "Tarjeta guardada",
-                style = MaterialTheme.typography.bodyMedium,
+                MaterialTheme.typography.bodyMedium,
                 color = if (last?.kind?.incoming == true) Neo.colors.positive else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         },
@@ -183,7 +199,7 @@ private fun ContactRow(contact: ContactUi, onClick: () -> Unit) {
 private fun ContactUi.summary(): String? {
     val card = cards.firstOrNull() ?: return phones.firstOrNull()?.let(::formatPhone)
     val more = cards.size - 1
-    return formatCardNumber(card.number) + if (more > 0) "$NoBreak· " + "${more + 1} tarjetas".unbroken() else ""
+    return formatCardNumber(card.number) + if (more > 0) " · " + "${more + 1} tarjetas".unbroken() else ""
 }
 
 // ---- Everyone -----------------------------------------------------------------------------------------------
@@ -234,14 +250,17 @@ private fun initialOf(name: String): String {
     return if (first in 'A'..'Z') first.toString() else "#"
 }
 
-// ---- Detail -------------------------------------------------------------------------------------------------
+/// ---- Detail -------------------------------------------------------------------------------------------------
 
 interface ContactActions {
     fun back()
-    /** The whole contact; only its cards for someone in the address book. */
+    /** Name and phones of a contact kept only in the app. */
     fun edit()
     fun editInContacts()
     fun transfer(cardId: String)
+    fun addCard()
+    fun editCard(cardId: String)
+    fun removeCard(cardId: String)
     fun openMovement(id: String)
     /** Activity, searched by this person's name. */
     fun allMovements()
@@ -252,8 +271,8 @@ interface ContactActions {
 }
 
 /**
- * Someone in the address book is changed in Contacts; here only their cards, and they are never deleted from here.
- * [movements]: the newest money moved with them.
+ * Someone in the address book is changed in Contacts and never deleted from here; their cards are managed here, each
+ * from its own menu. [movements]: the newest money moved with them.
  */
 @Composable
 fun ContactDetailScreen(
@@ -275,32 +294,36 @@ fun ContactDetailScreen(
             }
             Spacer(Modifier.height(NeoSpace.xxl))
             val first = contact.cards.firstOrNull()
-            when {
-                first != null -> NeoButton("Transferir", { actions.transfer(first.id) }, icon = Ds.drawable.ic_arrow_outward)
-                contact.fromAddressBook -> NeoButton("Añadir tarjeta", actions::edit, icon = Ds.drawable.ic_add_card)
-            }
+            if (first != null) NeoButton("Transferir", { actions.transfer(first.id) }, icon = Ds.drawable.ic_arrow_outward)
+            else NeoButton("Añadir tarjeta", actions::addCard, icon = Ds.drawable.ic_add_card)
             if (movements.isNotEmpty()) {
                 SectionHeader("Movimientos", Modifier.padding(top = NeoSpace.l), action = "Ver todo", onAction = actions::allMovements)
                 NeoGroup {
                     movements.forEachIndexed { index, operation ->
                         if (index > 0) GroupDivider()
-                        OperationRow(operation, labels.moment(operation.at), { actions.openMovement(operation.id) }, title = operation.kind.verb())
+                        OperationRow(operation, labels.moment(operation.at, operation.dateOnly), { actions.openMovement(operation.id) }, title = operation.kind.verb())
                     }
                 }
             }
             if (contact.cards.isNotEmpty()) {
                 SectionHeader("Tarjetas", Modifier.padding(top = NeoSpace.l))
                 NeoGroup {
-                    contact.cards.forEachIndexed { index, card ->
-                        if (index > 0) GroupDivider()
+                    contact.cards.forEach { card ->
                         NeoRow(
                             formatCardNumber(card.number),
-                            supporting = listOfNotNull(card.bankName, card.label).joinToString(" · ").ifEmpty { null },
-                            leading = { IconAvatar(Ds.drawable.ic_credit_card) },
-                            trailing = { NeoIconButton(Ds.drawable.ic_content_copy, "Copiar número", { actions.copy(card.number) }, Modifier.flushEnd()) },
+                            supporting = listOfNotNull(card.issuer, card.label).joinToString(" · ").ifEmpty { null },
+                            leading = { ForeignCardThumb(card.bank) },
+                            trailing = { CardMenu({ actions.copy(card.number) }, { actions.editCard(card.id) }, { actions.removeCard(card.id) }) },
                             onClick = { actions.transfer(card.id) },
                         )
+                        GroupDivider()
                     }
+                    NeoRow(
+                        "Añadir tarjeta",
+                        leading = { IconAvatar(Ds.drawable.ic_add, tint = Neo.colors.accentInk) },
+                        titleColor = Neo.colors.accentInk,
+                        onClick = actions::addCard,
+                    )
                 }
             }
             if (contact.phones.isNotEmpty()) {
@@ -318,10 +341,6 @@ fun ContactDetailScreen(
             }
             NeoGroup(Modifier.padding(top = NeoSpace.xxl)) {
                 if (contact.fromAddressBook) {
-                    if (first != null) {
-                        NeoRow("Editar tarjetas", leading = { IconAvatar(Ds.drawable.ic_credit_card) }, onClick = actions::edit)
-                        GroupDivider()
-                    }
                     NeoRow("Editar en Contactos", leading = { IconAvatar(Ds.drawable.ic_edit) }, onClick = actions::editInContacts)
                 } else {
                     NeoRow("Editar contacto", leading = { IconAvatar(Ds.drawable.ic_edit) }, onClick = actions::edit)
@@ -347,23 +366,47 @@ fun ContactDetailScreen(
     )
 }
 
+/** What else can be done with one card; tapping the row itself transfers to it. */
+@Composable
+private fun CardMenu(onCopy: () -> Unit, onEdit: () -> Unit, onRemove: () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        NeoIconButton(Ds.drawable.ic_more_vert, "Opciones de la tarjeta", { open = true }, Modifier.flushEnd())
+        DropdownMenu(open, { open = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
+            DropdownMenuItem(
+                { Text("Copiar número") },
+                { open = false; onCopy() },
+                leadingIcon = { Icon(painterResource(Ds.drawable.ic_content_copy), null) },
+            )
+            DropdownMenuItem(
+                { Text("Editar") },
+                { open = false; onEdit() },
+                leadingIcon = { Icon(painterResource(Ds.drawable.ic_edit), null) },
+            )
+            DropdownMenuItem(
+                { Text("Quitar", color = Neo.colors.danger) },
+                { open = false; onRemove() },
+                leadingIcon = { Icon(painterResource(Ds.drawable.ic_delete), null, tint = Neo.colors.danger) },
+            )
+        }
+    }
+}
+
 // ---- Create / edit ------------------------------------------------------------------------------------------
 
 interface ContactEditActions {
     fun back()
     fun save()
     fun name(value: String)
-    fun cardNumber(id: String, value: String)
-    fun cardLabel(id: String, value: String)
-    fun removeCard(id: String)
-    fun addCard()
+    fun cardNumber(value: String)
+    fun cardLabel(value: String)
     fun scanCard()
     fun phone(id: String, value: String)
     fun removePhone(id: String)
     fun addPhone()
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+/** A contact kept only in the app: its name and phones, and its first card when it is created. */
 @Composable
 fun ContactEditScreen(state: ContactEditUi, actions: ContactEditActions, modifier: Modifier = Modifier) {
     Scaffold(
@@ -371,11 +414,7 @@ fun ContactEditScreen(state: ContactEditUi, actions: ContactEditActions, modifie
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             NeoTopBar(
-                when {
-                    state.id == null -> "Nuevo contacto"
-                    state.fromAddressBook -> "Tarjetas de ${state.name.substringBefore(' ')}"
-                    else -> "Editar contacto"
-                },
+                if (state.id == null) "Nuevo contacto" else "Editar contacto",
                 onBack = actions::back,
                 backIcon = Ds.drawable.ic_close,
                 backDescription = "Cerrar",
@@ -387,29 +426,13 @@ fun ContactEditScreen(state: ContactEditUi, actions: ContactEditActions, modifie
             Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(horizontal = NeoSpace.gutter).padding(bottom = NeoSpace.xxl),
             verticalArrangement = Arrangement.spacedBy(NeoSpace.m),
         ) {
-            if (!state.fromAddressBook) {
-                NeoTextField(state.name, actions::name, "Nombre")
-                SectionHeader("Tarjetas", Modifier.padding(top = NeoSpace.m))
+            NeoTextField(state.name, actions::name, "Nombre")
+            // The contact, its card and its phones read as three groups.
+            state.card?.let { card ->
+                Spacer(Modifier.height(NeoSpace.s))
+                CardFields(card, actions::cardNumber, actions::cardLabel, actions::scanCard)
             }
-            state.cards.forEachIndexed { index, card ->
-                if (index > 0) Spacer(Modifier.height(NeoSpace.s))
-                NeoTextField(
-                    card.number, { actions.cardNumber(card.id, it) }, "Número de tarjeta",
-                    keyboardType = KeyboardType.Number, error = card.error,
-                    visualTransformation = CardNumberTransformation,
-                    supporting = card.bankName,
-                    trailing = if (state.cards.size > 1 || card.number.isNotEmpty()) {
-                        { NeoIconButton(Ds.drawable.ic_delete, "Quitar tarjeta", { actions.removeCard(card.id) }, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    } else null,
-                )
-                NeoTextField(card.label, { actions.cardLabel(card.id, it) }, "Nombre de la tarjeta (opcional)")
-            }
-            FlowRow(Modifier.flushStart()) {
-                if (state.cards.none { it.number.isEmpty() }) NeoTextButton("Añadir tarjeta", actions::addCard, icon = Ds.drawable.ic_add)
-                NeoTextButton("Escanear", actions::scanCard, icon = Ds.drawable.ic_photo_camera)
-            }
-            if (state.fromAddressBook) return@Column
-            SectionHeader("Teléfonos", Modifier.padding(top = NeoSpace.m))
+            Spacer(Modifier.height(NeoSpace.s))
             state.phones.forEach { phone ->
                 NeoTextField(
                     phone.number, { actions.phone(phone.id, it) }, "Teléfono",
@@ -421,4 +444,56 @@ fun ContactEditScreen(state: ContactEditUi, actions: ContactEditActions, modifie
             NeoTextButton("Añadir teléfono", actions::addPhone, Modifier.flushStart(), icon = Ds.drawable.ic_add)
         }
     }
+}
+
+// ---- One card -----------------------------------------------------------------------------------------------
+
+interface CardEditActions {
+    fun back()
+    fun save()
+    fun number(value: String)
+    fun label(value: String)
+    fun scan()
+}
+
+/** A card of someone else, new or saved: how it will look, its number and an optional name. */
+@Composable
+fun CardEditScreen(state: CardEditUi, actions: CardEditActions, modifier: Modifier = Modifier) {
+    val focus = remember { FocusRequester() }
+    if (!state.editing) LaunchedEffect(Unit) { focus.requestFocus() }
+    Scaffold(
+        modifier.imePadding(),
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            NeoTopBar(
+                if (state.editing) "Editar tarjeta" else "Nueva tarjeta",
+                onBack = actions::back,
+                backIcon = Ds.drawable.ic_close,
+                backDescription = "Cerrar",
+                actions = { NeoTextButton("Guardar", actions::save, enabled = state.canSave) },
+            )
+        },
+    ) { padding ->
+        Column(
+            Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(horizontal = NeoSpace.gutter).padding(bottom = NeoSpace.xxl),
+            verticalArrangement = Arrangement.spacedBy(NeoSpace.m),
+        ) {
+            Text("Para ${state.contactName}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            ForeignCardFace(state.card.number, state.card.bank, state.card.currency, Modifier.padding(bottom = NeoSpace.s))
+            CardFields(state.card, actions::number, actions::label, actions::scan, focus)
+        }
+    }
+}
+
+/** The number, with the camera at hand and what the number tells under it, then the optional name. */
+@Composable
+private fun CardFields(card: CardFieldUi, onNumber: (String) -> Unit, onLabel: (String) -> Unit, onScan: () -> Unit, focus: FocusRequester? = null) {
+    NeoTextField(
+        card.number, onNumber, "Número de tarjeta", if (focus != null) Modifier.focusRequester(focus) else Modifier,
+        keyboardType = KeyboardType.Number, error = card.error,
+        visualTransformation = CardNumberTransformation,
+        supporting = issuerOf(card.bank, card.currency).orEmpty(),
+        trailing = { NeoIconButton(Ds.drawable.ic_photo_camera, "Escanear", onScan, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+    )
+    NeoTextField(card.label, onLabel, "Nombre de la tarjeta (opcional)", imeAction = ImeAction.Done)
 }

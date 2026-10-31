@@ -72,6 +72,7 @@ class AppJourneyTest(private val mode: String) {
         if (mode == "dark") onController { rig.controller.updateSettings(Settings(theme = Theme.DARK)) }
         model = AppModel(application, rig.controller, dispatcher).also { it.host = host }
         compose.setContent { NeoApp(model) }
+        rig.controller.onForeground() // a dialed transfer leaves only with the app in front
         settle()
 
         // First start: nothing set up, no lock; bank, key (fingerprint), card.
@@ -80,11 +81,11 @@ class AppJourneyTest(private val mode: String) {
         settle()
         shot("onboarding-key")
         "1234".forEach { key(it).performClick(); settle() }
-        assertEquals("Guardar clave de BPA", host.prompts.last())
+        assertEquals("Guardar la clave de BPA", host.prompts.last())
         shot("onboarding-card")
         field("Número de tarjeta").performTextInput(OWN_CARD)
         field("Titular (opcional)").performTextInput("Laura Méndez Soto")
-        field("Vence (opcional)").performTextInput("0329")
+        field("Vencimiento (opcional)").performTextInput("0329")
         settle()
         shot("onboarding-card-filled")
         text("Guardar tarjeta").performClick()
@@ -109,7 +110,7 @@ class AppJourneyTest(private val mode: String) {
         node(hasSetTextAction()).performTextInput(FRIEND)
         settle()
         shot("transfer-recipient-typed")
-        text("Tarjeta nueva").performClick()
+        node(hasText("Tarjeta nueva", substring = true)).performClick()
         settle()
         "300".forEach { key(it).performClick() }
         settle()
@@ -184,6 +185,46 @@ class AppJourneyTest(private val mode: String) {
         text("Contactos").performClick()
         settle()
         shot("contacts")
+
+        // A contact's cards are managed on their page: add one, name it, remove it and undo.
+        text("Juan Prueba").performClick()
+        settle()
+        text("Añadir tarjeta").performClick()
+        settle()
+        field("Número de tarjeta").performTextInput(DOLLARS)
+        settle()
+        shot("card-new-typed")
+        text("Guardar").performClick()
+        settle()
+        val juan = { rig.controller.contacts.value.single { it.name == "Juan Prueba" } }
+        assertEquals(listOf(FRIEND, DOLLARS), juan().cards)
+        compose.onAllNodes(hasContentDescription("Opciones de la tarjeta"))[1].performClick()
+        settle()
+        shot("contact-card-menu")
+        text("Editar").performClick()
+        settle()
+        field("Nombre de la tarjeta (opcional)").performTextInput("Dólares")
+        text("Guardar").performClick()
+        settle()
+        assertEquals(mapOf(DOLLARS to "Dólares"), juan().labels)
+        shot("contact-cards")
+        compose.onAllNodes(hasContentDescription("Opciones de la tarjeta"))[1].performClick()
+        settle()
+        text("Quitar").performClick()
+        settle()
+        shot("contact-card-removed")
+        assertEquals(listOf(FRIEND), juan().cards)
+        text("Deshacer").performClick()
+        settle()
+        assertEquals(listOf(FRIEND, DOLLARS), juan().cards)
+        assertEquals(mapOf(DOLLARS to "Dólares"), juan().labels)
+        compose.onAllNodes(hasContentDescription("Opciones de la tarjeta"))[1].performClick()
+        settle()
+        text("Quitar").performClick()
+        settle()
+        assertEquals(listOf(FRIEND), juan().cards)
+        compose.runOnUiThread { model.messages.currentSnackbarData?.dismiss() }
+        back()
         text("Servicios").performClick()
         settle()
         shot("services")
@@ -337,8 +378,9 @@ class AppJourneyTest(private val mode: String) {
     }
 
     companion object {
-        private const val OWN_CARD = "9212060123456781"
+        private const val OWN_CARD = "9212120123456783"
         private const val FRIEND = "9205880012345673"
+        private const val DOLLARS = "9225129900435519"
         private const val ACK = "Su solicitud esta siendo procesada, espere un SMS"
         private const val PAY_LINK = "https://transfermovil.app/action?id_transaccion=CLE-00417&importe=480&moneda=CUP&numero_proveedor=0001234&titulo=Cafeteria%20La%20Esquina"
 

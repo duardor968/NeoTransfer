@@ -26,10 +26,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -60,12 +60,12 @@ import dev.duardo.neotransfer.designsystem.component.NeoTextButton
 import dev.duardo.neotransfer.designsystem.component.NeoTopBar
 import dev.duardo.neotransfer.designsystem.component.ReviewLayout
 import dev.duardo.neotransfer.designsystem.component.SectionHeader
+import dev.duardo.neotransfer.designsystem.component.SeparatedText
 import dev.duardo.neotransfer.designsystem.component.StatusMark
 import dev.duardo.neotransfer.designsystem.component.StatusTone
 import dev.duardo.neotransfer.designsystem.component.SummaryLine
 import dev.duardo.neotransfer.designsystem.component.groupItem
 import dev.duardo.neotransfer.designsystem.format.formatAmount
-import dev.duardo.neotransfer.designsystem.format.NoBreak
 import dev.duardo.neotransfer.designsystem.format.formatCardNumber
 import dev.duardo.neotransfer.designsystem.format.formatMoney
 import dev.duardo.neotransfer.designsystem.format.unbroken
@@ -74,6 +74,7 @@ import dev.duardo.neotransfer.designsystem.theme.NeoMotion
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
 import dev.duardo.neotransfer.ui.common.CardNumberTransformation
 import dev.duardo.neotransfer.ui.common.ConfirmedMark
+import dev.duardo.neotransfer.ui.common.ForeignCardThumb
 import dev.duardo.neotransfer.ui.common.SourceCardPicker
 import dev.duardo.neotransfer.ui.common.SwitchRow
 import dev.duardo.neotransfer.ui.common.label
@@ -103,9 +104,9 @@ interface RecipientActions {
     fun closeCards()
 }
 
-/** Who receives: a contact, a recent recipient, a typed or scanned card number. */
+/** Who receives: a contact, a recent recipient, a typed or scanned card number; from a Clásica ([classicOnly]), another Clásica. */
 @Composable
-fun RecipientScreen(state: RecipientPickUi, actions: RecipientActions, modifier: Modifier = Modifier) {
+fun RecipientScreen(state: RecipientPickUi, actions: RecipientActions, modifier: Modifier = Modifier, classicOnly: Boolean = false) {
     Scaffold(
         modifier.imePadding(),
         containerColor = MaterialTheme.colorScheme.background,
@@ -122,7 +123,8 @@ fun RecipientScreen(state: RecipientPickUi, actions: RecipientActions, modifier:
                         emptyAction = { NeoIconButton(Ds.drawable.ic_photo_camera, "Escanear tarjeta o QR", actions::scan, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                         visualTransformation = if (state.query.isNotEmpty() && state.query.all(Char::isDigit)) CardNumberTransformation else VisualTransformation.None,
                     )
-                    state.typedError?.let { Text(it, Modifier.padding(start = NeoSpace.l), style = MaterialTheme.typography.bodyMedium, color = Neo.colors.danger) }
+                    // Where a field's own error goes ([dev.duardo.neotransfer.designsystem.component.NeoTextField]).
+                    state.typedError?.let { Text(it, Modifier.padding(start = NeoSpace.xxs), style = MaterialTheme.typography.bodySmall, color = Neo.colors.danger) }
                 }
             }
             if (state.recent.isNotEmpty()) item(key = "recent") {
@@ -132,13 +134,16 @@ fun RecipientScreen(state: RecipientPickUi, actions: RecipientActions, modifier:
                         contentPadding = PaddingValues(horizontal = NeoSpace.gutter),
                         horizontalArrangement = Arrangement.spacedBy(NeoSpace.s),
                     ) {
-                        items(state.recent, key = { it.card.id }) { recipient -> RecentChip(recipient) { actions.pick(recipient) } }
+                        items(state.recent, key = { it.card.id }) { recipient ->
+                            val number = recipient.card.number.chunked(8).joinToString("\n", transform = ::formatCardNumber)
+                            RecentChip(recipient.name, recipient.name?.substringBefore(' ') ?: number, Ds.drawable.ic_credit_card) { actions.pick(recipient) }
+                        }
                     }
                 }
             }
             val typed = state.typed
             if (state.query.isBlank() && state.recent.isEmpty() && state.contacts.isEmpty()) item(key = "empty") {
-                EmptyState(Ds.drawable.ic_contacts, "Sin contactos con tarjeta")
+                EmptyState(Ds.drawable.ic_contacts, if (classicOnly) "Sin contactos con Clásica" else "Sin contactos con tarjeta")
             }
             val count = state.contacts.size + if (typed != null) 1 else 0
             if (count > 0) {
@@ -150,8 +155,8 @@ fun RecipientScreen(state: RecipientPickUi, actions: RecipientActions, modifier:
                     Column(Modifier.padding(horizontal = NeoSpace.gutter).groupItem(0, count)) {
                         NeoRow(
                             formatCardNumber(typed.number),
-                            supporting = typed.bankName ?: "Tarjeta nueva",
-                            leading = { IconAvatar(Ds.drawable.ic_credit_card) },
+                            supporting = listOfNotNull("Tarjeta nueva", typed.issuer).joinToString(" · "),
+                            leading = { ForeignCardThumb(typed.bank) },
                             onClick = actions::pickTyped,
                         )
                     }
@@ -163,7 +168,7 @@ fun RecipientScreen(state: RecipientPickUi, actions: RecipientActions, modifier:
                         NeoRow(
                             contact.name,
                             supporting = contact.cards.firstOrNull()?.let { first ->
-                                formatCardNumber(first.number) + if (contact.cards.size > 1) "$NoBreak· " + "${contact.cards.size} tarjetas".unbroken() else ""
+                                formatCardNumber(first.number) + if (contact.cards.size > 1) " · " + "${contact.cards.size} tarjetas".unbroken() else ""
                             } ?: "Sin tarjeta guardada",
                             leading = { NameAvatar(contact.name) },
                             onClick = { actions.pickContact(contact.id) },
@@ -176,17 +181,17 @@ fun RecipientScreen(state: RecipientPickUi, actions: RecipientActions, modifier:
     state.chooseCardOf?.let { contact -> ContactCardsSheet(contact, actions) }
 }
 
+/** Someone recently paid: [name]'s initials over [label], or [icon] when nobody has a name. */
 @Composable
-private fun RecentChip(recipient: RecipientUi, onClick: () -> Unit) {
+internal fun RecentChip(name: String?, label: String, icon: Int, onClick: () -> Unit) {
     Column(
         Modifier.width(76.dp).clip(RoundedCornerShape(16.dp)).clickable(role = Role.Button, onClick = onClick).padding(vertical = NeoSpace.s),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(NeoSpace.s),
     ) {
-        val name = recipient.name
-        if (name != null) NameAvatar(name, size = 52.dp) else IconAvatar(Ds.drawable.ic_credit_card, size = 52.dp)
+        if (name != null) NameAvatar(name, size = 52.dp) else IconAvatar(icon, size = 52.dp)
         Text(
-            name?.substringBefore(' ') ?: recipient.card.number.chunked(8).joinToString("\n", transform = ::formatCardNumber),
+            label,
             style = MaterialTheme.typography.labelMedium,
             textAlign = TextAlign.Center,
             softWrap = false,
@@ -202,8 +207,8 @@ private fun ContactCardsSheet(contact: ContactUi, actions: RecipientActions) {
             contact.cards.forEach { card ->
                 NeoRow(
                     formatCardNumber(card.number),
-                    supporting = listOfNotNull(card.bankName, card.label).joinToString(" · ").ifEmpty { null },
-                    leading = { IconAvatar(Ds.drawable.ic_credit_card) },
+                    supporting = listOfNotNull(card.issuer, card.label).joinToString(" · ").ifEmpty { null },
+                    leading = { ForeignCardThumb(card.bank) },
                     onClick = { actions.pickContactCard(contact.id, card.id) },
                 )
             }
@@ -238,7 +243,7 @@ fun TransferAmountScreen(state: TransferAmountUi, actions: AmountActions, modifi
                     if (state.overBalance) Text("Más que el saldo de esta tarjeta", style = MaterialTheme.typography.bodyMedium, color = Neo.colors.warning)
                 }
                 Spacer(Modifier.weight(1f))
-                SourceCardPicker(state.sources, state.source, actions::source)
+                SourceCardPicker(state.sources, state.source, actions::source, label = "Desde")
             }
             NeoKeypad(actions::key, Modifier.padding(horizontal = NeoSpace.m).padding(top = NeoSpace.m))
             BottomAction { NeoButton("Continuar", actions::next, enabled = state.canContinue) }
@@ -260,14 +265,14 @@ private fun RecipientHeader(recipient: RecipientUi, avatar: Dp) {
             minScale = 0.75f,
         )
         val detail = if (name != null) {
-            listOfNotNull(formatCardNumber(recipient.card.number), recipient.card.bankName).joinToString(" · ")
+            listOfNotNull(formatCardNumber(recipient.card.number), recipient.card.issuer).joinToString(" · ")
         } else {
-            recipient.card.bankName
+            recipient.card.issuer
         }
         detail?.let {
-            Text(
-                it, Modifier.padding(top = NeoSpace.xxs),
-                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center,
+            SeparatedText(
+                it, MaterialTheme.typography.bodyMedium, Modifier.padding(top = NeoSpace.xxs),
+                color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center,
             )
         }
     }
