@@ -1,0 +1,31 @@
+# Comprobación Android en el Woodpecker de kvm8: pruebas JVM, compilación y lint en cada push a main y cada pull request.
+# Los informes se publican en registry.asrlabs.space/neotransfer/ci-reports:<pipeline> (oras pull), salvo en pull requests.
+when:
+  - event: push
+    branch: main
+  - event: pull_request
+  - event: manual
+
+steps:
+  check:
+    image: ghcr.io/cirruslabs/android-sdk:36@sha256:f9b3ea9ed2b5fc9522adae82c7b4622ab7aa54207ef532c8e615a347dca08f31
+    commands:
+      - export GRADLE_USER_HOME="$${CI_WORKSPACE}/.gradle/user-home"
+      - bash ./gradlew --no-daemon :core:test :scanner:testDebugUnitTest :app:testDebugUnitTest :app:testPreviewUnitTest :app:assembleDebug :app:assemblePreview :app:assembleDebugAndroidTest :app:lintDebug
+
+  reports:
+    image: ghcr.io/oras-project/oras:v1.3.6@sha256:9cfb578be975b762fd898b9d004243d8003aeb807a3e15b2ed212cdd1326c9eb
+    when:
+      - event: [push, manual]
+        status: [success, failure]
+    environment:
+      REGISTRY_USER:
+        from_secret: registry_user
+      REGISTRY_PASSWORD:
+        from_secret: registry_password
+    commands:
+      - files=$(ls -d core/build/reports/tests scanner/build/reports/tests app/build/reports/tests app/build/reports/lint-results-debug.* 2>/dev/null || true)
+      - if [ -z "$${files}" ]; then echo "Sin informes"; exit 0; fi
+      - tar czf resultados-android.tgz $${files}
+      - echo "$${REGISTRY_PASSWORD}" | oras login -u "$${REGISTRY_USER}" --password-stdin registry.asrlabs.space
+      - oras push registry.asrlabs.space/neotransfer/ci-reports:$${CI_PIPELINE_NUMBER} resultados-android.tgz
