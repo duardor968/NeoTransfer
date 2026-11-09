@@ -11,6 +11,36 @@ steps:
     image: ghcr.io/cirruslabs/android-sdk:36@sha256:f9b3ea9ed2b5fc9522adae82c7b4622ab7aa54207ef532c8e615a347dca08f31
     commands:
       - export GRADLE_USER_HOME="$${CI_WORKSPACE}/.gradle/user-home"
+      # Dependencias por el proxy Maven de kvm8 (maven.asrlabs.space): Maven Central limita con 429 a la IP del CI.
+      - mkdir -p "$${GRADLE_USER_HOME}/init.d"
+      - |
+        cat > "$${GRADLE_USER_HOME}/init.d/proxy-maven.gradle" <<'GRADLE'
+        def proxy = 'https://maven.asrlabs.space/'
+        def mirrors = [
+          'https://repo.maven.apache.org/maven2': 'central',
+          'https://dl.google.com/dl/android/maven2': 'google',
+          'https://plugins.gradle.org/m2': 'gradle-plugins',
+        ]
+        def redirect = { repos ->
+          repos.withType(MavenArtifactRepository).configureEach { r ->
+            def u = r.url.toString()
+            if (u.endsWith('/')) u = u[0..-2]
+            if (mirrors[u]) r.url = proxy + mirrors[u]
+          }
+        }
+        beforeSettings { s ->
+          redirect(s.pluginManagement.repositories)
+          redirect(s.dependencyResolutionManagement.repositories)
+        }
+        allprojects {
+          redirect(buildscript.repositories)
+          redirect(repositories)
+          tasks.withType(Test).configureEach {
+            systemProperty 'robolectric.dependency.repo.url', proxy + 'central'
+            systemProperty 'robolectric.dependency.repo.id', 'proxy-maven'
+          }
+        }
+        GRADLE
       - bash ./gradlew --no-daemon :core:test :scanner:testDebugUnitTest :app:testDebugUnitTest :app:testPreviewUnitTest :app:assembleDebug :app:assemblePreview :app:assembleDebugAndroidTest :app:lintDebug
 
   reports:
