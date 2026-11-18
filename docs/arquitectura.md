@@ -55,7 +55,7 @@ Una consulta nunca envía una gestión: `49`, `58`, `60`, `68`, `69` y `111` sol
 - Por tipo y banco y, en dinero, por importe y destino: la máscara del beneficiario en transferencias, la cuenta o la factura en servicios, el `Id Compra` en pagos QR. Un ordenante explícito debe coincidir con la tarjeta de origen elegida. Si el comprobante de transferencia admite más de un envío, su referencia registra el movimiento una sola vez y los envíos quedan sin confirmar.
 - El SMS debe recibirse después del envío, y haber salido del SMSC como mucho 30 s antes y no más de 2 horas después. Se tolera el desorden: el resultado puede llegar antes que el SMS de autenticación.
 - El envío lleva la hora del teléfono y el SMS la marca del SMSC, y un teléfono con la hora puesta a mano puede ir una hora, o unos minutos, por delante o por detrás. Un SMS nunca se recibe antes de salir: la menor diferencia entre recepción y marca de los SMS recibidos en los 30 minutos anteriores, él incluido, es lo más cerca que se puede estar de la diferencia entre ambos relojes, y la marca más esa diferencia es cuándo salió según el teléfono (`Ledger`, `leftAt`). Los SMS que llegan después no la cambian. Con un solo SMS en ese rato no hay con qué distinguir un retraso de un reloj adelantado, y cuenta como recién salido. La sesión y el bloqueo por clave incorrecta usan esa misma hora.
-- Una respuesta de consulta cierra todas las copias pendientes de esa misma consulta.
+- Una respuesta de consulta cierra las copias pendientes de esa misma consulta. Si BPA devuelve un saldo sin identificar la tarjeta y hay consultas compatibles a distintos orígenes, cada tarjeta conserva su último saldo identificado.
 - «Solicitud en proceso» se aplica al último envío anterior a ese SMS.
 - Un rechazo que no dice qué rechaza solo se asigna si hay una única candidata.
 - Un comprobante y su copia impersonal, o un comprobante repetido, cuentan una vez por referencia.
@@ -95,7 +95,7 @@ Room, base `neotransfer.db`, versión 3 (`app/src/main/kotlin/dev/duardo/neotran
 |---|---|
 | `operation` | Cada operación como JSON (`Operation.encode`): la solicitud y sus intentos, sin secretos |
 | `sms` | SMS del banco ingeridos: `_id`, hora del SMSC, hora de recepción y texto. Del SMS de registro, que trae la clave y el PIN, no se guarda el texto: el núcleo extrae solo la clave (`SmsMessage.Registration`) |
-| `card` | Tarjetas propias de los bancos en orden de cartera, con titular y vencimiento opcionales |
+| `card` | Tarjetas propias en orden de cartera, con titular, vencimiento y alias local opcionales |
 | `classic_card` | Clásicas propias, solo el número: no tienen banco y siempre son USD. La cartera las muestra tras las tarjetas de los bancos |
 | `contact` | Lo que la app añade a cada persona: tarjetas y un nombre por tarjeta («Salario»). Las de la agenda del teléfono se guardan como `phone:<lookup key>`, con una copia de su nombre y teléfonos para el respaldo; la agenda manda en nombre y teléfonos (`engine/Directory.kt`). Las que solo existen en la app guardan todo |
 | `service` | Referencias de servicios guardadas: factura, cuenta Nauta, móvil |

@@ -99,26 +99,35 @@ class ClockAndCardsScenarioTest {
         assertEquals(cup("895.10"), phone.balance(bpa))
     }
 
-    @Test fun `several cards of BPA go explicitly and each answer goes to its card`() {
+    @Test fun `anonymous replies to overlapping queries preserve each last identified BPA balance`() {
         val phone = Phone(listOf(bpa, bpa2))
-        val first = phone.submit(BalanceQuery(Bank.BPA, Source.forCard(bpa, phone.cards)))
-        val second = phone.submit(BalanceQuery(Bank.BPA, Source.forCard(bpa2, phone.cards)))
-        assertEquals(listOf(Source.Card(bpa.number), Source.Card(bpa2.number)), phone.operations.map { (it.request as BalanceQuery).source })
-        phone.pump()
-        assertEquals(listOf(40, 46, 46), phone.services)
-        // BPA's answer names no card: each one answers the oldest query still waiting.
-        phone.receive(Sms.balanceBpa("100.00"), Duration.ofSeconds(4))
-        phone.seconds(2)
-        phone.receive(Sms.balanceBpa("200.00"), Duration.ofSeconds(3))
-        assertIs<OperationState.Confirmed>(phone.state(first))
-        assertIs<OperationState.Confirmed>(phone.state(second))
+        fun query(card: OwnCard): String {
+            val source = Source.forCard(card, phone.cards)
+            assertEquals(Source.Card(card.number), source)
+            return phone.submit(BalanceQuery(Bank.BPA, source)).also { phone.pump() }
+        }
+        query(bpa)
+        phone.receive(Sms.balanceBpa("100.00"))
+        phone.minutes(1)
+        query(bpa2)
+        phone.receive(Sms.balanceBpa("200.00"))
+        phone.minutes(1)
+        val first = query(bpa)
+        val second = query(bpa2)
+        phone.seconds(10)
+        phone.receive(Sms.balanceBpa("205.00"))
+        phone.seconds(3)
+        phone.receive(Sms.balanceBpa("105.00"))
+        assertIs<OperationState.Sent>(phone.state(first))
+        assertIs<OperationState.Sent>(phone.state(second))
         assertEquals(cup("100.00"), phone.balance(bpa))
         assertEquals(cup("200.00"), phone.balance(bpa2))
-        // A balance asked from another app names no card either: with two it belongs to neither.
-        phone.minutes(5)
-        phone.receive(Sms.balanceBpa("999.00"))
+        phone.minutes(125)
+        val fresh = query(bpa2)
+        phone.receive(Sms.balanceBpa("210.00"))
+        assertIs<OperationState.Confirmed>(phone.state(fresh))
+        assertEquals(cup("210.00"), phone.balance(bpa2))
         assertEquals(cup("100.00"), phone.balance(bpa))
-        assertEquals(cup("200.00"), phone.balance(bpa2))
     }
 
     @Test fun `a line with more BPA cards than the wallet sends its card explicitly, and what names no card is no one's`() {

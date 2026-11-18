@@ -93,6 +93,7 @@ internal class Activity(
     private val operationOf: Map<Long, String>,
     private val operations: Map<String, Operation>,
     private val cards: List<OwnCard>,
+    private val ambiguousBalances: Set<Long>,
 ) {
     private class Entry(val movement: Movement, val order: Long)
 
@@ -264,6 +265,7 @@ internal class Activity(
 
     /** Balance answers: BANDEC by card mask (available balance); BPA's single figure by the query's origin. */
     private fun observations(): List<Observation> = sms.flatMap { record ->
+        if (record.id in ambiguousBalances) return@flatMap emptyList()
         val message = record.message as? SmsMessage.Balance ?: return@flatMap emptyList()
         message.rows.mapNotNull { row ->
             val card = when {

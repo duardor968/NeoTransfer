@@ -123,7 +123,7 @@ object Ledger {
         val blocked = book.blocked(pinSavedAt)
         val session = book.session()
         val statuses = book.ops.filter { it.unlocks == null }.map { OperationStatus(it, book.state(it, pinSavedAt)) }
-        val activity = Activity(sms, book.operationOf, book.byId, cards)
+        val activity = Activity(sms, book.operationOf, book.byId, cards, book.ambiguousBalances)
         return LedgerView(statuses, book.dispatch(statuses, session), book.wakeAt(statuses), session, blocked,
             activity.movements, activity.balances())
     }
@@ -169,6 +169,7 @@ object Ledger {
         val resolved = mutableMapOf<String, SmsRecord>()
         val busy = mutableMapOf<Pair<String, Int>, SmsRecord>()
         val operationOf = mutableMapOf<Long, String>()
+        val ambiguousBalances = mutableSetOf<Long>()
         val foreign = mutableListOf<SmsRecord>()
 
         /**
@@ -223,6 +224,12 @@ object Ledger {
                 val candidates = ops.filter { eligible(it, record) && matches(it.request, message) }
                 val chosen = when {
                     candidates.isEmpty() -> emptyList()
+                    message is SmsMessage.Balance && message.bank == Bank.BPA &&
+                        message.rows.singleOrNull()?.let { it.account == null && it.label == null } == true &&
+                        candidates.distinctBy { it.request }.size > 1 -> {
+                        ambiguousBalances += record.id
+                        emptyList()
+                    }
                     message is SmsMessage.Balance || message is SmsMessage.History || message is SmsMessage.Authenticated -> {
                         // A query answer settles every pending copy of the same query (manual resends included).
                         val first = candidates.minBy { it.attempts.first().sentAt }
