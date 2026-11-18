@@ -37,8 +37,8 @@ android {
         applicationId = "dev.duardo.neotransfer"
         minSdk = 35
         targetSdk = 36
-        versionCode = 130
-        versionName = "1.3.0"
+        versionCode = 140
+        versionName = "1.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Android 15+ phones are 64-bit ARM; the ML Kit and CameraX natives ship for that ABI only.
         ndk { abiFilters += "arm64-v8a" }
