@@ -48,6 +48,15 @@ object PreviewData {
         WalletCardUi(bandec, BalanceUi.Known(cup("3215.00"), ago(185))),
     )
 
+    /** Two BPA cards with the names the person gave them, and a BANDEC one without. */
+    val nomina = bpa.copy(alias = "Nómina")
+    val ahorro = bpaUsd.copy(alias = "Ahorro")
+    val aliasWallet = listOf(
+        WalletCardUi(nomina, BalanceUi.Known(cup("12480.50"), ago(5))),
+        WalletCardUi(ahorro, BalanceUi.Known(Money(BigDecimal("640.00"), "USD"), ago(40))),
+        WalletCardUi(bandec, BalanceUi.Known(cup("3215.00"), ago(185))),
+    )
+
     // Contacts --------------------------------------------------------------------------------------------------
     val juan = ContactUi(
         "c-juan", "Juan Carlos Pérez",

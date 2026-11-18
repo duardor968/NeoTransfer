@@ -300,7 +300,10 @@ fun TransferReviewScreen(state: TransferReviewUi, actions: ReviewActions, modifi
         ReviewLayout(
             amount = state.amount.amount,
             currency = state.amount.currency,
-            lines = listOf(SummaryLine("Desde", formatCardNumber(state.source.number), state.source.bank.shortName)),
+            lines = listOf(
+                state.source.alias?.let { SummaryLine("Desde", it, state.source.identity) }
+                    ?: SummaryLine("Desde", formatCardNumber(state.source.number), state.source.bank.shortName),
+            ),
             confirm = "Transferir ${formatMoney(state.amount.amount, state.amount.currency)}",
             onConfirm = actions::confirm,
             modifier = Modifier.padding(padding),

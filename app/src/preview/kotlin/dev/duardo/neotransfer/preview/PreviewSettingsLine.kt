@@ -41,6 +41,7 @@ import java.math.BigDecimal
 internal val settingsLineScreens: Map<String, @Composable () -> Unit> = linkedMapOf(
     // Ajustes › banco ----------------------------------------------------------------------------------------------
     "settings-bank" to { BankSettingsScreen(LineData.bpaSettings, noop(), line = LineData.line(Bank.BPA)) },
+    "settings-bank-alias" to { BankSettingsScreen(LineData.aliasSettings, noop(), line = LineData.line(Bank.BPA)) },
     "settings-bank-code" to {
         BankSettingsScreen(LineData.bpaSettings.copy(protection = KeyProtection.Code), noop(), line = LineData.line(Bank.BPA))
     },
@@ -180,6 +181,7 @@ internal val settingsLineScreens: Map<String, @Composable () -> Unit> = linkedMa
 /** Invented line answers: card numbers start with 92 or 976003, identity numbers belong to nobody. */
 private object LineData {
     val bpaSettings = BankSettingsUi(Bank.BPA, listOf(PreviewData.wallet[0], WalletCardUi(PreviewData.bpaUsd, BalanceUi.Unknown)), true)
+    val aliasSettings = BankSettingsUi(Bank.BPA, PreviewData.aliasWallet.take(2), true)
 
     val classic = CardUi("classic-1", Bank.CLASSIC, "9760031234567812", "USD")
     val classicSettings = ClassicSettingsUi(

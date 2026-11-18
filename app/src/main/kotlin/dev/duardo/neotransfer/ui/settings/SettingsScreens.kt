@@ -267,9 +267,10 @@ fun BankSettingsScreen(
         NeoGroup {
             state.cards.forEach { wallet ->
                 val balance = wallet.balance
+                val shown = (balance as? BalanceUi.Known)?.money?.let(::balanceLabel) ?: wallet.card.currency
                 NeoRow(
-                    formatCardNumber(wallet.card.number),
-                    supporting = (balance as? BalanceUi.Known)?.money?.let(::balanceLabel) ?: wallet.card.currency,
+                    wallet.card.title,
+                    supporting = if (wallet.card.alias != null) "${wallet.card.lastDigits}\n$shown" else shown,
                     leading = { BankCardThumb(wallet.card.bank) },
                     trailing = { NeoIconButton(Ds.drawable.ic_delete, "Quitar tarjeta", { actions.removeCard(wallet.card.id) }, Modifier.flushEnd()) },
                 )
@@ -326,7 +327,7 @@ fun BankSettingsScreen(
     unregistering?.let { RemovalSheet(it, sending, actions::removalField, actions::confirmUnregister, actions::cancelUnregister) }
     state.cards.firstOrNull { it.card.id == removingCard }?.let { wallet ->
         NeoConfirmSheet(
-            title = "¿Quitar $name$NoBreak••••$NoBreak${wallet.card.number.takeLast(4)}?",
+            title = "¿Quitar ${wallet.card.alias ?: "$name$NoBreak${wallet.card.lastDigits}"}?",
             text = "Sale de la app hasta que la añadas otra vez. Tu actividad se conserva.",
             confirm = "Quitar",
             dismiss = "Cancelar",

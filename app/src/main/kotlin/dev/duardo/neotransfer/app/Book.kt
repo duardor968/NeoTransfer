@@ -130,7 +130,7 @@ fun Agency.ui(): Bank = when (this) {
 }
 fun CoreMoney.ui(): Money = Money(amount, currency.name)
 
-fun WalletCard.ui(): CardUi = CardUi(card.number, card.bank.ui(), card.number, card.currency.name, holder, expiry)
+fun WalletCard.ui(): CardUi = CardUi(card.number, card.bank.ui(), card.number, card.currency.name, holder, expiry, card.alias)
 fun ClassicCard.ui(): CardUi = CardUi(number, Bank.CLASSIC, number, Currency.USD.name)
 
 /** The issuer a number, whole or while typed, shows: its bank, or the Clásica for a personal one (`976003…`). */

@@ -43,7 +43,6 @@ import dev.duardo.neotransfer.designsystem.component.SecureWindow
 import dev.duardo.neotransfer.designsystem.component.StatusChip
 import dev.duardo.neotransfer.designsystem.component.StatusTone
 import dev.duardo.neotransfer.designsystem.component.flushEnd
-import dev.duardo.neotransfer.designsystem.format.formatCardNumber
 import dev.duardo.neotransfer.designsystem.format.unbroken
 import dev.duardo.neotransfer.designsystem.theme.Neo
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
@@ -233,6 +232,7 @@ interface CardSetupActions {
     fun holder(value: String)
     fun expiry(value: String)
     fun currency(value: String)
+    fun alias(value: String)
     fun scan()
     fun save()
     fun addAnother()
@@ -280,12 +280,15 @@ fun CardSetupScreen(state: CardSetupUi, actions: CardSetupActions, modifier: Mod
                         visualTransformation = ExpiryTransformation,
                     )
                     NeoSegmented(CardCurrencies, form.currency, { it }, actions::currency)
+                    NeoTextField(form.alias, actions::alias, "Alias (opcional)", imeAction = ImeAction.Done)
                 } else {
                     NeoGroup {
                         state.cards.forEach { card ->
                             NeoRow(
-                                formatCardNumber(card.number),
-                                supporting = listOfNotNull(card.currency, card.holder, card.expiry?.let { "Vence $it".unbroken() }).joinToString(" · "),
+                                card.title,
+                                // Under an alias, its number tells the card apart; without one the number is the title.
+                                supporting = if (card.alias != null) "${card.currency} · ${card.lastDigits}"
+                                else listOfNotNull(card.currency, card.holder, card.expiry?.let { "Vence $it".unbroken() }).joinToString(" · "),
                                 leading = { BankCardThumb(card.bank) },
                                 trailing = { NeoIconButton(Ds.drawable.ic_delete, "Quitar tarjeta", { actions.remove(card.id) }, Modifier.flushEnd()) },
                             )

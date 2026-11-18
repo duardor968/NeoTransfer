@@ -754,7 +754,10 @@ class AppControllerTest {
 
     @Test fun `contacts, backup round trip and wrong password`() = runTest {
         val rig = rig()
-        rig.controller.saveCard(bpa.copy(holder = "Duardo", expiry = "03/29"))
+        // The alias comes trimmed and goes with the backup; blank is none.
+        rig.controller.saveCard(bpa.copy(card = bpa.card.copy(alias = "  "), holder = "Duardo", expiry = "03/29"))
+        assertNull(rig.controller.cards.value.single().card.card.alias)
+        rig.controller.saveCard(bpa.copy(card = bpa.card.copy(alias = " Nómina "), holder = "Duardo", expiry = "03/29"))
         rig.controller.saveClassic("9760030000000001")
         val juan = rig.controller.saveContact(Contact("", " Juan ", listOf("+53 5000 0009", "50000009"), listOf("9204-9900-0000-0007"),
             mapOf("9204-9900-0000-0007" to " Salario  BANDEC ", "9204990000000099" to "Sin tarjeta")))
@@ -788,7 +791,7 @@ class AppControllerTest {
         restored.documents.files["content://backup"] = rig.documents.files.getValue("content://backup")
         assertFailsWith<BackupFailure.AuthenticationFailed> { restored.controller.importBackup("content://backup", "otra".toCharArray()) }
         assertEquals(ImportSummary(2, 2, 1), restored.controller.importBackup("content://backup", "clave segura".toCharArray()))
-        assertEquals(listOf(bpa.copy(holder = "Duardo", expiry = "03/29")), restored.controller.cards.value.map { it.card })
+        assertEquals(listOf(bpa.copy(card = bpa.card.copy(alias = "Nómina"), holder = "Duardo", expiry = "03/29")), restored.controller.cards.value.map { it.card })
         assertEquals(listOf(ClassicCard("9760030000000001")), restored.controller.classics.value)
         assertEquals(setOf(juan.id, ana.id), restored.controller.contacts.value.map { it.id }.toSet())
         assertEquals(mapOf(friend to "Salario BANDEC"), restored.controller.contacts.value.first { it.id == juan.id }.labels)

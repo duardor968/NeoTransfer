@@ -61,7 +61,7 @@ Las versiones nuevas se instalan igual, encima de la anterior, y conservan tus d
 1. Al abrir la app, Android te pide todos los permisos de una vez: SMS y Teléfono, que son imprescindibles, y Cámara, Contactos y Notificaciones.
 2. Elige tu banco: BPA, BANDEC o Metropolitano.
 3. Escribe la clave de autenticación del banco, la misma de Transfermóvil (4 dígitos en BPA y Metropolitano, 5 en BANDEC), y confírmala con la huella (o con el bloqueo de pantalla si el teléfono no tiene huella).
-4. Añade tus tarjetas de ese banco: escribe el número o escanéalo, y elige CUP o USD. El titular y el vencimiento son opcionales.
+4. Añade tus tarjetas de ese banco: escribe el número o escanéalo, y elige CUP o USD. El titular y el vencimiento son opcionales, igual que un alias («Nómina», «Ahorro») que nombra la tarjeta dentro de la app y nunca se envía al banco.
 5. Toca «Consultar saldo» para ver el saldo por primera vez. La actividad ya aparece con los SMS del banco que tenías.
 
 El otro banco se añade en Ajustes › Bancos y claves. Desde entonces, la app pide la huella (o el bloqueo de pantalla) al abrirla y al volver después de un minuto fuera. En Ajustes › Código de acceso puedes poner un código de 6 dígitos para abrirla, y usarlo también para las claves.

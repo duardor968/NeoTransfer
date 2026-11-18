@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -33,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.designsystem.R as Ds
 import dev.duardo.neotransfer.designsystem.component.EmptyState
@@ -46,7 +48,6 @@ import dev.duardo.neotransfer.designsystem.component.groupItem
 import dev.duardo.neotransfer.designsystem.component.rim
 import dev.duardo.neotransfer.designsystem.component.skeleton
 import dev.duardo.neotransfer.designsystem.component.spinning
-import dev.duardo.neotransfer.designsystem.format.formatCardNumber
 import dev.duardo.neotransfer.designsystem.theme.Neo
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
 import dev.duardo.neotransfer.ui.common.BankCardThumb
@@ -132,8 +133,8 @@ fun ActivityScreen(state: ActivityUi, actions: ActivityActions, modifier: Modifi
         Column(Modifier.padding(horizontal = NeoSpace.xs)) {
             state.cards.forEach { card ->
                 NeoRow(
-                    formatCardNumber(card.number),
-                    supporting = card.bank.shortName,
+                    card.title,
+                    supporting = if (card.alias != null) card.identity else card.bank.shortName,
                     leading = { BankCardThumb(card.bank) },
                     onClick = { actions.checkCard(card.id) },
                 )
@@ -165,8 +166,12 @@ private fun CardFilter(state: ActivityUi, actions: ActivityActions, modifier: Mo
             if (selected != null) BankCardThumb(selected.bank, width = 28.dp)
             else Icon(painterResource(Ds.drawable.ic_credit_card), null, Modifier.size(20.dp))
             Text(
-                selected?.number?.takeLast(4) ?: "Todas",
+                selected?.let { it.alias ?: it.number.takeLast(4) } ?: "Todas",
+                // About «Todas» wide, so a long alias never squeezes the title.
+                Modifier.widthIn(max = 96.dp),
                 style = MaterialTheme.typography.labelLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 color = if (selected != null) Neo.colors.onAccentContainer else MaterialTheme.colorScheme.onSurface,
             )
             Icon(painterResource(Ds.drawable.ic_expand_more), null, Modifier.size(20.dp))
@@ -179,7 +184,7 @@ private fun CardFilter(state: ActivityUi, actions: ActivityActions, modifier: Mo
             )
             state.cards.forEach { card ->
                 DropdownMenuItem(
-                    { Text(formatCardNumber(card.number)) },
+                    { Text(card.title) },
                     { open = false; actions.card(card.id) },
                     leadingIcon = { BankCardThumb(card.bank, width = 34.dp) },
                 )

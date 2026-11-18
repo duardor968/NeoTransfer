@@ -103,6 +103,18 @@ class AppJourneyTest(private val mode: String) {
         deliver(BankSms.balanceBpa("12480.50"))
         shot("home-balance")
 
+        // An alias from the card's sheet: it names the card over its balance and wherever it is picked.
+        node(hasContentDescription("Tarjeta BPA", substring = true)).performClick()
+        settle()
+        text("Añadir alias").performClick()
+        settle()
+        field("Alias (opcional)").performTextInput(" Nómina ")
+        text("Guardar").performClick()
+        settle()
+        assertEquals("Nómina", rig.controller.cards.value.single().card.card.alias)
+        text("Nómina").assertExists()
+        shot("home-alias")
+
         // Transfer to a typed card: review, fingerprint, sent, confirmed by the SMS while the result is open.
         text("Transferir").performClick()
         settle()

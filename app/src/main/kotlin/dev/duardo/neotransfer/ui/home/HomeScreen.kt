@@ -81,6 +81,7 @@ import dev.duardo.neotransfer.designsystem.theme.NeoMotion
 import dev.duardo.neotransfer.designsystem.theme.NeoSpace
 import dev.duardo.neotransfer.ui.common.BankCard
 import dev.duardo.neotransfer.ui.common.BrandMark
+import dev.duardo.neotransfer.ui.common.CardAliasSheet
 import dev.duardo.neotransfer.ui.common.OperationAmount
 import dev.duardo.neotransfer.ui.common.OperationAvatar
 import dev.duardo.neotransfer.ui.common.OperationRow
@@ -111,6 +112,9 @@ interface HomeActions {
     fun copyCard(cardId: String)
     fun cardMovements(cardId: String)
     fun cardSettings(cardId: String)
+    fun editAlias(cardId: String)
+    fun alias(value: String)
+    fun saveAlias()
     fun closeCard()
     fun addCard()
     fun transfer()
@@ -197,9 +201,20 @@ fun HomeScreen(state: HomeUi, actions: HomeActions, modifier: Modifier = Modifie
                     contentKey = { it?.card?.id },
                     label = "balance",
                 ) { wallet ->
-                    // A fixed block: swiping between a card with balance and one without moves nothing below.
-                    Box(Modifier.fillMaxWidth().padding(top = NeoSpace.l).height(96.dp), contentAlignment = Alignment.Center) {
-                        if (wallet != null) Balance(wallet, labels::ago) { actions.refreshBalance(wallet.card.id) }
+                    // A fixed block: swiping between a card with balance and one without, or with an alias and one
+                    // without, moves nothing below. The alias line is there once any card has one.
+                    Column(Modifier.fillMaxWidth().padding(top = NeoSpace.l), horizontalAlignment = Alignment.CenterHorizontally) {
+                        if (state.cards.any { it.card.alias != null }) Text(
+                            wallet?.card?.alias.orEmpty(),
+                            Modifier.padding(horizontal = NeoSpace.gutter),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Box(Modifier.fillMaxWidth().height(96.dp), contentAlignment = Alignment.Center) {
+                            if (wallet != null) Balance(wallet, labels::ago) { actions.refreshBalance(wallet.card.id) }
+                        }
                     }
                 }
             }
@@ -274,7 +289,9 @@ fun HomeScreen(state: HomeUi, actions: HomeActions, modifier: Modifier = Modifie
     }
 
     state.recharge?.let { targets -> RechargeSheet(targets, actions) }
-    state.card?.let { card -> CardSheet(card, actions) }
+    state.card?.let { card ->
+        if (state.alias != null) CardAliasSheet(card, state.alias, actions::alias, actions::saveAlias, actions::closeCard) else CardSheet(card, actions)
+    }
 }
 
 @Composable
@@ -377,16 +394,25 @@ private fun SkeletonRow() {
 /** One of the person's cards: its number to copy, its movements in Activity and its settings. */
 @Composable
 private fun CardSheet(card: CardUi, actions: HomeActions) {
-    NeoBottomSheet(onDismissRequest = actions::closeCard, title = "Tarjeta ${card.bank.shortName}") {
+    NeoBottomSheet(onDismissRequest = actions::closeCard, title = card.alias ?: "Tarjeta ${card.bank.shortName}") {
         Column(Modifier.padding(horizontal = NeoSpace.xl), verticalArrangement = Arrangement.spacedBy(NeoSpace.m)) {
             NeoGroup {
                 NeoRow(
                     formatCardNumber(card.number),
-                    supporting = listOfNotNull(card.currency, card.holder).joinToString(" · "),
+                    supporting = listOfNotNull(card.bank.shortName.takeIf { card.alias != null }, card.currency, card.holder).joinToString(" · "),
                     trailing = { NeoIconButton(Ds.drawable.ic_content_copy, "Copiar número", { actions.copyCard(card.id) }) },
                 )
             }
             NeoGroup {
+                if (card.bank != Bank.CLASSIC) {
+                    NeoRow(
+                        if (card.alias == null) "Añadir alias" else "Cambiar alias",
+                        leading = { IconAvatar(Ds.drawable.ic_edit) },
+                        trailing = { Chevron() },
+                        onClick = { actions.editAlias(card.id) },
+                    )
+                    GroupDivider()
+                }
                 NeoRow(
                     "Movimientos de la tarjeta",
                     leading = { IconAvatar(Ds.drawable.ic_receipt_long) },

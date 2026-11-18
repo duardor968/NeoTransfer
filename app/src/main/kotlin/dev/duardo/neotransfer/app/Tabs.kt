@@ -18,6 +18,7 @@ import dev.duardo.neotransfer.ui.home.HomeScreen
 import dev.duardo.neotransfer.ui.model.ActivityContent
 import dev.duardo.neotransfer.ui.model.ActivityFilter
 import dev.duardo.neotransfer.ui.model.ActivityUi
+import dev.duardo.neotransfer.ui.model.CARD_ALIAS_LENGTH
 import dev.duardo.neotransfer.ui.model.ContactUi
 import dev.duardo.neotransfer.ui.model.ContactsContent
 import dev.duardo.neotransfer.ui.model.ContactsUi
@@ -36,6 +37,7 @@ import java.text.Normalizer
 class Main(private val app: AppModel) : Destination(), HomeActions, ContactsActions, ServicesActions {
     private var recharge by mutableStateOf(false)
     private var cardSheet by mutableStateOf<String?>(null)
+    private var alias by mutableStateOf<String?>(null)
 
     @Composable
     override fun Content(app: AppModel, book: Book) {
@@ -60,6 +62,7 @@ class Main(private val app: AppModel) : Destination(), HomeActions, ContactsActi
         recent = if (book.domain.loaded) book.recent else null,
         recharge = if (recharge) book.rechargeTargets else null,
         card = cardSheet?.let { id -> book.wallet.firstOrNull { it.card.id == id }?.card },
+        alias = alias,
     )
 
     private val selectedCard: String? get() = app.book.value.wallet.let { wallet -> wallet.firstOrNull { it.card.id == app.homeCard } ?: wallet.firstOrNull() }?.card?.id
@@ -71,7 +74,18 @@ class Main(private val app: AppModel) : Destination(), HomeActions, ContactsActi
     override fun refreshBalance(cardId: String) = app.query { app.controller.refreshBalance(cardId) }
     override fun lastOperations(cardId: String) = app.activity.checkCard(cardId)
     override fun openCard(cardId: String) { cardSheet = cardId }
-    override fun closeCard() { cardSheet = null }
+    override fun closeCard() {
+        cardSheet = null
+        alias = null
+    }
+    override fun editAlias(cardId: String) { alias = app.book.value.card(cardId)?.card?.card?.alias.orEmpty() }
+    override fun alias(value: String) { alias = value.take(CARD_ALIAS_LENGTH) }
+    override fun saveAlias() {
+        val typed = alias ?: return
+        val view = cardSheet?.let(app.book.value::card) ?: return
+        closeCard()
+        app.launch { app.controller.saveCard(view.card.copy(card = view.card.card.copy(alias = typed))) }
+    }
     override fun copyCard(cardId: String) {
         app.book.value.wallet.firstOrNull { it.card.id == cardId }?.let { app.host?.copy(it.card.number) }
     }

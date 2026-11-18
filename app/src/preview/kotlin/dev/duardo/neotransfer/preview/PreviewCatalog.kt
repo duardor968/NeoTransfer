@@ -598,7 +598,7 @@ object PreviewCatalog {
         "settings-transfermovil" to { TransfermovilImportScreen(TransfermovilImportUi.Pick, noop()) },
         "settings-transfermovil-preview" to { TransfermovilImportScreen(TransfermovilImportUi.Preview("transfermovil_2026-10-01.trm", 14, 19, 6), noop()) },
         "settings-about" to { AboutScreen(appVersion(), noop()) },
-    ) + settingsLineScreens
+    ) + settingsLineScreens + aliasScreens
 
     val ids: List<String> get() = screens.keys.toList()
 
@@ -634,7 +634,7 @@ private fun associate(request: LineRequestUi? = null) = ClassicSetupUi.Associate
 )
 
 @Composable
-private fun Tabbed(tab: Tab, content: @Composable () -> Unit) {
+internal fun Tabbed(tab: Tab, content: @Composable () -> Unit) {
     MainShell(tab, {}, content = content)
 }
 

@@ -130,7 +130,10 @@ private fun detailLines(operation: OperationUi): List<SummaryLine> {
     }?.takeIf { it.value != operation.title }
     return listOfNotNull(
         counterpart,
-        operation.card?.let { SummaryLine(if (operation.kind.incoming) "A tu tarjeta" else "Desde", formatCardNumber(it.number), issuerOf(it.bank, it.currency)) },
+        operation.card?.let {
+            val label = if (operation.kind.incoming) "A tu tarjeta" else "Desde"
+            if (it.alias != null) SummaryLine(label, it.alias, it.identity) else SummaryLine(label, formatCardNumber(it.number), issuerOf(it.bank, it.currency))
+        },
         SummaryLine("Fecha", labels.stamp(operation.at, operation.dateOnly)),
         operation.transactionId?.let { SummaryLine("Transacción", it) },
         operation.balanceAfter?.let { SummaryLine("Saldo restante", formatMoney(it.amount, it.currency)) },

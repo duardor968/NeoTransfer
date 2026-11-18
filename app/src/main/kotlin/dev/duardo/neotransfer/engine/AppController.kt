@@ -752,7 +752,11 @@ class AppController(
 
     /** Adds the card at the end of the wallet, or replaces the one with the same number. */
     suspend fun saveCard(card: WalletCard) = onState {
-        val updated = card.copy(holder = card.holder?.trim()?.ifEmpty { null }, expiry = card.expiry?.trim()?.ifEmpty { null })
+        val updated = card.copy(
+            card = card.card.copy(alias = card.card.alias?.trim()?.ifEmpty { null }),
+            holder = card.holder?.trim()?.ifEmpty { null },
+            expiry = card.expiry?.trim()?.ifEmpty { null },
+        )
         val next = if (wallet.any { it.card.number == card.card.number }) wallet.map { if (it.card.number == card.card.number) updated else it } else wallet + updated
         store.saveCards(next)
         wallet = next

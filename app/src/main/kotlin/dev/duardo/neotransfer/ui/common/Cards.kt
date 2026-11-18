@@ -38,6 +38,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.duardo.neotransfer.R
@@ -47,6 +48,9 @@ import dev.duardo.neotransfer.designsystem.card.CardFace
 import dev.duardo.neotransfer.designsystem.card.CardFaceLayout
 import dev.duardo.neotransfer.designsystem.card.CardPrint
 import dev.duardo.neotransfer.designsystem.card.CardShape
+import dev.duardo.neotransfer.designsystem.component.NeoBottomSheet
+import dev.duardo.neotransfer.designsystem.component.NeoButton
+import dev.duardo.neotransfer.designsystem.component.NeoTextField
 import dev.duardo.neotransfer.designsystem.component.StatusChip
 import dev.duardo.neotransfer.designsystem.component.StatusTone
 import dev.duardo.neotransfer.designsystem.component.pressScale
@@ -132,7 +136,7 @@ fun BankCard(card: CardUi, modifier: Modifier = Modifier, elevation: Dp = 10.dp,
         holder = card.holder,
         expiry = card.expiry,
         currency = card.currency,
-        contentDescription = "Tarjeta ${card.bank.shortName} ${formatCardNumber(card.number)}, ${card.currency}",
+        contentDescription = listOfNotNull(card.alias, "Tarjeta ${card.bank.shortName} ${formatCardNumber(card.number)}, ${card.currency}").joinToString(", "),
         modifier = modifier,
         elevation = elevation,
         onClick = onClick,
@@ -278,5 +282,16 @@ fun ForeignCardFace(number: String, bank: Bank?, currency: String?, modifier: Mo
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (number.isEmpty()) 0.4f else 1f),
             maxLines = 1,
         )
+    }
+}
+
+/** The alias of one of the person's cards, named by its bank and last digits; saved empty, the card has none. */
+@Composable
+fun CardAliasSheet(card: CardUi, alias: String, onAlias: (String) -> Unit, onSave: () -> Unit, onDismiss: () -> Unit) {
+    NeoBottomSheet(onDismissRequest = onDismiss, title = "${card.bank.shortName}$NoBreak·$NoBreak${card.lastDigits}") {
+        Column(Modifier.padding(horizontal = NeoSpace.gutter), verticalArrangement = Arrangement.spacedBy(NeoSpace.l)) {
+            NeoTextField(alias, onAlias, "Alias (opcional)", imeAction = ImeAction.Done)
+            NeoButton("Guardar", onSave)
+        }
     }
 }

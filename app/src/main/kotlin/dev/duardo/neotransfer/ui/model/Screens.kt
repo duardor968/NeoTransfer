@@ -63,6 +63,7 @@ data class CardFormUi(
     val currency: String,
     val numberError: String? = null,
     val canSave: Boolean = false,
+    val alias: String = "",
 )
 
 /** Cards of a bank being set up. [form] is shown while adding one; null shows the list. */
@@ -81,6 +82,8 @@ data class HomeUi(
     val recharge: List<RechargeTargetUi>? = null,
     /** The card whose sheet is open. */
     val card: CardUi? = null,
+    /** The alias being typed for [card], while its sheet edits it. */
+    val alias: String? = null,
 )
 
 /** Saved destination for the Recharge shortcut. */

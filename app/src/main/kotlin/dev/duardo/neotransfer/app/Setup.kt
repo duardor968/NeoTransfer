@@ -28,6 +28,7 @@ import dev.duardo.neotransfer.ui.model.Bank
 import dev.duardo.neotransfer.ui.model.BankChoiceUi
 import dev.duardo.neotransfer.ui.model.BankKeyUi
 import dev.duardo.neotransfer.ui.model.BankRegistrationUi
+import dev.duardo.neotransfer.ui.model.CARD_ALIAS_LENGTH
 import dev.duardo.neotransfer.ui.model.CardFieldUi
 import dev.duardo.neotransfer.ui.model.CardFormUi
 import dev.duardo.neotransfer.ui.model.CardSetupUi
@@ -192,9 +193,20 @@ class CardSetupDestination(
     private val setup: Boolean,
     private val flowStart: Destination?,
 ) : Destination(), CardSetupActions {
-    private class Form(val number: String = "", val holder: String = "", val expiry: String = "", val currency: String = CardCurrencies.first()) {
-        fun copy(number: String = this.number, holder: String = this.holder, expiry: String = this.expiry, currency: String = this.currency) =
-            Form(number, holder, expiry, currency)
+    private class Form(
+        val number: String = "",
+        val holder: String = "",
+        val expiry: String = "",
+        val currency: String = CardCurrencies.first(),
+        val alias: String = "",
+    ) {
+        fun copy(
+            number: String = this.number,
+            holder: String = this.holder,
+            expiry: String = this.expiry,
+            currency: String = this.currency,
+            alias: String = this.alias,
+        ) = Form(number, holder, expiry, currency, alias)
     }
 
     private var form by mutableStateOf(if (app.book.value.cards.none { it.bank == bank }) registered() ?: Form() else null)
@@ -231,7 +243,7 @@ class CardSetupDestination(
             else -> null
         }
         val canSave = form.number.length == 16 && numberError == null && (form.expiry.isEmpty() || form.expiry.length == 4)
-        return CardFormUi(form.number, form.holder, form.expiry, form.currency, numberError, canSave)
+        return CardFormUi(form.number, form.holder, form.expiry, form.currency, numberError, canSave, form.alias)
     }
 
     override fun number(value: String) { form = form?.copy(number = value.filter(Char::isDigit).take(16)) }
@@ -242,6 +254,7 @@ class CardSetupDestination(
         if (possibleExpiry(digits)) form = form?.copy(expiry = digits)
     }
     override fun currency(value: String) { form = form?.copy(currency = value) }
+    override fun alias(value: String) { form = form?.copy(alias = value.take(CARD_ALIAS_LENGTH)) }
 
     override fun scan() = app.navigator.push(ScanDestination(app, ScanMode.NUMBERS) { result ->
         if (result is ScanResult.CardNumber) number(result.digits)
@@ -253,7 +266,7 @@ class CardSetupDestination(
         val expiry = form.expiry.takeIf { it.length == 4 }?.let { it.take(2) + "/" + it.drop(2) }
         app.launch {
             try {
-                app.controller.saveCard(WalletCard(OwnCard(form.number, bank.core(), Currency.valueOf(form.currency)), form.holder.trim(), expiry))
+                app.controller.saveCard(WalletCard(OwnCard(form.number, bank.core(), Currency.valueOf(form.currency), form.alias), form.holder.trim(), expiry))
                 app.homeCard = form.number
                 this.form = null
             } catch (e: IllegalArgumentException) {

@@ -29,7 +29,7 @@ import dev.duardo.neotransfer.designsystem.R as Ds
 import dev.duardo.neotransfer.designsystem.component.NeoBottomSheet
 import dev.duardo.neotransfer.designsystem.component.NeoRow
 import dev.duardo.neotransfer.designsystem.component.NeoSwitch
-import dev.duardo.neotransfer.designsystem.format.formatCardNumber
+import dev.duardo.neotransfer.designsystem.format.NoBreak
 import dev.duardo.neotransfer.designsystem.format.formatMoney
 import dev.duardo.neotransfer.designsystem.format.unbroken
 import dev.duardo.neotransfer.designsystem.theme.Neo
@@ -63,7 +63,7 @@ fun CardPicker(
         label?.let { Text(it, Modifier.padding(start = NeoSpace.xxs), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         Column(Modifier.fillMaxWidth().clip(shape).background(Neo.colors.group).border(1.dp, Neo.colors.divider, shape)) {
             NeoRow(
-                formatCardNumber(current.number),
+                current.title,
                 supporting = detail(selected),
                 leading = { BankCardThumb(current.bank, width = 52.dp) },
                 trailing = if (several) ({ Icon(painterResource(Ds.drawable.ic_expand_more), "Cambiar tarjeta", tint = MaterialTheme.colorScheme.onSurfaceVariant) }) else null,
@@ -75,7 +75,7 @@ fun CardPicker(
         Column(Modifier.padding(horizontal = NeoSpace.xs)) {
             cards.forEachIndexed { index, card ->
                 NeoRow(
-                    formatCardNumber(card.number),
+                    card.title,
                     supporting = detail(index),
                     leading = { BankCardThumb(card.bank, width = 52.dp) },
                     trailing = if (index == selected) ({ Icon(painterResource(Ds.drawable.ic_check), "Seleccionada", tint = Neo.colors.accentInk) }) else null,
@@ -92,9 +92,15 @@ fun SourceCardPicker(cards: List<WalletCardUi>, selected: Int, onSelect: (Int) -
     CardPicker(cards.map { it.card }, selected, onSelect, "Pagar desde", { cards[it].balanceLine() }, modifier, label)
 }
 
-private fun WalletCardUi.balanceLine(): String = when (val b = balance) {
-    is BalanceUi.Known -> "${card.bank.shortName} · ${balanceLabel(b.money)}"
-    is BalanceUi.Text, BalanceUi.Unknown -> card.bank.shortName
+/** Under an alias, what tells the card apart and then its balance on a line of its own, so every card reads alike. */
+private fun WalletCardUi.balanceLine(): String {
+    val known = (balance as? BalanceUi.Known)?.money?.let(::balanceLabel)
+    return when {
+        card.alias == null -> listOfNotNull(card.bank.shortName, known).joinToString(" · ")
+        known == null -> card.identity
+        // The balance already says the currency.
+        else -> "${card.bank.shortName}$NoBreak·$NoBreak${card.lastDigits}\n$known"
+    }
 }
 
 /** A balance beside its card or account, the same everywhere: «Saldo 12 480.50 CUP», the figure never split from its currency. */

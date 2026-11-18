@@ -2,6 +2,7 @@ package dev.duardo.neotransfer.ui.model
 
 import androidx.compose.runtime.Immutable
 import dev.duardo.neotransfer.designsystem.format.NoBreak
+import dev.duardo.neotransfer.designsystem.format.formatCardNumber
 import java.math.BigDecimal
 import java.time.Instant
 
@@ -19,7 +20,10 @@ enum class Bank(val shortName: String, val fullName: String) {
 @Immutable
 data class Money(val amount: BigDecimal, val currency: String)
 
-/** One of the user's own cards. [number] is the full 16-digit PAN; [expiry] is `MM/AA`. */
+/**
+ * One of the user's own cards. [number] is the full 16-digit PAN; [expiry] is `MM/AA`. [alias] is the user's own name
+ * for it («Nómina»): it only labels the card in the app and never goes to the bank.
+ */
 @Immutable
 data class CardUi(
     val id: String,
@@ -28,7 +32,20 @@ data class CardUi(
     val currency: String,
     val holder: String? = null,
     val expiry: String? = null,
-)
+    val alias: String? = null,
+) {
+    /** What names the card where it is picked or recognized: its alias, or its whole number. */
+    val title: String get() = alias ?: formatCardNumber(number)
+
+    /** `•••• 6783`, never split across lines. */
+    val lastDigits: String get() = "••••$NoBreak${number.takeLast(4)}"
+
+    /** Under an alias, what tells the card apart: `BPA · CUP · •••• 6783`. */
+    val identity: String get() = listOf(bank.shortName, currency, lastDigits).joinToString("$NoBreak·$NoBreak")
+}
+
+/** Longest alias a card takes: it has to fit a picker's line and Activity's card filter. */
+const val CARD_ALIAS_LENGTH = 20
 
 @Immutable
 sealed interface BalanceUi {

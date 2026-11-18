@@ -93,7 +93,7 @@ fun ReceiveScreen(state: ReceiveUi, actions: ReceiveActions, modifier: Modifier 
                 Spacer(Modifier.height(NeoSpace.xl))
                 CardPicker(
                     state.cards, state.selected, actions::card, "Cobrar en",
-                    { "${state.cards[it].bank.shortName} · ${state.cards[it].currency}" },
+                    { state.cards[it].let { card -> if (card.alias != null) card.identity else "${card.bank.shortName} · ${card.currency}" } },
                     Modifier.padding(horizontal = NeoSpace.gutter),
                 )
             }
