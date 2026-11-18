@@ -188,6 +188,7 @@ class Book(val domain: Domain, private val now: Instant = Instant.now()) {
     fun keyToSave(bank: Bank): KeyToSaveUi? = keysToSave.firstOrNull { it.bank == bank }
 
     private val operationIdsWithReceipt = domain.movements.mapNotNullTo(mutableSetOf()) { it.operationId }
+    private val ownTransfers = domain.movements.filter { it.direction == Direction.BETWEEN_OWN }.associateBy { it.id }
     private val operationsById = domain.operations.associateBy { it.operation.id }
 
     /** Operations still on their way, and money that did not go through and was not retried yet. */
@@ -251,7 +252,18 @@ class Book(val domain: Domain, private val now: Instant = Instant.now()) {
     val checkingHistory: Boolean = domain.operations.any { (it.operation.request is HistoryQuery || it.operation.request is ClassicHistoryQuery) && it.state.inFlight }
 
     /** Recent activity for Home: what is not already listed as in progress. */
-    val recent: List<OperationUi> = inProgress.mapTo(mutableSetOf()) { it.id }.let { shown -> activity.filter { it.id !in shown } }
+    private val recent = inProgress.mapTo(mutableSetOf()) { it.id }.let { shown -> activity.filter { it.id !in shown } }
+
+    fun recentFor(cardId: String): List<OperationUi> = recent.mapNotNull { onCard(it, cardId) }
+
+    /** A transfer between own cards is a credit in the receiving card's history. */
+    fun onCard(item: OperationUi, cardId: String): OperationUi? {
+        if (item.card?.id == cardId) return item
+        val transfer = ownTransfers[item.id]?.takeIf { it.creditCard == cardId } ?: return null
+        val from = transfer.debitCard ?: return null
+        return item.copy(kind = OperationKind.Incoming, card = ownCard(cardId), title = ownCard(from)?.title ?: formatCardNumber(from),
+            counterpart = CounterpartUi.Card(from, null), balanceAfter = null)
+    }
 
     val references: List<SavedReferenceUi> = domain.services.map(::reference)
 

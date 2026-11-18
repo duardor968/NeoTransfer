@@ -55,15 +55,19 @@ class Main(private val app: AppModel) : Destination(), HomeActions, ContactsActi
 
     // ---- Home ----
 
-    private fun home(book: Book) = HomeUi(
-        cards = book.wallet,
-        selected = book.wallet.indexOfFirst { it.card.id == app.homeCard }.coerceAtLeast(0),
-        inProgress = book.inProgress,
-        recent = if (book.domain.loaded) book.recent else null,
-        recharge = if (recharge) book.rechargeTargets else null,
-        card = cardSheet?.let { id -> book.wallet.firstOrNull { it.card.id == id }?.card },
-        alias = alias,
-    )
+    private fun home(book: Book): HomeUi {
+        val selected = book.wallet.indexOfFirst { it.card.id == app.homeCard }.coerceAtLeast(0)
+        val cardId = book.wallet.getOrNull(selected)?.card?.id
+        return HomeUi(
+            cards = book.wallet,
+            selected = selected,
+            inProgress = book.inProgress.filter { cardId != null && it.card?.id == cardId },
+            recent = if (book.domain.loaded) cardId?.let(book::recentFor).orEmpty() else null,
+            recharge = if (recharge) book.rechargeTargets else null,
+            card = cardSheet?.let { id -> book.wallet.firstOrNull { it.card.id == id }?.card },
+            alias = alias,
+        )
+    }
 
     private val selectedCard: String? get() = app.book.value.wallet.let { wallet -> wallet.firstOrNull { it.card.id == app.homeCard } ?: wallet.firstOrNull() }?.card?.id
 
@@ -119,7 +123,7 @@ class Main(private val app: AppModel) : Destination(), HomeActions, ContactsActi
     override fun closeRecharge() { recharge = false }
     override fun openOperation(id: String) = app.navigator.push(OperationDestination(app, id))
     override fun retry(id: String) = app.retry(id)
-    override fun allActivity() { app.tab = Tab.Activity }
+    override fun allActivity() { selectedCard?.let(::cardMovements) }
     override fun settings() = app.navigator.push(SettingsDestination(app))
 
     // ---- Contacts ----
@@ -168,9 +172,9 @@ class ActivityState(private val app: AppModel) : ActivityActions {
             !book.domain.loaded -> ActivityContent.Loading
             !app.granted(Manifest.permission.READ_SMS) -> ActivityContent.NoAccess
             book.activity.isEmpty() -> ActivityContent.Empty
-            else -> book.activity.filter { item ->
+            else -> (card?.let { id -> book.activity.mapNotNull { book.onCard(it, id) } } ?: book.activity).filter { item ->
                 (filter == ActivityFilter.All || item.kind.incoming == (filter == ActivityFilter.In)) &&
-                    (card == null || item.card?.id == card) && item.matches(query)
+                    item.matches(query)
             }.let { if (it.isEmpty()) ActivityContent.NoResults else ActivityContent.Items(it) }
         }
         return ActivityUi(query, filter, book.cards, card?.takeIf { id -> book.cards.any { it.id == id } }, content, book.checkingHistory, picking)

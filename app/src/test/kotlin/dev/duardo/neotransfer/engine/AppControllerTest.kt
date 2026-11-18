@@ -96,6 +96,21 @@ class AppControllerTest {
     private fun Rig.book() = Book(Domain(loaded = true, cards = controller.cards.value, classics = controller.classics.value,
         operations = controller.operations.value, movements = controller.movements.value, savedKeys = controller.savedKeys.value))
 
+    @Test fun `a credit for an unregistered card stays in all activity and follows that card when added`() = runTest {
+        val rig = rig()
+        rig.ready(bandec)
+        deliver(rig, BankSms.received(bpa.card.number, "5000.00", "AY000OWNBPA"))
+        rig.controller.onBankSms().join()
+        val before = rig.book()
+        assertEquals("AY000OWNBPA", before.activity.single().transactionId)
+        assertTrue(before.recentFor(bandec.card.number).isEmpty())
+        rig.controller.saveCard(bpa)
+        runCurrent()
+        val after = rig.book()
+        assertEquals(before.activity.single().id, after.recentFor(bpa.card.number).single().id)
+        assertTrue(after.recentFor(bandec.card.number).isEmpty())
+    }
+
     /** The command is `*444*<service>*<parameters, encoded with some prefix>*<version>#`. */
     private fun UssdCommand.carries(service: Int, vararg parameters: String) = (0 until 100).any { seed ->
         valueForTransport() == "*444*$service*${ParameterCodec().encode(parameters.toList(), seed)}*1260416#"
