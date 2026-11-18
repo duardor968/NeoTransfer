@@ -101,8 +101,6 @@ object Ledger {
 
     /** Longest gap between a send and the SMSC stamp of its answer that still correlates. */
     private val WINDOW = Duration.ofHours(2)
-    /** Longest a bank's USSD dialog stays open for the person to confirm a dialed request. */
-    private val DIALOG = Duration.ofMinutes(3)
     /** An answer cannot leave the SMSC much before the request left the phone. */
     private val SKEW = Duration.ofSeconds(30)
     /** How far back the SMS received before one tell how far the phone's clock is from the SMSC's ([Book.leftAt]). */
@@ -211,13 +209,6 @@ object Ledger {
 
         private fun busyMarked(op: Operation) = op.attempts.indices.any { (op.id to it) in busy }
 
-        /**
-         * A dialed request is confirmed in the bank's dialog, which does not last [DIALOG]: one dialed longer before its
-         * receipt left was most likely left unanswered, and an equal one dialed since is the receipt's.
-         */
-        private fun unanswered(op: Operation, record: SmsRecord) = op.request.dialed &&
-            op.attempts.filter { usable(op, it) && answers(it, record) }.maxOf { it.sentAt } < left(record) - DIALOG
-
         private fun correlate() {
             val seenReferences = mutableSetOf<String>()
             for (record in sms) {
@@ -238,12 +229,13 @@ object Ledger {
                         candidates.filter { it.request == first.request }
                     }
                     // What does not say what it answers goes only where it cannot be anything else.
-                    message is SmsMessage.Rejected && message.operation == RejectedOperation.UNKNOWN ||
+                    message is SmsMessage.TransferSent ||
+                        message is SmsMessage.Rejected && message.operation == RejectedOperation.UNKNOWN ||
                         message is SmsMessage.WalletText || message is SmsMessage.BankText ||
                         message is SmsMessage.Registration && message.agency == null ->
                         listOfNotNull(candidates.singleOrNull())
                     else -> listOf(candidates.minWith(compareBy<Operation>({ !preferred(it.request, message) }, { busyMarked(it) },
-                        { unanswered(it, record) }, { it.attempts.first().sentAt })))
+                        { it.attempts.first().sentAt })))
                 }
                 chosen.forEach { resolved[it.id] = record }
                 chosen.firstOrNull()?.let { operationOf[record.id] = it.id }
@@ -423,15 +415,8 @@ object Ledger {
                 }
             ).filter { it > now }.minOrNull()
 
-        /**
-         * Among the operations a receipt can answer, the one it names goes first: for a transfer, the one sent from the
-         * card the receipt gives as "Ordenante"; for a QR payment, the one whose transaction id agrees with "Id Compra".
-         */
+        /** For QR payments prefer the transaction id reported as "Id Compra". */
         private fun preferred(request: UssdRequest, message: SmsMessage): Boolean {
-            if (request is Transfer && message is SmsMessage.TransferSent) {
-                val source = request.source
-                return message.sourceMask != null && source is Source.Card && Cards.matches(message.sourceMask, source.number)
-            }
             val (purchase, id) = when {
                 request is QrPay && message is SmsMessage.PaymentCompleted -> message.purchaseId to request.payment.transactionId
                 request is ClassicQrPay && message is SmsMessage.WalletPaymentCompleted -> message.purchaseId to request.payment.transactionId
@@ -442,13 +427,19 @@ object Ledger {
         }
     }
 
+    private fun matchesTransfer(request: Transfer, receipt: SmsMessage.TransferSent): Boolean {
+        val source = request.source
+        return request.bank == receipt.bank && request.amount == receipt.amount &&
+            Cards.matches(receipt.beneficiaryMask, request.destination) &&
+            (source !is Source.Card || receipt.sourceMask == null || Cards.matches(receipt.sourceMask, source.number))
+    }
+
     internal fun matches(request: UssdRequest, message: SmsMessage): Boolean = when (message) {
         is SmsMessage.Authenticated -> authenticates(request) == message.agency
         is SmsMessage.AuthenticationFailed -> authenticates(request)?.let { message.agency == null || message.agency == it } == true
         is SmsMessage.Balance -> (request is BalanceQuery || request is AccountsQuery) && request.bank == message.bank
         is SmsMessage.History -> request is HistoryQuery && request.bank == message.bank
-        is SmsMessage.TransferSent -> request is Transfer && request.bank == message.bank && request.amount == message.amount &&
-            Cards.matches(message.beneficiaryMask, request.destination)
+        is SmsMessage.TransferSent -> request is Transfer && matchesTransfer(request, message)
         is SmsMessage.PaymentCompleted -> request is QrPay && request.bank == message.bank && request.amount == message.amount
         is SmsMessage.ServicePaid -> request is BankRequest && request.bank == message.bank && servicePaid(request, message)
         is SmsMessage.WalletTransferSent -> request is ClassicTransfer && request.amount == message.amount &&

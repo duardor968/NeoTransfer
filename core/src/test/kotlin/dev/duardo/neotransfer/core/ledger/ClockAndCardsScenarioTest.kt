@@ -191,18 +191,32 @@ class ClockAndCardsScenarioTest {
         assertEquals(cup("650.00"), phone.balance(bpa2))
     }
 
-    @Test fun `between two equal transfers, the receipt is the one dialed last, not one left unconfirmed in the bank's dialog`() {
+    @Test fun `a receipt from another card is recorded without confirming the only pending transfer`() {
         val phone = Phone(listOf(bpa, bpa2))
-        // The bank's dialog of the first one was never answered: no receipt came.
+        val id = phone.submit(Transfer(Bank.BPA, Source.Card(bpa.number), friend, cup("300")))
+        phone.pump()
+        phone.seconds(15)
+        phone.receive(Sms.sent(Bank.BPA, friend, "300.00", "BR000OTHER", balance = "700.00", from = bpa2.number))
+        assertIs<OperationState.Sent>(phone.state(id))
+        val movement = phone.view().movements.single()
+        assertNull(movement.operationId)
+        assertEquals(bpa2.number, movement.debitCard)
+        assertNull(phone.balance(bpa))
+    }
+
+    @Test fun `a late receipt cannot distinguish identical transfers dialed twelve minutes apart`() {
+        val phone = Phone(listOf(bpa, bpa2))
+        // Either bank dialog could have been confirmed; the phone recorded no answer for either.
         val unanswered = phone.submit(Transfer(Bank.BPA, Source.Card(bpa.number), bpa2.number, cup("1")))
         phone.pump(ack = { if (it.request.dialed) null else ACK })
         phone.minutes(12)
-        val confirmed = phone.submit(Transfer(Bank.BPA, Source.Card(bpa.number), bpa2.number, cup("1")))
+        val later = phone.submit(Transfer(Bank.BPA, Source.Card(bpa.number), bpa2.number, cup("1")))
         phone.pump(ack = { if (it.request.dialed) null else ACK })
         phone.seconds(10)
         phone.receive(Sms.sent(Bank.BPA, bpa2.number, "1.00", "BR000AGAIN", balance = "1999.00", from = bpa.number), Duration.ofSeconds(3))
-        assertIs<OperationState.Confirmed>(phone.state(confirmed))
+        assertIs<OperationState.Sent>(phone.state(later))
         assertIs<OperationState.Sent>(phone.state(unanswered))
+        assertNull(phone.view().movements.single().operationId)
     }
 
     @Test fun `a transfer sent to an own card credits it, though the receipt only masks it`() {

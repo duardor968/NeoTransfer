@@ -158,7 +158,7 @@ class LedgerScenarioTest {
         assertIs<OperationState.Confirmed>(phone.state(id))
     }
 
-    @Test fun `two identical payments of 300 confirm separately by reference`() {
+    @Test fun `two identical sends have two distinct receipts without a provable pairing`() {
         val phone = Phone(listOf(bandec))
         val transfer = Transfer(Bank.BANDEC, Source.Default(), friend, cup("300"))
         val first = phone.submit(transfer)
@@ -172,15 +172,15 @@ class LedgerScenarioTest {
         phone.seconds(5)
         phone.receive(Sms.sent(Bank.BANDEC, friend, "300.00", "KW000AAA", "700.00"))
         phone.receive(Sms.copy(friend, "300.00", "KW000AAA"))
-        assertIs<OperationState.Confirmed>(phone.state(first))
+        assertIs<OperationState.Sent>(phone.state(first))
         assertIs<OperationState.Sent>(phone.state(second)) // the copy does not confirm the second payment
         phone.seconds(10)
         phone.receive(Sms.copy(friend, "300.00", "KW000BBB"))
         phone.receive(Sms.sent(Bank.BANDEC, friend, "300.00", "KW000BBB", "400.00"))
-        assertIs<OperationState.Confirmed>(phone.state(second))
+        assertIs<OperationState.Sent>(phone.state(second))
         val movements = phone.view().movements
         assertEquals(listOf("KW000BBB", "KW000AAA"), movements.map { it.reference })
-        assertEquals(listOf(second, first), movements.map { it.operationId })
+        assertTrue(movements.all { it.operationId == null })
         assertEquals(cup("400.00"), phone.balance(bandec))
     }
 
